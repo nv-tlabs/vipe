@@ -237,9 +237,54 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
     
     logger.info(f"Converting video: {base_name}")
     
-    # 1. Copy RGB video (rename to standard name)
-    logger.info("Copying RGB video...")
-    shutil.copy(rgb_file, output_path / "rgb.mp4")
+    # 1. Process RGB video and adjust frame count
+    logger.info("Processing RGB video...")
+    
+    # First, determine target frame count from depth or camera data
+    target_frames = None
+    
+    # Try to get frame count from other data first
+    depth_files = list((vipe_path / "depth").glob(f"{base_name}.zip"))
+    if depth_files:
+        # Get original depth frame count to determine target
+        temp_depth = read_vipe_depth_data(depth_files[0])
+        target_frames = adjust_to_gen3c_frames(len(temp_depth))
+    
+    if target_frames is None:
+        # Fallback: copy as-is and determine later
+        shutil.copy(rgb_file, output_path / "rgb.mp4")
+    else:
+        # Adjust RGB video to target frame count
+        import cv2
+        cap = cv2.VideoCapture(str(rgb_file))
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+        cap.release()
+        
+        logger.info(f"Adjusting RGB from {len(frames)} to {target_frames} frames")
+        
+        # Pad frames if needed
+        while len(frames) < target_frames:
+            frames.append(frames[-1])  # Duplicate last frame
+            
+        # Trim frames if needed
+        if len(frames) > target_frames:
+            frames = frames[:target_frames]
+        
+        # Save adjusted video
+        if frames:
+            height, width = frames[0].shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(output_path / "rgb.mp4"), fourcc, 24.0, (width, height))
+            for frame in frames:
+                out.write(frame)
+            out.release()
+        
+        logger.info(f"RGB video adjusted to {len(frames)} frames")
     
     # 2. Convert depth data
     depth_files = list((vipe_path / "depth").glob(f"{base_name}.zip"))
@@ -253,6 +298,8 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
         logger.info(f"Adjusting depth from {original_frames} to {target_frames} frames (GEN3C format)")
         
         depth_stack = pad_or_interpolate_data(depth_stack, target_frames)
+        # Convert to float16 to match batch_0000 format
+        depth_stack = depth_stack.astype(np.float16)
         np.savez_compressed(output_path / "depth.npz", depth=depth_stack)
         num_frames = target_frames
         logger.info(f"Converted {num_frames} depth frames")
@@ -317,14 +364,16 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
         mask_stack = read_vipe_mask_data(mask_files[0])
         # Adjust mask to target frame count
         mask_stack = pad_or_interpolate_data(mask_stack, num_frames)
+        # Convert to boolean to match batch_0000 format
+        mask_stack = (mask_stack > 0).astype(bool)
         np.savez_compressed(output_path / "mask.npz", mask=mask_stack)
         logger.info(f"Converted {len(mask_stack)} mask frames")
     else:
         logger.info("No mask data found, creating default masks...")
-        # Create default masks (all ones)
+        # Create default masks (all ones, boolean type)
         if num_frames and 'depth_stack' in locals():
             _, h, w = depth_stack.shape
-            default_mask = np.ones((num_frames, h, w), dtype=np.float32)
+            default_mask = np.ones((num_frames, h, w), dtype=bool)
             np.savez_compressed(output_path / "mask.npz", mask=default_mask)
     
     logger.info(f"Conversion completed successfully: {vipe_dir} -> {output_dir}")
