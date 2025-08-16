@@ -115,6 +115,50 @@ def convert_intrinsics_to_matrix(fx: float, fy: float, cx: float, cy: float) -> 
     ], dtype=np.float32)
 
 
+def adjust_to_gen3c_frames(num_frames: int) -> int:
+    """
+    Adjust frame count to GEN3C expected format (120*N + 1).
+    
+    Args:
+        num_frames: Original number of frames
+        
+    Returns:
+        Adjusted frame count in format 121, 241, 361, etc.
+    """
+    if num_frames <= 121:
+        return 121
+    else:
+        # Find the smallest N such that 120*N + 1 >= num_frames
+        n = (num_frames - 1 + 119) // 120  # Ceiling division
+        return 120 * n + 1
+
+
+def pad_or_interpolate_data(data: np.ndarray, target_frames: int) -> np.ndarray:
+    """
+    Pad or interpolate data to match target frame count.
+    
+    Args:
+        data: Input data array with shape [T, ...]
+        target_frames: Target number of frames
+        
+    Returns:
+        Adjusted data array with shape [target_frames, ...]
+    """
+    current_frames = data.shape[0]
+    
+    if current_frames == target_frames:
+        return data
+    elif current_frames > target_frames:
+        # Downsample by taking evenly spaced frames
+        indices = np.linspace(0, current_frames - 1, target_frames, dtype=int)
+        return data[indices]
+    else:
+        # Upsample by padding with the last frame
+        padding_frames = target_frames - current_frames
+        last_frame = data[-1:].repeat(padding_frames, axis=0)
+        return np.concatenate([data, last_frame], axis=0)
+
+
 def interpolate_sparse_data(data: np.ndarray, indices: np.ndarray, target_length: int) -> np.ndarray:
     """
     Interpolate sparse data to fill all frames.
@@ -202,8 +246,15 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
     if depth_files:
         logger.info("Converting depth data...")
         depth_stack = read_vipe_depth_data(depth_files[0])
+        original_frames = len(depth_stack)
+        
+        # Adjust to GEN3C expected frame format
+        target_frames = adjust_to_gen3c_frames(original_frames)
+        logger.info(f"Adjusting depth from {original_frames} to {target_frames} frames (GEN3C format)")
+        
+        depth_stack = pad_or_interpolate_data(depth_stack, target_frames)
         np.savez_compressed(output_path / "depth.npz", depth=depth_stack)
-        num_frames = len(depth_stack)
+        num_frames = target_frames
         logger.info(f"Converted {num_frames} depth frames")
     else:
         logger.warning("No depth data found")
@@ -232,17 +283,28 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
             num_frames = max(pose_inds.max(), intr_inds.max()) + 1
             logger.info(f"Inferred {num_frames} frames from camera data")
         
+        # Adjust to GEN3C expected frame format
+        target_frames = adjust_to_gen3c_frames(num_frames)
+        logger.info(f"Adjusting from {num_frames} to {target_frames} frames (GEN3C format)")
+        
         # Interpolate poses to fill all frames
         full_w2c = interpolate_sparse_data(w2c_matrices, pose_inds, num_frames)
+        # Adjust to target frame count
+        full_w2c = pad_or_interpolate_data(full_w2c, target_frames)
         
         # Convert and interpolate intrinsics
         intr_matrices = np.array([convert_intrinsics_to_matrix(*params) for params in intr_params])
         full_intrinsics = interpolate_sparse_data(intr_matrices, intr_inds, num_frames)
+        # Adjust to target frame count
+        full_intrinsics = pad_or_interpolate_data(full_intrinsics, target_frames)
         
         # Save combined camera parameters
         np.savez(output_path / "camera.npz",
                  w2c=full_w2c.astype(np.float32),
                  intrinsics=full_intrinsics.astype(np.float32))
+        
+        # Update frame count for other data
+        num_frames = target_frames
         
         logger.info(f"Converted camera parameters for {num_frames} frames")
     else:
@@ -253,6 +315,8 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
     if mask_files:
         logger.info("Converting mask data...")
         mask_stack = read_vipe_mask_data(mask_files[0])
+        # Adjust mask to target frame count
+        mask_stack = pad_or_interpolate_data(mask_stack, num_frames)
         np.savez_compressed(output_path / "mask.npz", mask=mask_stack)
         logger.info(f"Converted {len(mask_stack)} mask frames")
     else:
