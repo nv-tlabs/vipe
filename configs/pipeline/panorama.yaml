@@ -18,12 +18,12 @@ slam:
   map_filter_thresh: 0.01
 
 post:
-  depth_align_model: unik3d
+  depth_align_model: null
 
 # Output configs
 output:
   # Path to save results
-  path: results/
+  path: vipe_results/
   skip_exists: false
 
   # Save artifacts and a info file
@@ -31,5 +31,5 @@ output:
 
   # Visualization videos to BASE_PATH/vipe/xxx.mp4
   save_viz: true
-  viz_downsample: 1
+  viz_downsample: 2
   viz_attributes: [["rgb"], ["pcd"]]
