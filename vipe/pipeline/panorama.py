@@ -26,6 +26,7 @@ from omegaconf import DictConfig
 
 from vipe.ext import lietorch as lt
 from vipe.priors.depth.base import DepthEstimationInput
+from vipe.priors.depth.unik3d import Unik3DModel
 from vipe.slam.interface import SLAMOutput
 from vipe.slam.system import SLAMSystem
 from vipe.streams.base import (
@@ -67,9 +68,6 @@ class MergedPanoramaVideoStream(VideoStream):
         self.pano_depth_method = pano_depth_method
 
         if self.pano_depth_method == "unik3d":
-            # Lazy import for temporary hack of license issue.
-            from vipe.priors.depth.unik3d import Unik3DModel
-
             self.pano_depth_model = Unik3DModel()
 
         else:

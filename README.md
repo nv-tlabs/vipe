@@ -113,6 +113,7 @@ ViPE is built on top of many great open-source research projects and codebases. 
 - [Metric3Dv2](https://github.com/YvanYin/Metric3D)
 - [PriorDA](https://github.com/SpatialVision/Prior-Depth-Anything)
 - [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
+- [UniK3D](https://github.com/lpiccinelli-eth/UniK3D)
 - [VideoDepthAnything](https://github.com/DepthAnything/Video-Depth-Anything)
 - [GeoCalib](https://github.com/cvg/GeoCalib)
 - [Segment and Track Anything](https://github.com/z-x-yang/Segment-and-Track-Anything)
@@ -143,4 +144,4 @@ If you find ViPE useful in your research or application, please consider citing 
 
 ## License
 
-This project will download and install additional third-party **models and softwares**. Note that these models or softwares are not distributed by NVIDIA. Review the license terms of these models and projects before use. This source code is released under the [Apache 2 License](https://www.apache.org/licenses/LICENSE-2.0).
+This project will download and install additional third-party **models and softwares**. Note that these models or softwares are not distributed by NVIDIA. Review the license terms of these models and projects before use. This source code, **except for the Unik3D part (which is under the BY-NC-SA 4.0 license)** , is released under the [Apache 2 License](https://www.apache.org/licenses/LICENSE-2.0).
