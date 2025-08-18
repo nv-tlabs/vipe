@@ -371,7 +371,7 @@ def se3_to_isometry(se3: SE3) -> list[Isometry] | Isometry:
     return isometries if batch_dim else isometries[0]
 
 
-def so3_to_se3(so3: SE3) -> SE3:
+def so3_to_se3(so3: SO3) -> SE3:
     """Converts a single SO3 Lie group element to a SE3 Lie group element.
 
     Args:
@@ -384,7 +384,7 @@ def so3_to_se3(so3: SE3) -> SE3:
     return SE3.InitFromVec(torch.cat((t_component, so3.vec()), dim=-1))
 
 
-def se3_to_so3(se3: SE3) -> SE3:
+def se3_to_so3(se3: SE3) -> SO3:
     """Converts a single SE3 Lie group element to a SO3 Lie group element.
 
     Args:
@@ -393,7 +393,7 @@ def se3_to_so3(se3: SE3) -> SE3:
     Returns:
         single / batch of SO3 Lie group elements [] / [bs]
     """
-    return SE3.InitFromVec(se3.vec()[..., 3:])
+    return SO3.InitFromVec(se3.vec()[..., 3:])
 
 
 def so3_average(so3: SE3, dim: int) -> SE3:
