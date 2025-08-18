@@ -11,7 +11,6 @@ import numpy as np
 import cv2
 import zipfile
 import OpenEXR
-import Imath
 from pathlib import Path
 import shutil
 import argparse
@@ -70,7 +69,7 @@ def read_vipe_mask_data(mask_zip_path: Path) -> np.ndarray:
         mask_zip_path: Path to the mask.zip file
         
     Returns:
-        numpy array of shape [T, H, W] with mask values
+        numpy array of shape [T, H, W] with mask values (True=valid, False=invalid)
     """
     mask_arrays = []
     
@@ -83,14 +82,16 @@ def read_vipe_mask_data(mask_zip_path: Path) -> np.ndarray:
                     mask = cv2.imdecode(mask_buffer, cv2.IMREAD_UNCHANGED)
                     if mask is None:
                         raise ValueError(f"Failed to decode PNG mask {file_name}")
-                    mask_arrays.append(mask.astype(np.float32))
-                    logger.debug(f"Loaded mask frame {frame_idx}: {mask.shape}")
+                    # Convert to boolean: non-zero values are valid pixels (True)
+                    mask_bool = mask > 0
+                    mask_arrays.append(mask_bool.astype(bool))
+                    logger.debug(f"Loaded mask frame {frame_idx}: {mask.shape}, valid pixels: {mask_bool.sum()}/{mask.size} ({mask_bool.sum()/mask.size:.3f})")
                 except Exception as e:
                     logger.warning(f"Failed to load mask frame {file_name}: {e}")
-                    # Create a dummy mask filled with ones
+                    # Create a dummy mask filled with ones (all valid)
                     if mask_arrays:
                         h, w = mask_arrays[-1].shape[:2]
-                        mask_arrays.append(np.ones((h, w), dtype=np.float32))
+                        mask_arrays.append(np.ones((h, w), dtype=bool))
                     else:
                         raise ValueError("Cannot determine mask dimensions")
     
@@ -362,19 +363,26 @@ def convert_vipe_to_gen3c(vipe_dir: str, output_dir: str, video_name: Optional[s
     if mask_files:
         logger.info("Converting mask data...")
         mask_stack = read_vipe_mask_data(mask_files[0])
+        original_valid_ratio = mask_stack.sum() / mask_stack.size
+        logger.info(f"Original ViPE mask: {mask_stack.shape}, valid ratio: {original_valid_ratio:.3f}")
+        
         # Adjust mask to target frame count
         mask_stack = pad_or_interpolate_data(mask_stack, num_frames)
-        # Convert to boolean to match batch_0000 format
-        mask_stack = (mask_stack > 0).astype(bool)
+        
+        # Mask is already boolean from read_vipe_mask_data (True=valid, False=invalid)
+        final_valid_ratio = mask_stack.sum() / mask_stack.size
+        logger.info(f"Final GEN3C mask: {mask_stack.shape}, dtype: {mask_stack.dtype}, valid ratio: {final_valid_ratio:.3f}")
+        
         np.savez_compressed(output_path / "mask.npz", mask=mask_stack)
         logger.info(f"Converted {len(mask_stack)} mask frames")
     else:
         logger.info("No mask data found, creating default masks...")
-        # Create default masks (all ones, boolean type)
+        # Create default masks (all ones = all valid pixels, boolean type)
         if num_frames and 'depth_stack' in locals():
             _, h, w = depth_stack.shape
             default_mask = np.ones((num_frames, h, w), dtype=bool)
             np.savez_compressed(output_path / "mask.npz", mask=default_mask)
+            logger.info(f"Created default mask: all valid pixels ({num_frames}, {h}, {w})")
     
     logger.info(f"Conversion completed successfully: {vipe_dir} -> {output_dir}")
     return output_path
