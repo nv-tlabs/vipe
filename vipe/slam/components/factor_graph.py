@@ -403,7 +403,7 @@ class FactorGraph:
         ii = ii.reshape(-1).to(dtype=torch.long, device=self.device)
         jj = jj.reshape(-1).to(dtype=torch.long, device=self.device)
 
-        c = 1 if self.cross_view else 0
+        c = -1 if self.cross_view else 0
 
         keep = ((ii - jj).abs() > c) & ((ii - jj).abs() <= r)
         self.add_factors(ii[keep], jj[keep])
