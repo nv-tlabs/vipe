@@ -1,6 +1,7 @@
---extra-index-url https://download.pytorch.org/whl/cu128
-torch==2.7.0+cu128
-torchvision
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.7.0+cu118
+torchvision==0.22.0+cu118
+xformers==v0.0.30
 
 click
 numpy

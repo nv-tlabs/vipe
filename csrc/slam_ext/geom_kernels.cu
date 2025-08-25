@@ -1100,14 +1100,14 @@ __global__ void EvT6x1_kernel(const torch::PackedTensorAccessor32<float, 3, torc
 class SparseBlock {
    public:
     Eigen::SparseMatrix<double> A;
-    Eigen::VectorX<double> b;
+    Eigen::VectorXd b;
 
     SparseBlock(int N, int M) : N(N), M(M) {
         A = Eigen::SparseMatrix<double>(N * M, N * M);
         b = Eigen::VectorXd::Zero(N * M);
     }
 
-    SparseBlock(Eigen::SparseMatrix<double> const &A, Eigen::VectorX<double> const &b, int N, int M)
+    SparseBlock(Eigen::SparseMatrix<double> const &A, Eigen::VectorXd const &b, int N, int M)
         : A(A), b(b), N(N), M(M) {}
 
     void update_lhs(torch::Tensor As, torch::Tensor ii, torch::Tensor jj) {
