@@ -113,16 +113,60 @@ class MergedPanoramaVideoStream(VideoStream):
                 uvd[:, 0] *= pano_frame_data.size()[1]
                 uvd[:, 1] *= pano_frame_data.size()[0]
                 target_depth = torch.zeros(pano_frame_data.size(), device="cuda")
-                target_depth[uvd[:, 1].floor().long(), uvd[:, 0].floor().long()] = uvd[:, 2]
+
+                # Filter out-of-bounds indices to prevent CUDA assertion errors
+                height, width = pano_frame_data.size()
+                u_indices = uvd[:, 0].floor().long()
+                v_indices = uvd[:, 1].floor().long()
+
+                # Create valid mask for in-bounds indices
+                valid_mask = (u_indices >= 0) & (u_indices < width) & (v_indices >= 0) & (v_indices < height)
+
+                if valid_mask.any():
+                    # Only assign values for valid indices
+                    target_depth[v_indices[valid_mask], u_indices[valid_mask]] = uvd[valid_mask, 2]
+
                 target_depth = target_depth[height_crop:-height_crop]
                 target_mask = target_depth > 0
 
-                if target_mask.float().sum() < 0.05 * target_mask.numel():
-                    logger.warning(f"Too few valid pixels in pano frame {frame_idx}, skipping scale estimation.")
+                # Additional safety check to ensure target_mask is valid
+                if not target_mask.any():
+                    logger.warning(f"No valid pixels in pano frame {frame_idx}, skipping scale estimation.")
                     inv_scale = last_inv_scale
                 else:
-                    inv_scale = torch.median(croped_distance[target_mask] / target_depth[target_mask]).item()
-                    last_inv_scale = inv_scale
+                    # Check if target_mask contains any invalid values
+                    if torch.isnan(target_mask).any() or torch.isinf(target_mask).any():
+                        logger.warning(
+                            f"Invalid mask values detected in pano frame {frame_idx}, skipping scale estimation."
+                        )
+                        inv_scale = last_inv_scale
+                    elif target_mask.float().sum() < 0.05 * target_mask.numel():
+                        logger.warning(f"Too few valid pixels in pano frame {frame_idx}, skipping scale estimation.")
+                        inv_scale = last_inv_scale
+                    else:
+                        # Ensure we only use valid values for median calculation
+                        valid_depth_mask = (
+                            target_mask
+                            & (target_depth > 0)
+                            & (~torch.isnan(target_depth))
+                            & (~torch.isinf(target_depth))
+                        )
+                        if valid_depth_mask.any():
+                            try:
+                                inv_scale = torch.median(
+                                    croped_distance[valid_depth_mask] / target_depth[valid_depth_mask]
+                                ).item()
+                                last_inv_scale = inv_scale
+                            except (RuntimeError, ValueError):
+                                logger.warning(
+                                    f"Scale estimation failed in pano frame {frame_idx}, using previous scale."
+                                )
+                                inv_scale = last_inv_scale
+                        else:
+                            logger.warning(
+                                f"No valid depth values for scale estimation in pano frame {frame_idx}, skipping."
+                            )
+                            inv_scale = last_inv_scale
 
                 full_distance[height_crop:-height_crop] = croped_distance / inv_scale
                 pano_frame_data.metric_depth = full_distance
