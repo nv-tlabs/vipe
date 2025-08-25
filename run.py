@@ -12,8 +12,11 @@ def run(args: DictConfig) -> None:
     from vipe.pipeline import make_pipeline
     from vipe.utils.logging import configure_logging
 
+    print(f"Running pipeline: {args.pipeline}")
+
     # Process each video stream
     logger = configure_logging()
+    print(f"Found {len(stream_list)} streams.")
     for stream_idx in range(len(stream_list)):
         video_stream = stream_list[stream_idx]
         logger.info(

@@ -1,0 +1,8 @@
+instance: vipe.streams.raw_image_sequence_stream.RawImageSequenceStreamList
+
+base_path: ??
+frame_start: 0
+frame_end: 1000
+frame_skip: 1
+fps: 30.0
+cached: false
