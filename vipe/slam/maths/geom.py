@@ -340,6 +340,8 @@ def frame_distance_dense_disp(
     pi = pi * num_views + qi
     pj = pj * num_views + qj
 
+    print("before slam_ext.frame_distance.")
+
     return slam_ext.frame_distance(
         poses.data,
         dense_disps,

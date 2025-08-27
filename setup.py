@@ -48,6 +48,7 @@ setup(
     ext_modules=[
         CUDAExtension(
             f"{PACKAGE_NAME}_ext",
+            include_dirs=[os.path.join('./thirdparty/eigen')],
             sources=get_sources(),  # type: ignore
             extra_compile_args={"cxx": get_cpp_flags(), "nvcc": get_cuda_flags()},  # type: ignore
         )

@@ -18,9 +18,9 @@
 
 // #include "utils.cuh"
 
-#include <eigen3/Eigen/Sparse>
-#include <eigen3/Eigen/SparseCore>
-#include <eigen3/Eigen/SparseCholesky>
+#include <Eigen/Sparse>
+#include <Eigen/SparseCore>
+#include <Eigen/SparseCholesky>
 
 typedef Eigen::SparseMatrix<double> SpMat;
 typedef Eigen::Triplet<double> T;

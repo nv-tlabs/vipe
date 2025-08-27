@@ -272,16 +272,23 @@ class SLAMSystem:
                 self.backend.run_if_necessary(5, log=self.visualize)
 
         # Tracks can be determined earlier since it's fixed after frontend.
+        print(f"Building sparse tracks with  tracks.")
         if self.visualize:
             self.buffer.log_tracks()
 
         # Run the backend to perform a global BA over the keyframes.
+        print("Running final backend optimization.")
         self.backend.run(7, log=self.visualize)
+
+        print("Running final backend optimization2.")
 
         # Run backend again with a new graph and cleared GRU states.
         self.backend.run(self.config.backend_iters, update_depth=False, log=self.visualize)
 
         # Infill poses and attributes for non-keyframe frames.
+
+        print("SLAM Pass (2/2)")
+
         self.inner_filler.set_start_idx(self.buffer.n_frames)
         for frame_idx, frame_data_list in pbar(
             enumerate(zip(*video_streams)), desc="SLAM Pass (2/2)", total=total_n_frames
