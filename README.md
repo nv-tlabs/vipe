@@ -78,6 +78,35 @@ python scripts/vipe_to_colmap.py vipe_results/ --sequence dog_example
 This will unproject the dense depth maps to create the 3D point cloud. 
 Alternatively for a more lightweight and 3D consistent point cloud, you can add the `--use_slam_map` flag to the above command. This requires you to run the full pipeline with `pipeline.output.save_slam_map=true` to save the additional information.
 
+## Downloading the Dataset
+
+**This section is still under construction pending the final legal approval. We will make the HF link available as soon as possible.**
+
+![dataset](assets/dataset.gif)
+
+Together with ViPE we release a large-scale dataset containing ~1M high-quality videos with accurate camera poses and dense depth maps. Specifications of the datasets are listed below:
+
+| Dataset Name   | # Videos | # Frames | Hugging Face Link                                            | License      | Prefix |
+| -------------- | -------- | -------- | ------------------------------------------------------------ | ------------ | ------ |
+| Dynpose-100K++ | 99,501   | 15.8M    | [Link](https://huggingface.co/datasets/nvidia/vipe-dynpose-100kpp) | CC-BY-NC 4.0 | `dpsp` |
+| Wild-SDG-1M    | 966,448  | 78.2M    | [Link](https://huggingface.co/datasets/nvidia/vipe-wild-sdg-1m) | CC-BY-NC 4.0 | `wsdg` |
+| Web360         | 2,114    | 212K     | [Link](https://huggingface.co/datasets/nvidia/vipe-web360)   | CC-BY 4.0    | `w360` |
+
+You can download the datasets using the following utility script:
+
+```bash
+# Replace YOUR_PREFIX with the prefix of the dataset to be downloaded (see prefix column in the table above)
+# You can also use more specific prefixes, e.g. wsdg-003e2c86 to download a specific shard of the dataset.
+python scripts/download_dataset.py --prefix YOUR_PREFIX --output_base YOUR_OUTPUT_DIR --rgb --depth
+```
+
+> Note that the depth component is very large and you might expect a long downloading time. For `rgb` component of the Dynpose-100K++ dataset, we directly retrieve the RGB frames from YouTube. You have to `pip install yt_dlp ffmpeg-python` to use this feature. Please refer to the original [Dynpose-100K dataset](https://huggingface.co/datasets/nvidia/dynpose-100k) for alternative approaches to retrieve the videos.
+
+The dataset itself can be visualized using the same visualization script:
+```bash
+vipe visualize YOUR_OUTPUT_DIR
+```
+
 ## Acknowledgments
 
 ViPE is built on top of many great open-source research projects and codebases. Some of these include (not exhaustive):
