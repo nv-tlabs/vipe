@@ -437,12 +437,7 @@ class FactorGraph:
         ii, jj = torch.meshgrid(ix, jx, indexing="ij")
         ii, jj = ii.reshape(-1), jj.reshape(-1)
 
-        print("frame_distance_dense_disp.")
-
         d = self.buffer.frame_distance_dense_disp(ii, jj, beta=beta)
-
-        print("frame_distance_dense_disp over.")
-
         d = d.mean(-1)
 
         def _suppress(i: int, j: int):

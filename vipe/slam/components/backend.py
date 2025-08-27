@@ -77,8 +77,6 @@ class SLAMBackend:
 
         t = self.video.n_frames
 
-        print("build factor graph.")
-
         graph = FactorGraph(
             self.net,
             self.video,
@@ -88,7 +86,6 @@ class SLAMBackend:
             cross_view=self.args.cross_view,
         )
 
-        print("add_proximity_factors.")
 
         graph.add_proximity_factors(
             rad=self.args.backend_radius,
@@ -97,7 +94,6 @@ class SLAMBackend:
             beta=self.args.beta,
         )
 
-        print("build_adaptive_cross_view_idx.")
 
         if self.args.adaptive_cross_view:
             self.video.build_adaptive_cross_view_idx()
@@ -106,13 +102,10 @@ class SLAMBackend:
         if len(graph.ii) > 0:
             more_iters = self.args.optimize_intrinsics or self.args.optimize_rig_rotation
             if self.depth_model is not None:
-                print("_iterate_with_depth.")
                 self._iterate_with_depth(graph, steps, more_iters)
             else:
-                print("_iterate_without_depth.")
                 self._iterate_without_depth(graph, steps, more_iters)
         else:
-            print("Empty graph with only one keyframe, assign sensor depth.")
             # Empty graph with only one keyframe, assign sensor depth
             self.video.disps[0] = torch.where(
                 self.video.disps_sens[0] > 0,
@@ -122,7 +115,6 @@ class SLAMBackend:
 
         self.video.dirty[:t] = True
 
-        print("over.")
 
         if log:
             self.video.log(self.args.map_filter_thresh)

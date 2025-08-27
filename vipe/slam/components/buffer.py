@@ -560,8 +560,6 @@ class GraphBuffer:
         poses = self.poses[: self.n_frames]
         intrinsics = self.camera_type.build_camera_model(self.intrinsics).scaled(1 / 8.0).intrinsics
 
-        print("geom.frame_distance_dense_disp 1.")
-
         d = geom.frame_distance_dense_disp(
             SE3(poses),
             self.flattened_disps,
@@ -576,10 +574,7 @@ class GraphBuffer:
             beta,
         )
 
-        
-
         if bidirectional:
-            print("geom.frame_distance_dense_disp bidirectional.")
             d2 = geom.frame_distance_dense_disp(
                 SE3(poses),
                 self.flattened_disps,
