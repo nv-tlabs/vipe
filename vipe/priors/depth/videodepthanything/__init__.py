@@ -22,7 +22,7 @@ from ..base import DepthEstimationInput, DepthEstimationModel, DepthEstimationRe
 from .video_depth import VideoDepthAnything
 
 
-class VdieoDepthAnythingDepthModel(DepthEstimationModel):
+class VideoDepthAnythingDepthModel(DepthEstimationModel):
     """
     https://github.com/DepthAnything/Video-Depth-Anything
     """
