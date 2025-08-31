@@ -80,8 +80,6 @@ Alternatively for a more lightweight and 3D consistent point cloud, you can add 
 
 ## Downloading the Dataset
 
-**This section is still under construction pending the final legal approval. We will make the HF link available as soon as possible.**
-
 ![dataset](assets/dataset.gif)
 
 Together with ViPE we release a large-scale dataset containing ~1M high-quality videos with accurate camera poses and dense depth maps. Specifications of the datasets are listed below:
@@ -126,7 +124,7 @@ We thank useful discussions from Aigul Dzhumamuratova, Viktor Kuznetsov, Soha Po
 ## TODO
 
 - [x] Initial code released under Apache 2.0 license.
-- [ ] Full dataset uploaded to Hugging Face for download.
+- [x] Full dataset uploaded to Hugging Face for download.
 - [ ] Add instructions to run inference on wide-angle and 360° videos.
 - [ ] Add instructions for benchmarking.
 
@@ -138,7 +136,7 @@ If you find ViPE useful in your research or application, please consider citing 
 @inproceedings{huang2025vipe,
     title={ViPE: Video Pose Engine for 3D Geometric Perception},
     author={Huang, Jiahui and Zhou, Qunjie and Rabeti, Hesam and Korovko, Aleksandr and Ling, Huan and Ren, Xuanchi and Shen, Tianchang and Gao, Jun and Slepichev, Dmitry and Lin, Chen-Hsuan and Ren, Jiawei and Xie, Kevin and Biswas, Joydeep and Leal-Taixe, Laura and Fidler, Sanja},
-    booktitle={NVIDIA Research Whitepapers},
+    booktitle={NVIDIA Research Whitepapers arXiv:2508.10934},
     year={2025}
 }
 ```
