@@ -1,0 +1,7 @@
+instance: vipe.streams.frame_dir_stream.FrameDirStreamList
+
+base_path: ??
+frame_start: 0
+frame_end: 1000
+frame_skip: 1
+cached: false
