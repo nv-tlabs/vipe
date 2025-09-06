@@ -21,12 +21,18 @@ import hydra
 from vipe import get_config_path, make_pipeline
 from vipe.streams.base import ProcessedVideoStream
 from vipe.streams.raw_mp4_stream import RawMp4Stream
+from vipe.streams.frame_dir_stream import FrameDirStream
 from vipe.utils.logging import configure_logging
 from vipe.utils.viser import run_viser
 
 
 @click.command()
-@click.argument("video", type=click.Path(exists=True, path_type=Path))
+@click.argument("video", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option(
+    "--image-dir",
+    type=click.Path(exists=True, path_type=Path),
+    help="Directory containing image frames",
+)
 @click.option(
     "--output",
     "-o",
@@ -36,10 +42,19 @@ from vipe.utils.viser import run_viser
 )
 @click.option("--pipeline", "-p", default="default", help="Pipeline configuration to use (default: 'default')")
 @click.option("--visualize", "-v", is_flag=True, help="Enable visualization of intermediate results")
-def infer(video: Path, output: Path, pipeline: str, visualize: bool):
-    """Run inference on a video file."""
+def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: bool):
+    """Run inference on a video file or directory of images."""
 
     logger = configure_logging()
+
+    # Validate that exactly one input source is provided
+    if not video and not image_dir:
+        click.echo("Error: Must provide either a video file or --image-dir", err=True)
+        raise click.Abort()
+    
+    if video and image_dir:
+        click.echo("Error: Cannot provide both video file and --image-dir", err=True)
+        raise click.Abort()
 
     overrides = [f"pipeline={pipeline}", f"pipeline.output.path={output}", "pipeline.output.save_artifacts=true"]
     if visualize:
@@ -48,14 +63,30 @@ def infer(video: Path, output: Path, pipeline: str, visualize: bool):
     else:
         overrides.append("pipeline.output.save_viz=false")
 
+    # Set up stream configuration based on input type
+    if image_dir:
+        overrides.extend([
+            "streams=frame_dir_stream",
+            f"streams.base_path={image_dir}"
+        ])
+        input_path = image_dir
+        input_desc = f"image directory {image_dir}"
+    else:
+        input_path = video
+        input_desc = f"video {video}"
+
     with hydra.initialize_config_dir(config_dir=str(get_config_path()), version_base=None):
         args = hydra.compose("default", overrides=overrides)
 
-    logger.info(f"Processing {video}...")
+    logger.info(f"Processing {input_desc}...")
     vipe_pipeline = make_pipeline(args.pipeline)
 
-    # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
-    video_stream = ProcessedVideoStream(RawMp4Stream(video), []).cache(desc="Reading video stream")
+    if image_dir:
+        # Use frame directory stream
+        video_stream = ProcessedVideoStream(FrameDirStream(image_dir), []).cache(desc="Reading image frames")
+    else:
+        # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
+        video_stream = ProcessedVideoStream(RawMp4Stream(video), []).cache(desc="Reading video stream")
 
     vipe_pipeline.run(video_stream)
     logger.info("Finished")
