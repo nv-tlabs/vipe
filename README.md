@@ -64,9 +64,13 @@ Example usages:
 ```bash
 # Running the full pipeline.
 python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH
+# or 
+python run.py pipeline=default streams=raw_image_sequence_stream streams.base_path=YOUR_IMAGE_SEQ_OR_DIR_PATH
 
 # Running the pose-only pipeline without depth estimation.
 python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH pipeline.post.depth_align_model=null
+# or
+python run.py pipeline=default streams=raw_image_sequence_stream streams.base_path=YOUR_IMAGE_SEQ_OR_DIR_PATH pipeline.post.depth_align_model=null
 ```
 
 ### Converting to COLMAP format

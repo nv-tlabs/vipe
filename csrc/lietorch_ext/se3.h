@@ -8,8 +8,8 @@
 #define SE3_HEADER
 
 #include <stdio.h>
-#include <eigen3/Eigen/Dense>
-#include <eigen3/Eigen/Geometry>
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
 
 #include "common.h"
 #include "so3.h"

@@ -86,6 +86,7 @@ class SLAMBackend:
             cross_view=self.args.cross_view,
         )
 
+
         graph.add_proximity_factors(
             rad=self.args.backend_radius,
             nms=self.args.backend_nms,
@@ -93,8 +94,10 @@ class SLAMBackend:
             beta=self.args.beta,
         )
 
+
         if self.args.adaptive_cross_view:
             self.video.build_adaptive_cross_view_idx()
+
 
         if len(graph.ii) > 0:
             more_iters = self.args.optimize_intrinsics or self.args.optimize_rig_rotation
@@ -111,6 +114,7 @@ class SLAMBackend:
             )
 
         self.video.dirty[:t] = True
+
 
         if log:
             self.video.log(self.args.map_filter_thresh)

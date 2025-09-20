@@ -5,7 +5,7 @@
  */
 
 #include "lietorch_gpu.h"
-#include <eigen3/Eigen/Dense>
+#include <Eigen/Dense>
 
 #include "common.h"
 #include "dispatch.h"
