@@ -32,5 +32,10 @@ def make_depth_model(model: str):
 
         return UniDepth2Model(type=model_sub)
 
+    elif model_name == "moge":
+        from .moge import MogeModel
+
+        return MogeModel()
+
     else:
         raise ValueError(f"Unknown depth model: {model}")

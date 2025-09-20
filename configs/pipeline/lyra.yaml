@@ -1,0 +1,8 @@
+defaults:
+  - default
+
+slam:
+  keyframe_depth: moge
+
+post:
+  depth_align_model: "adaptive_moge_vda"
