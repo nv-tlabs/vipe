@@ -3,6 +3,22 @@ defaults:
 
 instance: vipe.pipeline.panorama.PanoramaAnnotationPipeline
 
+# Init configs
+init:
+  instance:
+    kf_gap_sec: 2.0
+    phrases: 
+      - person
+      - animal
+      - vehicle
+      - ball
+      - balloon
+      - gun
+      - pet
+      - car
+      - bus
+    add_sky: false
+
 virtual:
   height: 512
   fovx: 100.0
@@ -32,4 +48,4 @@ output:
   # Visualization videos to BASE_PATH/vipe/xxx.mp4
   save_viz: true
   viz_downsample: 2
-  viz_attributes: [["rgb"], ["pcd"]]
+  viz_attributes: [["rgb"], ["pcd"], ["instance"]]
