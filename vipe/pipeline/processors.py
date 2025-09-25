@@ -343,9 +343,7 @@ class EquirectProjectionProcessor(StreamProcessor):
         return self.frame_size
 
     def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
-        assert frame.mask is None and frame.instance is None and frame.metric_depth is None, (
-            "Attributes are not supported for equirect projection"
-        )
+        assert frame.metric_depth is None, "Metric depth is not supported for equirect projection"
 
         if (new_pose := frame.pose) is not None:
             rel_transform = SE3.InitFromVec(torch.cat((torch.zeros(3).cuda(), self.rotation.data)))
@@ -357,10 +355,22 @@ class EquirectProjectionProcessor(StreamProcessor):
             .moveaxis(0, -1)
         )
 
+        if (new_instance := frame.instance) is not None:
+            new_instance = torch.nn.functional.grid_sample(
+                new_instance[None, None].float(), self.uv[None], align_corners=True, mode="nearest"
+            )[0, 0]
+
+        if (new_mask := frame.mask) is not None:
+            new_mask = torch.nn.functional.grid_sample(
+                new_mask[None, None].float(), self.uv[None], align_corners=True, mode="nearest"
+            )[0, 0]
+
         return VideoFrame(
             raw_frame_idx=frame.raw_frame_idx,
             rgb=new_rgb,
             pose=new_pose,
             intrinsics=self.intrinsics.clone(),
             camera_type=CameraType.PINHOLE,
+            instance=new_instance,
+            mask=new_mask,
         )

@@ -43,7 +43,7 @@ from vipe.utils.geometry import project_points_to_panorama, se3_to_so3, so3_to_s
 from vipe.utils.visualization import save_projection_video
 
 from . import AnnotationPipelineOutput, Pipeline
-from .processors import EquirectProjectionProcessor
+from .processors import EquirectProjectionProcessor, TrackAnythingProcessor
 
 
 logger = logging.getLogger(__name__)
@@ -183,12 +183,14 @@ class MergedPanoramaVideoStream(VideoStream):
 class PanoramaAnnotationPipeline(Pipeline):
     def __init__(
         self,
+        init: DictConfig,
         virtual: DictConfig,
         slam: DictConfig,
         output: DictConfig,
         post: DictConfig,
     ) -> None:
         super().__init__()
+        self.init_cfg = init
         virtual_height = virtual.height
         virtual_focal = virtual_height / (2 * np.tan(np.deg2rad(virtual.fovx) / 2))
         virtual_width = int(virtual_focal * np.tan(np.deg2rad(virtual.fovx) / 2) * 2)
@@ -229,6 +231,19 @@ class PanoramaAnnotationPipeline(Pipeline):
             rig_transforms.append(so3_to_se3(EquirectProjectionProcessor.yaw_pitch_to_rotation(0.0, -np.pi / 2)))
         rig_names = ["left"] * len(rig_transforms)
 
+        # Add init processors if necessary
+        if self.init_cfg.instance is not None:
+            video_stream = ProcessedVideoStream(
+                video_stream,
+                [
+                    TrackAnythingProcessor(
+                        self.init_cfg.instance.phrases,
+                        add_sky=self.init_cfg.instance.add_sky,
+                        sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    )
+                ],
+            )
+
         # Cache video stream on the fly so no need to maintain several readers.
         cached_video_stream = CachedVideoStream(video_stream)
 
@@ -261,7 +276,7 @@ class PanoramaAnnotationPipeline(Pipeline):
         depth_align_model = self.post_cfg.depth_align_model
         output_stream = CachedVideoStream(
             MergedPanoramaVideoStream(
-                video_stream,
+                cached_video_stream,
                 slam_streams,
                 slam_output,
                 pano_depth_method=depth_align_model,
