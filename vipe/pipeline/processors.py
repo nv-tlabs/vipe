@@ -21,6 +21,9 @@ from typing import Iterator
 import numpy as np
 import torch
 
+from scipy.spatial.transform import Rotation as R
+
+from vipe.ext.lietorch import SE3, SO3
 from vipe.priors.depth import DepthEstimationInput, make_depth_model
 from vipe.priors.depth.alignment import align_inv_depth_to_depth
 from vipe.priors.depth.priorda import PriorDAModel
@@ -30,6 +33,8 @@ from vipe.priors.track_anything import TrackAnythingPipeline
 from vipe.slam.interface import SLAMOutput
 from vipe.streams.base import CachedVideoStream, FrameAttribute, StreamProcessor, VideoFrame, VideoStream
 from vipe.utils.cameras import CameraType
+from vipe.utils.depth import get_camera_rays
+from vipe.utils.geometry import project_points_to_panorama
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
 from vipe.utils.morph import erode
@@ -299,3 +304,73 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 frame.metric_depth = prompt_result
 
             yield frame
+
+
+class EquirectProjectionProcessor(StreamProcessor):
+    """
+    Camera convention (with rotation = I, up of panorama is outward, Y is inward):
+       -----
+      (  Z  )
+     (   |   )
+    (    Y-X  )
+     (       )
+      (     )
+       -<|>-
+         |
+    [boundary of image]
+    """
+
+    def __init__(self, rotation: SO3, frame_size: tuple[int, int], intrinsics: torch.Tensor) -> None:
+        super().__init__()
+        self.rotation = rotation.cuda()
+        self.intrinsics = intrinsics.cuda()
+        rays = get_camera_rays(frame_size[0], frame_size[1], self.intrinsics, normalize=True)
+        rays = unpack_optional(self.rotation[None, None].act(rays))
+        uv = project_points_to_panorama(rays, return_depth=False)
+        self.uv = (uv * 2) - 1
+        self.frame_size = frame_size
+
+    @staticmethod
+    def yaw_pitch_to_rotation(yaw: float, pitch: float) -> SO3:
+        """
+        First rotate around yaw, then pitch (positive is heads up, negative is down).
+        """
+        return SO3.InitFromVec(
+            torch.from_numpy(R.from_euler("xyz", [pitch, yaw, 0], degrees=False).as_quat(canonical=True)).float()
+        )
+
+    def update_frame_size(self, previous_frame_size: tuple[int, int]):
+        return self.frame_size
+
+    def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
+        assert frame.metric_depth is None, "Metric depth is not supported for equirect projection"
+
+        if (new_pose := frame.pose) is not None:
+            rel_transform = SE3.InitFromVec(torch.cat((torch.zeros(3).cuda(), self.rotation.data)))
+            new_pose = new_pose * rel_transform
+
+        new_rgb = (
+            torch.nn.functional.grid_sample(frame.rgb.moveaxis(-1, 0)[None], self.uv[None], align_corners=True)
+            .squeeze()
+            .moveaxis(0, -1)
+        )
+
+        if (new_instance := frame.instance) is not None:
+            new_instance = torch.nn.functional.grid_sample(
+                new_instance[None, None].float(), self.uv[None], align_corners=True, mode="nearest"
+            )[0, 0]
+
+        if (new_mask := frame.mask) is not None:
+            new_mask = torch.nn.functional.grid_sample(
+                new_mask[None, None].float(), self.uv[None], align_corners=True, mode="nearest"
+            )[0, 0]
+
+        return VideoFrame(
+            raw_frame_idx=frame.raw_frame_idx,
+            rgb=new_rgb,
+            pose=new_pose,
+            intrinsics=self.intrinsics.clone(),
+            camera_type=CameraType.PINHOLE,
+            instance=new_instance,
+            mask=new_mask,
+        )
