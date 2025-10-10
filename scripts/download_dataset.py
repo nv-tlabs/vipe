@@ -148,6 +148,7 @@ def main():
                         "https://drive.google.com/file/d/1W1eLmaP16GZOeisAR1q-y9JYP9gT1CRs/view",
                         output=str(output_base / "web360_raw.zip"),
                         fuzzy=True,
+                        use_cookies=False,
                     )
                     with zipfile.ZipFile(output_base / "web360_raw.zip", "r") as zip_ref:
                         with tempfile.TemporaryDirectory() as tmp_dir:
