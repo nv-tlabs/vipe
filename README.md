@@ -21,7 +21,8 @@ To ensure the reproducibility, we recommend creating the runtime environment usi
 # Create a new conda environment and install 3rd-party dependencies
 conda env create -f envs/base.yml
 conda activate vipe
-pip install -r envs/requirements.txt
+# You can switch to your own PyPI index if you want.
+pip install -r envs/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 
 # Build the project and install it into the current environment
 # Omit the -e flag to install the project as a regular package
