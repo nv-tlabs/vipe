@@ -1,8 +1,10 @@
 import hydra
 from omegaconf import DictConfig
 
+from vipe import get_config_path
 
-@hydra.main(version_base=None, config_path="configs", config_name="default")
+
+@hydra.main(version_base=None, config_path=str(get_config_path()), config_name="default")
 def run(args: DictConfig) -> None:
     from vipe.streams.base import StreamList
 

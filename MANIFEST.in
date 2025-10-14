@@ -1,0 +1,27 @@
+# Include package metadata files
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include THIRD_PARTY_LICENSES.md
+include pyproject.toml
+
+# Include config files
+recursive-include vipe/configs *.yaml
+recursive-include vipe/configs *.yml
+
+# Include C++ source files for building extensions
+recursive-include csrc *.cpp
+recursive-include csrc *.cu
+recursive-include csrc *.cuh
+recursive-include csrc *.h
+
+# Include environment files for reference
+include envs/base.yml
+include envs/requirements.txt
+include envs/requirements.in
+
+# Include scripts
+include scripts/*.py
+include run.py
+
+

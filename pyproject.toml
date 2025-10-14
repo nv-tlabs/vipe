@@ -2,6 +2,12 @@
 requires = ["setuptools>=40.8.0", "wheel", "torch"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+vipe = ["configs/**/*.yaml", "configs/**/*.yml"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

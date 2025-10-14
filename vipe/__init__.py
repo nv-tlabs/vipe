@@ -30,4 +30,4 @@ if not OmegaConf.has_resolver("neq"):
 
 
 def get_config_path() -> Path:
-    return Path(__file__).parent.parent / "configs"
+    return Path(__file__).parent / "configs"

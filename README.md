@@ -15,6 +15,8 @@ We use ViPE to annotate a large-scale collection of videos. This collection incl
 
 ## Installation
 
+### Standard Installation (Development)
+
 To ensure the reproducibility, we recommend creating the runtime environment using [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html).
 
 ```bash
@@ -27,6 +29,20 @@ pip install -r envs/requirements.txt --extra-index-url https://download.pytorch.
 # Build the project and install it into the current environment
 # Omit the -e flag to install the project as a regular package
 pip install --no-build-isolation -e .
+```
+
+### Installation for Modal
+
+ViPE can be installed in Modal apps for scalable video processing. See [MODAL_INSTALLATION.md](MODAL_INSTALLATION.md) for detailed instructions.
+
+```python
+import modal
+
+image = (
+    modal.Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04")
+    .pip_install("torch", "torchvision", extra_index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install("git+https://github.com/your-org/vipe.git")
+)
 ```
 
 ## Usage
