@@ -27,7 +27,7 @@ slam:
 
 # Post-processing configs
 post:
-  depth_align_model: "adaptive_unidepth-l_svda"
+  depth_align_model: "adaptive_unidepth-l_gc"
 
 # Output configs
 output:
