@@ -262,7 +262,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
         assert height % 64 == 0
         assert width % 64 == 0
         with torch.inference_mode():
-            rec_point_map, rec_valid_masks = self.video_depth_model(
+            rec_point_map, _ = self.video_depth_model(
                 frames_tensor,
                 self.point_map_vae,
                 self.prior_model,

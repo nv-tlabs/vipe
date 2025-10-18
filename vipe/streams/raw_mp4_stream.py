@@ -27,7 +27,7 @@ class RawMp4Stream(VideoStream):
     This does not support nested iterations.
     """
 
-    def __init__(self, path: Path, seek_range: range | None = None, name: str | None = None) -> None:
+    def __init__(self, path: Path, seek_range: range | None = None, name: str | None = None, resize_to_multiple: int = 64) -> None:
         super().__init__()
         if seek_range is None:
             seek_range = range(-1)
@@ -37,11 +37,24 @@ class RawMp4Stream(VideoStream):
 
         # Read metadata
         vcap = cv2.VideoCapture(str(self.path))
-        self._width = int(vcap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self._height = int(vcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._original_width = int(vcap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self._original_height = int(vcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         _fps = vcap.get(cv2.CAP_PROP_FPS)
         _n_frames = int(vcap.get(cv2.CAP_PROP_FRAME_COUNT))
         vcap.release()
+
+        # Calculate nearest multiple of resize_to_multiple for width and height
+        self.resize_to_multiple = resize_to_multiple
+        if resize_to_multiple > 0:
+            self._width = round(self._original_width / resize_to_multiple) * resize_to_multiple
+            self._height = round(self._original_height / resize_to_multiple) * resize_to_multiple
+            self.do_resize = (self._width != self._original_width) or (self._height != self._original_height)
+            if self.do_resize:
+                print(f"Resizing video from {self._original_width}x{self._original_height} to {self._width}x{self._height} (multiple of {resize_to_multiple})")
+        else:
+            self._width = self._original_width
+            self._height = self._original_height
+            self.do_resize = False
 
         self.start = seek_range.start
         self.end = seek_range.stop if seek_range.stop != -1 else _n_frames
@@ -86,6 +99,11 @@ class RawMp4Stream(VideoStream):
                 break
 
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Resize frame if needed
+        if self.do_resize:
+            frame = cv2.resize(frame, (self._width, self._height), interpolation=cv2.INTER_LANCZOS4)
+        
         frame_rgb = torch.as_tensor(frame).float() / 255.0
         frame_rgb = frame_rgb.cuda()
 
@@ -93,7 +111,7 @@ class RawMp4Stream(VideoStream):
 
 
 class RawMP4StreamList(StreamList):
-    def __init__(self, base_path: str, frame_start: int, frame_end: int, frame_skip: int, cached: bool = False) -> None:
+    def __init__(self, base_path: str, frame_start: int, frame_end: int, frame_skip: int, cached: bool = False, resize_to_multiple: int = 64) -> None:
         super().__init__()
         if Path(base_path).is_file():
             self.mp4_sequences = [Path(base_path)]
@@ -102,12 +120,13 @@ class RawMP4StreamList(StreamList):
             self.mp4_sequences = sorted(list(Path(base_path).glob("*.mp4")))
         self.frame_range = range(frame_start, frame_end, frame_skip)
         self.cached = cached
+        self.resize_to_multiple = resize_to_multiple
 
     def __len__(self) -> int:
         return len(self.mp4_sequences)
 
     def __getitem__(self, index: int) -> VideoStream:
-        stream: VideoStream = RawMp4Stream(self.mp4_sequences[index], seek_range=self.frame_range)
+        stream: VideoStream = RawMp4Stream(self.mp4_sequences[index], seek_range=self.frame_range, resize_to_multiple=self.resize_to_multiple)
         if self.cached:
             stream = ProcessedVideoStream(stream, []).cache(desc="Loading video", online=False)
         return stream
