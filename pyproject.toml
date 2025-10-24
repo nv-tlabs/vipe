@@ -41,6 +41,7 @@ dependencies = [
     "kornia",
     "viser",
     "click",
+    "moge @ git+https://github.com/microsoft/MoGe.git",
 ]
 
 [project.scripts]
