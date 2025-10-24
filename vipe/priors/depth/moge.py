@@ -55,7 +55,12 @@ class MogeModel(DepthEstimationModel,nn.Module):
         assert rgb.dtype == torch.float32, "Input image should be float32"
         assert src.camera_type == CameraType.PINHOLE, "MoGe only supports pinhole cameras"
 
-        focal_length: float = unpack_optional(src.intrinsics)[0].item()
+        # Extract focal length from intrinsics matrix (K[0,0] is fx)
+        intrinsics = unpack_optional(src.intrinsics)
+        if intrinsics.dim() == 2:  # 3x3 intrinsics matrix
+            focal_length: float = intrinsics[0, 0].item()
+        else:  # Already a scalar or 1D tensor
+            focal_length: float = intrinsics.item() if intrinsics.numel() == 1 else intrinsics[0].item()
 
         if rgb.dim() == 3:
             rgb, batch_dim = rgb[None], False
