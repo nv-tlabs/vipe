@@ -37,5 +37,10 @@ def make_depth_model(model: str):
 
         return MogeModel()
 
+    elif model_name == "hybrid_metric" or model_name == "hybrid":
+        from .hybrid_metric import HybridMetricDepthModel
+
+        return HybridMetricDepthModel()
+
     else:
         raise ValueError(f"Unknown depth model: {model}")
