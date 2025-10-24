@@ -3,36 +3,11 @@
 
 defaults:
   - default
-  - /slam: default
 
 # Override SLAM depth model with hybrid metric depth
 slam:
   keyframe_depth: hybrid_metric
   optimize_intrinsics: ${neq:${..init.intrinsics},"gt"}
-
-# Hybrid depth configuration
-hybrid_depth:
-  # MoGe model configuration
-  moge_model: "Ruicheng/moge-2-vitl"  # Can also use moge-2-vitl-normal for normal maps
-  
-  # Keyframe selection
-  keyframe_interval: 10  # Run MoGe every N frames
-  
-  # Scale optimization parameters
-  optimize_scales: true  # Enable temporal smoothness optimization
-  optimization:
-    lambda_metric: 1.0   # Weight for metric accuracy at keyframes
-    lambda_smooth: 0.1   # Weight for temporal smoothness
-    lambda_accel: 0.01   # Weight for acceleration penalty
-    n_iterations: 100    # Number of optimization iterations
-    learning_rate: 0.01  # Learning rate for Adam optimizer
-  
-  # Robustness parameters
-  min_valid_ratio: 0.1  # Minimum ratio of valid pixels required
-
-# Post-processing with hybrid depth
-post:
-  depth_align_model: "adaptive_hybrid_metric_gc"  # Use hybrid depth alignment
 
 # Output configuration (inherit from default)
 output:
