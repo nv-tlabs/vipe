@@ -1,0 +1,144 @@
+========================================
+SLURM Job Information
+========================================
+Job ID: 2975
+Node: 3feed1de-06
+Partition: batch
+CPUs: 8
+Memory: 40G
+Date: Fri Oct 24 11:11:58 PDT 2025
+========================================
+
+GPU Information:
+name, memory.total [MiB], memory.free [MiB], utilization.gpu [%]
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+NVIDIA H100 80GB HBM3, 81559 MiB, 81090 MiB, 0 %
+
+========================================
+Running hybrid metric depth E2E test...
+========================================
+
+/home/shivin/miniconda3/envs/vipe-test/lib/python3.10/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+================================================================================
+ViPE Hybrid Metric Depth - End-to-End Test
+================================================================================
+Input video: /home/shivin/ml-testing/vipe/assets/examples/cosmos-example.mp4
+Output directory: /home/shivin/ml-testing/vipe/vipe_results_hybrid_e2e
+Config path: /home/shivin/ml-testing/vipe/vipe/configs
+Loading configuration with overrides:
+  - pipeline=hybrid_metric
+  - pipeline.output.path=/home/shivin/ml-testing/vipe/vipe_results_hybrid_e2e
+  - pipeline.output.save_artifacts=true
+  - pipeline.output.save_viz=true
+  - pipeline.output.save_slam_map=false
+Configuration loaded successfully
+Depth model: hybrid_metric
+Creating video stream...
+Video stream created successfully
+Creating pipeline...
+Pipeline created successfully
+================================================================================
+Running pipeline (this may take a few minutes)...
+================================================================================
+/home/shivin/miniconda3/envs/vipe-test/lib/python3.10/site-packages/moge/model/v1.py:172: UserWarning: The following deprecated/invalid arguments are ignored: {'output_mask': True, 'split_head': True}
+  warnings.warn(f"The following deprecated/invalid arguments are ignored: {deprecated_kwargs}")
+using MLP layer as FFN
+Resizing video from 1280x720 to 1280x704 (multiple of 64)
+2025-10-24 11:12:22,189 - vipe.priors.depth.hybrid_metric - INFO - Initializing MoGe model: Ruicheng/moge-2-vitl
+2025-10-24 11:12:30,629 - vipe.priors.depth.hybrid_metric - INFO - HybridMetricDepthModel initialized: keyframe_interval=10, optimize_scales=True
+SLAM Pass (1/2):   0%|          | 0/81 [00:00<?, ?it/s]                                                       SLAM Pass (1/2):   0%|          | 0/81 [00:00<?, ?it/s]SLAM Pass (1/2):   1%|          | 1/81 [00:00<01:19,  1.01it/s]SLAM Pass (1/2):   2%|▏         | 2/81 [00:01<00:37,  2.12it/s]SLAM Pass (1/2):   5%|▍         | 4/81 [00:01<00:17,  4.46it/s]SLAM Pass (1/2):   7%|▋         | 6/81 [00:01<00:11,  6.49it/s]SLAM Pass (1/2):  10%|▉         | 8/81 [00:01<00:08,  8.19it/s]SLAM Pass (1/2):  12%|█▏        | 10/81 [00:01<00:07,  9.54it/s]SLAM Pass (1/2):  15%|█▍        | 12/81 [00:01<00:06, 10.55it/s]SLAM Pass (1/2):  17%|█▋        | 14/81 [00:02<00:05, 11.32it/s]SLAM Pass (1/2):  20%|█▉        | 16/81 [00:02<00:05, 11.95it/s]SLAM Pass (1/2):  22%|██▏       | 18/81 [00:02<00:05, 12.14it/s]SLAM Pass (1/2):  25%|██▍       | 20/81 [00:02<00:04, 12.35it/s]SLAM Pass (1/2):  27%|██▋       | 22/81 [00:02<00:04, 12.17it/s]SLAM Pass (1/2):  30%|██▉       | 24/81 [00:02<00:04, 12.13it/s]SLAM Pass (1/2):  32%|███▏      | 26/81 [00:02<00:04, 12.27it/s]                                                                SLAM Pass (1/2):  32%|███▏      | 26/81 [00:03<00:04, 12.27it/s]SLAM Pass (1/2):  35%|███▍      | 28/81 [00:03<00:04, 11.04it/s]SLAM Pass (1/2):  37%|███▋      | 30/81 [00:03<00:04, 11.55it/s]SLAM Pass (1/2):  40%|███▉      | 32/81 [00:03<00:04, 11.83it/s]SLAM Pass (1/2):  42%|████▏     | 34/81 [00:03<00:06,  7.52it/s]SLAM Pass (1/2):  44%|████▍     | 36/81 [00:04<00:05,  8.60it/s]SLAM Pass (1/2):  47%|████▋     | 38/81 [00:04<00:04,  9.44it/s]SLAM Pass (1/2):  49%|████▉     | 40/81 [00:04<00:04, 10.20it/s]SLAM Pass (1/2):  52%|█████▏    | 42/81 [00:04<00:03, 10.72it/s]SLAM Pass (1/2):  54%|█████▍    | 44/81 [00:04<00:03, 11.30it/s]SLAM Pass (1/2):  57%|█████▋    | 46/81 [00:04<00:03, 11.56it/s]SLAM Pass (1/2):  59%|█████▉    | 48/81 [00:05<00:02, 11.90it/s]SLAM Pass (1/2):  62%|██████▏   | 50/81 [00:05<00:02, 12.06it/s]SLAM Pass (1/2):  64%|██████▍   | 52/81 [00:05<00:02, 12.31it/s]SLAM Pass (1/2):  67%|██████▋   | 54/81 [00:05<00:02, 12.63it/s]SLAM Pass (1/2):  69%|██████▉   | 56/81 [00:05<00:01, 12.74it/s]SLAM Pass (1/2):  72%|███████▏  | 58/81 [00:05<00:01, 12.91it/s]                                                                SLAM Pass (1/2):  72%|███████▏  | 58/81 [00:05<00:01, 12.91it/s]SLAM Pass (1/2):  74%|███████▍  | 60/81 [00:06<00:01, 11.54it/s]SLAM Pass (1/2):  77%|███████▋  | 62/81 [00:06<00:01, 11.92it/s]SLAM Pass (1/2):  79%|███████▉  | 64/81 [00:06<00:01, 12.22it/s]SLAM Pass (1/2):  81%|████████▏ | 66/81 [00:06<00:01,  8.34it/s]SLAM Pass (1/2):  84%|████████▍ | 68/81 [00:06<00:01,  9.20it/s]SLAM Pass (1/2):  86%|████████▋ | 70/81 [00:07<00:01,  9.92it/s]SLAM Pass (1/2):  89%|████████▉ | 72/81 [00:07<00:00, 10.67it/s]SLAM Pass (1/2):  91%|█████████▏| 74/81 [00:07<00:00, 11.23it/s]SLAM Pass (1/2):  94%|█████████▍| 76/81 [00:07<00:00, 11.46it/s]SLAM Pass (1/2):  96%|█████████▋| 78/81 [00:07<00:00, 11.53it/s]SLAM Pass (1/2):  99%|█████████▉| 80/81 [00:07<00:00, 11.68it/s]                                                                SLAM Pass (1/2):  99%|█████████▉| 80/81 [00:08<00:00, 11.68it/s]SLAM Pass (1/2): 100%|██████████| 81/81 [00:08<00:00,  9.96it/s]
+2025-10-24 11:12:31,479 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:33,675 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:36,582 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:38,702 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:39,054 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 13.386966705322266 -> 1.3105740547180176
+2025-10-24 11:12:39,268 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 1.0167948305606842 -> 0.13649428635835648
+2025-10-24 11:12:39,481 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1600154135376215 -> 0.1089794673025608
+Update depth:   0%|          | 0/4 [00:00<?, ?it/s]                                                   Update depth:   0%|          | 0/4 [00:00<?, ?it/s]                                                   Update depth:   0%|          | 0/4 [00:00<?, ?it/s]Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.19it/s]                                                           Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.19it/s]                                                           Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.19it/s]Update depth: 100%|██████████| 4/4 [00:00<00:00, 17.18it/s]Update depth: 100%|██████████| 4/4 [00:00<00:00, 17.15it/s]
+2025-10-24 11:12:39,483 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:39,541 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:39,599 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:39,657 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:39,859 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.386120080947876 -> 0.14691903814673424
+2025-10-24 11:12:39,995 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.16167544573545456 -> 0.1502111777663231
+2025-10-24 11:12:40,131 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1597777120769024 -> 0.1537313610315323
+2025-10-24 11:12:40,267 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.15841972455382347 -> 0.1549503393471241
+2025-10-24 11:12:40,489 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.9827923029661179 -> 0.6940014958381653
+2025-10-24 11:12:40,702 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.27361005544662476 -> 0.18508706241846085
+2025-10-24 11:12:40,914 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.21089576929807663 -> 0.19219719618558884
+2025-10-24 11:12:41,126 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.20730550587177277 -> 0.19568677246570587
+2025-10-24 11:12:41,338 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1951390728354454 -> 0.18767932057380676
+2025-10-24 11:12:41,549 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18784048035740852 -> 0.18344970792531967
+2025-10-24 11:12:41,761 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18394877016544342 -> 0.1810670867562294
+2025-10-24 11:12:41,972 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18072834610939026 -> 0.17846371233463287
+2025-10-24 11:12:42,183 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.17852270230650902 -> 0.17656885832548141
+2025-10-24 11:12:42,395 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.17661098018288612 -> 0.17492632567882538
+2025-10-24 11:12:42,607 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.17507589608430862 -> 0.17367075383663177
+2025-10-24 11:12:42,818 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.17420614510774612 -> 0.1729748472571373
+Update depth:   0%|          | 0/4 [00:00<?, ?it/s]                                                   Update depth:   0%|          | 0/4 [00:00<?, ?it/s]                                                   Update depth:   0%|          | 0/4 [00:00<?, ?it/s]Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.25it/s]                                                           Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.25it/s]                                                           Update depth:  50%|█████     | 2/4 [00:00<00:00, 17.25it/s]Update depth: 100%|██████████| 4/4 [00:00<00:00, 17.32it/s]Update depth: 100%|██████████| 4/4 [00:00<00:00, 17.28it/s]
+2025-10-24 11:12:42,819 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:42,877 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:42,935 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:42,993 - vipe.priors.depth.hybrid_metric - WARNING - HybridMetricDepthModel.estimate() called for single frame. Falling back to MoGe only. For optimal results, use estimate_video().
+2025-10-24 11:12:43,191 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.3864453136920929 -> 0.18299997225403786
+2025-10-24 11:12:43,326 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18377836048603058 -> 0.1824081838130951
+2025-10-24 11:12:43,462 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18255901336669922 -> 0.1814335584640503
+2025-10-24 11:12:43,597 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1821776181459427 -> 0.18116435408592224
+2025-10-24 11:12:43,733 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18174326792359352 -> 0.18079252541065216
+2025-10-24 11:12:43,868 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18135006353259087 -> 0.1804744228720665
+2025-10-24 11:12:44,005 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18103737384080887 -> 0.18021506816148758
+2025-10-24 11:12:44,140 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1807137168943882 -> 0.17990637570619583
+2025-10-24 11:12:44,275 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.18041939660906792 -> 0.1796506643295288
+2025-10-24 11:12:44,410 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1801719143986702 -> 0.17942431941628456
+2025-10-24 11:12:44,545 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.1800062581896782 -> 0.17926377803087234
+2025-10-24 11:12:44,680 - vipe.slam.components.buffer - INFO - BA iters = 16, energy: 0.179825097322464 -> 0.17910826951265335
+SLAM Pass (2/2):   0%|          | 0/81 [00:00<?, ?it/s]SLAM Pass (2/2):  20%|█▉        | 16/81 [00:00<00:01, 46.98it/s]SLAM Pass (2/2):  40%|███▉      | 32/81 [00:00<00:00, 52.41it/s]SLAM Pass (2/2):  59%|█████▉    | 48/81 [00:00<00:00, 54.86it/s]SLAM Pass (2/2):  79%|███████▉  | 64/81 [00:01<00:00, 56.64it/s]SLAM Pass (2/2):  99%|█████████▉| 80/81 [00:01<00:00, 57.73it/s]SLAM Pass (2/2): 100%|██████████| 81/81 [00:01<00:00, 51.11it/s]
+Could not cache non-existence of file. Will ignore error and continue. Error: [Errno 13] Permission denied: '/home/afridi/Depth/GeometryCrafter/workspace/cache/models--TencentARC--GeometryCrafter/.no_exist/2e8eeeecd205018f0937e05f711011505ab61573/unet_diff/diffusion_pytorch_model.safetensors.index.json'
+Could not cache non-existence of file. Will ignore error and continue. Error: [Errno 13] Permission denied: '/home/afridi/Depth/GeometryCrafter/workspace/cache/models--TencentARC--GeometryCrafter/.no_exist/2e8eeeecd205018f0937e05f711011505ab61573/unet_diff/diffusion_pytorch_model.safetensors.index.json'
+Could not cache non-existence of file. Will ignore error and continue. Error: [Errno 13] Permission denied: '/home/afridi/Depth/GeometryCrafter/workspace/cache/models--TencentARC--GeometryCrafter/.no_exist/2e8eeeecd205018f0937e05f711011505ab61573/point_map_vae/diffusion_pytorch_model.safetensors.index.json'
+Could not cache non-existence of file. Will ignore error and continue. Error: [Errno 13] Permission denied: '/home/afridi/Depth/GeometryCrafter/workspace/cache/models--TencentARC--GeometryCrafter/.no_exist/2e8eeeecd205018f0937e05f711011505ab61573/point_map_vae/diffusion_pytorch_model.safetensors.index.json'
+using MLP layer as FFN
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00, 28.55it/s]`torch_dtype` is deprecated! Use `dtype` instead!
+Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  8.90it/s]
+2025-10-24 11:13:24,928 - vipe.pipeline.default - INFO - Saving artifacts to ArtifactPath(base_path=PosixPath('/home/shivin/ml-testing/vipe/vipe_results_hybrid_e2e'), artifact_name='cosmos-example')
+  0%|          | 0/5 [00:00<?, ?it/s] 20%|██        | 1/5 [00:01<00:05,  1.44s/it] 40%|████      | 2/5 [00:03<00:04,  1.54s/it] 60%|██████    | 3/5 [00:04<00:03,  1.72s/it] 80%|████████  | 4/5 [00:06<00:01,  1.80s/it]100%|██████████| 5/5 [00:08<00:00,  1.85s/it]100%|██████████| 5/5 [00:08<00:00,  1.77s/it]
+Rec point map range: 0.14067000150680542 to 7.6712212562561035
+Inverse Rec depth range: 0.13035733997821808 to 7.1088361740112305
+Aligning depth: 0it [00:00, ?it/s]                                  Aligning depth: 0it [00:00, ?it/s]Aligning depth: 1it [00:00,  5.19it/s]Aligning depth: 2it [00:00,  6.15it/s]Aligning depth: 3it [00:00,  6.66it/s]Aligning depth: 4it [00:00,  6.88it/s]Aligning depth: 5it [00:00,  7.10it/s]Aligning depth: 6it [00:00,  7.22it/s]Aligning depth: 7it [00:01,  7.24it/s]Aligning depth: 8it [00:01,  7.33it/s]Aligning depth: 9it [00:01,  7.26it/s]Aligning depth: 10it [00:01,  7.33it/s]Aligning depth: 11it [00:01,  7.40it/s]Aligning depth: 12it [00:01,  7.42it/s]Aligning depth: 13it [00:01,  7.27it/s]Aligning depth: 14it [00:01,  7.26it/s]Aligning depth: 15it [00:02,  7.25it/s]Aligning depth: 16it [00:02,  7.27it/s]Aligning depth: 17it [00:02,  7.24it/s]Aligning depth: 18it [00:02,  7.26it/s]Aligning depth: 19it [00:02,  7.28it/s]Aligning depth: 20it [00:02,  7.19it/s]Aligning depth: 21it [00:02,  7.17it/s]Aligning depth: 22it [00:03,  7.10it/s]Aligning depth: 23it [00:03,  7.13it/s]Aligning depth: 24it [00:03,  7.08it/s]Aligning depth: 25it [00:03,  7.13it/s]Aligning depth: 26it [00:03,  7.11it/s]Aligning depth: 27it [00:03,  7.17it/s]Aligning depth: 28it [00:03,  7.16it/s]Aligning depth: 29it [00:04,  7.09it/s]Aligning depth: 30it [00:04,  7.08it/s]Aligning depth: 31it [00:04,  6.99it/s]Aligning depth: 32it [00:04,  7.02it/s]Aligning depth: 33it [00:04,  7.08it/s]Aligning depth: 34it [00:04,  7.10it/s]Aligning depth: 35it [00:04,  7.03it/s]Aligning depth: 36it [00:05,  6.98it/s]Aligning depth: 37it [00:05,  7.02it/s]Aligning depth: 38it [00:05,  7.05it/s]Aligning depth: 39it [00:05,  7.06it/s]Aligning depth: 40it [00:05,  7.03it/s]Aligning depth: 41it [00:05,  7.00it/s]Aligning depth: 42it [00:05,  6.98it/s]Aligning depth: 43it [00:06,  6.89it/s]Aligning depth: 44it [00:06,  6.95it/s]Aligning depth: 45it [00:06,  6.99it/s]Aligning depth: 46it [00:06,  7.03it/s]Aligning depth: 47it [00:06,  6.92it/s]Aligning depth: 48it [00:06,  6.94it/s]Aligning depth: 49it [00:06,  7.00it/s]Aligning depth: 50it [00:07,  7.04it/s]Aligning depth: 51it [00:07,  7.08it/s]Aligning depth: 52it [00:07,  7.09it/s]Aligning depth: 53it [00:07,  7.12it/s]Aligning depth: 54it [00:07,  7.12it/s]Aligning depth: 55it [00:07,  7.14it/s]Aligning depth: 56it [00:07,  7.15it/s]Aligning depth: 57it [00:08,  7.15it/s]Aligning depth: 58it [00:08,  7.24it/s]Aligning depth: 59it [00:08,  7.29it/s]Aligning depth: 60it [00:08,  7.25it/s]Aligning depth: 61it [00:08,  7.31it/s]Aligning depth: 62it [00:08,  7.35it/s]Aligning depth: 63it [00:08,  7.36it/s]Aligning depth: 64it [00:08,  7.37it/s]Aligning depth: 65it [00:09,  7.40it/s]Aligning depth: 66it [00:09,  7.43it/s]Aligning depth: 67it [00:09,  7.39it/s]Aligning depth: 68it [00:09,  7.40it/s]Aligning depth: 69it [00:09,  7.42it/s]Aligning depth: 70it [00:09,  7.43it/s]Aligning depth: 71it [00:09,  7.43it/s]Aligning depth: 72it [00:10,  7.44it/s]Aligning depth: 73it [00:10,  7.43it/s]Aligning depth: 74it [00:10,  7.43it/s]Aligning depth: 75it [00:10,  7.39it/s]Aligning depth: 76it [00:10,  7.40it/s]Aligning depth: 77it [00:10,  7.42it/s]Aligning depth: 78it [00:10,  7.50it/s]Aligning depth: 79it [00:11,  7.49it/s]Aligning depth: 80it [00:11,  7.48it/s]Aligning depth: 80it [00:11,  7.10it/s]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2025-10-24 11:14:03,834 - vipe.pipeline.processors - INFO - Minimum UV score: 0.4300
+Writing viz video:   0%|          | 0/81 [00:00<?, ?it/s]huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+Writing viz video:   1%|          | 1/81 [00:00<00:38,  2.08it/s]Writing viz video:   2%|▏         | 2/81 [00:00<00:21,  3.62it/s]Writing viz video:   4%|▎         | 3/81 [00:00<00:15,  4.93it/s]Writing viz video:   5%|▍         | 4/81 [00:00<00:12,  5.98it/s]Writing viz video:   6%|▌         | 5/81 [00:00<00:11,  6.71it/s]Writing viz video:   7%|▋         | 6/81 [00:01<00:10,  7.33it/s]Writing viz video:   9%|▊         | 7/81 [00:01<00:09,  7.70it/s]Writing viz video:  10%|▉         | 8/81 [00:01<00:09,  8.05it/s]Writing viz video:  11%|█         | 9/81 [00:01<00:08,  8.21it/s]Writing viz video:  12%|█▏        | 10/81 [00:01<00:08,  8.42it/s]Writing viz video:  14%|█▎        | 11/81 [00:01<00:08,  8.58it/s]Writing viz video:  15%|█▍        | 12/81 [00:01<00:07,  8.69it/s]Writing viz video:  16%|█▌        | 13/81 [00:01<00:07,  8.68it/s]Writing viz video:  17%|█▋        | 14/81 [00:01<00:07,  8.76it/s]Writing viz video:  19%|█▊        | 15/81 [00:02<00:07,  8.81it/s]Writing viz video:  20%|█▉        | 16/81 [00:02<00:07,  8.85it/s]Writing viz video:  21%|██        | 17/81 [00:02<00:07,  8.88it/s]Writing viz video:  22%|██▏       | 18/81 [00:02<00:07,  8.71it/s]Writing viz video:  23%|██▎       | 19/81 [00:02<00:07,  8.74it/s]Writing viz video:  25%|██▍       | 20/81 [00:02<00:06,  8.79it/s]Writing viz video:  26%|██▌       | 21/81 [00:02<00:06,  8.83it/s]Writing viz video:  27%|██▋       | 22/81 [00:02<00:06,  8.77it/s]Writing viz video:  28%|██▊       | 23/81 [00:02<00:06,  8.81it/s]Writing viz video:  30%|██▉       | 24/81 [00:03<00:06,  8.85it/s]Writing viz video:  31%|███       | 25/81 [00:03<00:06,  8.85it/s]Writing viz video:  32%|███▏      | 26/81 [00:03<00:06,  8.83it/s]Writing viz video:  33%|███▎      | 27/81 [00:03<00:06,  8.70it/s]Writing viz video:  35%|███▍      | 28/81 [00:03<00:06,  8.73it/s]Writing viz video:  36%|███▌      | 29/81 [00:03<00:05,  8.80it/s]Writing viz video:  37%|███▋      | 30/81 [00:03<00:05,  8.84it/s]Writing viz video:  38%|███▊      | 31/81 [00:03<00:05,  8.83it/s]Writing viz video:  40%|███▉      | 32/81 [00:04<00:05,  8.86it/s]Writing viz video:  41%|████      | 33/81 [00:04<00:05,  8.88it/s]Writing viz video:  42%|████▏     | 34/81 [00:04<00:05,  8.89it/s]Writing viz video:  43%|████▎     | 35/81 [00:04<00:05,  8.87it/s]Writing viz video:  44%|████▍     | 36/81 [00:04<00:05,  8.80it/s]Writing viz video:  46%|████▌     | 37/81 [00:04<00:04,  8.84it/s]Writing viz video:  47%|████▋     | 38/81 [00:04<00:04,  8.81it/s]Writing viz video:  48%|████▊     | 39/81 [00:04<00:04,  8.73it/s]Writing viz video:  49%|████▉     | 40/81 [00:04<00:04,  8.64it/s]Writing viz video:  51%|█████     | 41/81 [00:05<00:04,  8.62it/s]Writing viz video:  52%|█████▏    | 42/81 [00:05<00:04,  8.63it/s]Writing viz video:  53%|█████▎    | 43/81 [00:05<00:04,  8.49it/s]Writing viz video:  54%|█████▍    | 44/81 [00:05<00:04,  8.55it/s]Writing viz video:  56%|█████▌    | 45/81 [00:05<00:04,  8.65it/s]Writing viz video:  57%|█████▋    | 46/81 [00:05<00:04,  8.71it/s]Writing viz video:  58%|█████▊    | 47/81 [00:05<00:03,  8.75it/s]Writing viz video:  59%|█████▉    | 48/81 [00:05<00:03,  8.77it/s]Writing viz video:  60%|██████    | 49/81 [00:05<00:03,  8.56it/s]Writing viz video:  62%|██████▏   | 50/81 [00:06<00:03,  8.48it/s]Writing viz video:  63%|██████▎   | 51/81 [00:06<00:03,  8.56it/s]Writing viz video:  64%|██████▍   | 52/81 [00:06<00:03,  8.64it/s]Writing viz video:  65%|██████▌   | 53/81 [00:06<00:03,  8.60it/s]Writing viz video:  67%|██████▋   | 54/81 [00:06<00:03,  8.68it/s]Writing viz video:  68%|██████▊   | 55/81 [00:06<00:03,  8.63it/s]Writing viz video:  69%|██████▉   | 56/81 [00:06<00:02,  8.67it/s]Writing viz video:  70%|███████   | 57/81 [00:06<00:02,  8.70it/s]Writing viz video:  72%|███████▏  | 58/81 [00:07<00:02,  8.73it/s]Writing viz video:  73%|███████▎  | 59/81 [00:07<00:02,  8.74it/s]Writing viz video:  74%|███████▍  | 60/81 [00:07<00:02,  8.72it/s]Writing viz video:  75%|███████▌  | 61/81 [00:07<00:02,  8.62it/s]Writing viz video:  77%|███████▋  | 62/81 [00:07<00:02,  8.59it/s]Writing viz video:  78%|███████▊  | 63/81 [00:07<00:02,  8.67it/s]Writing viz video:  79%|███████▉  | 64/81 [00:07<00:01,  8.69it/s]Writing viz video:  80%|████████  | 65/81 [00:07<00:01,  8.75it/s]Writing viz video:  81%|████████▏ | 66/81 [00:07<00:01,  8.71it/s]Writing viz video:  83%|████████▎ | 67/81 [00:08<00:01,  8.72it/s]Writing viz video:  84%|████████▍ | 68/81 [00:08<00:01,  8.73it/s]Writing viz video:  85%|████████▌ | 69/81 [00:08<00:01,  8.74it/s]Writing viz video:  86%|████████▋ | 70/81 [00:08<00:01,  8.67it/s]Writing viz video:  88%|████████▊ | 71/81 [00:08<00:01,  8.67it/s]Writing viz video:  89%|████████▉ | 72/81 [00:08<00:01,  8.68it/s]Writing viz video:  90%|█████████ | 73/81 [00:08<00:00,  8.71it/s]Writing viz video:  91%|█████████▏| 74/81 [00:08<00:00,  8.72it/s]Writing viz video:  93%|█████████▎| 75/81 [00:08<00:00,  8.63it/s]Writing viz video:  94%|█████████▍| 76/81 [00:09<00:00,  8.65it/s]Writing viz video:  95%|█████████▌| 77/81 [00:09<00:00,  8.63it/s]Writing viz video:  96%|█████████▋| 78/81 [00:09<00:00,  8.63it/s]Writing viz video:  98%|█████████▊| 79/81 [00:09<00:00,  8.64it/s]Writing viz video:  99%|█████████▉| 80/81 [00:09<00:00,  8.71it/s]Writing viz video: 100%|██████████| 81/81 [00:09<00:00,  8.61it/s]Writing viz video: 100%|██████████| 81/81 [00:09<00:00,  8.38it/s]
+================================================================================
+✓ Pipeline completed successfully!
+================================================================================
+Output directory: /home/shivin/ml-testing/vipe/vipe_results_hybrid_e2e
+
+Generated 9 output files:
+  depth/cosmos-example.zip (26.3 MB)
+  intrinsics/cosmos-example.npz (2.4 KB)
+  intrinsics/cosmos-example_camera.txt (0.9 KB)
+  mask/cosmos-example.txt (0.0 KB)
+  mask/cosmos-example.zip (397.5 KB)
+  pose/cosmos-example.npz (6.2 KB)
+  rgb/cosmos-example.mp4 (1.3 MB)
+  vipe/cosmos-example_info.pkl (0.0 KB)
+  vipe/cosmos-example_vis.mp4 (1.7 MB)
+
+========================================
+Job finished with exit code: 0
+Date: Fri Oct 24 11:14:31 PDT 2025
+========================================
