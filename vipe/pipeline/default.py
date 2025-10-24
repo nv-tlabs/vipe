@@ -15,13 +15,14 @@
 
 
 import logging
+import os
 import pickle
 
 from pathlib import Path
 
 import torch
-
 from omegaconf import DictConfig
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from vipe.slam.system import SLAMOutput, SLAMSystem
 from vipe.streams.base import (
@@ -91,6 +92,24 @@ class DefaultAnnotationPipeline(Pipeline):
         return ProcessedVideoStream(video_stream, post_processors)
 
     def run(self, video_data: VideoStream | MultiviewVideoList) -> AnnotationPipelineOutput:
+        # Check if profiling is enabled
+        enable_profiling = os.getenv("VIPE_PROFILE", "0") == "1"
+        
+        if enable_profiling:
+            logger = logging.getLogger(__name__)
+            logger.info("🔍 PyTorch profiling enabled for pipeline")
+            
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(warmup=1, active=3, repeat=2),
+                record_shapes=True,
+                with_stack=True,
+            ) as prof:
+                return self._run_with_profiling(video_data, prof)
+        else:
+            return self._run_without_profiling(video_data)
+    
+    def _run_without_profiling(self, video_data: VideoStream | MultiviewVideoList) -> AnnotationPipelineOutput:
         if isinstance(video_data, MultiviewVideoList):
             video_streams = [video_data[view_idx] for view_idx in range(len(video_data))]
             artifact_paths = [io.ArtifactPath(self.out_path, video_stream.name()) for video_stream in video_streams]
@@ -150,3 +169,115 @@ class DefaultAnnotationPipeline(Pipeline):
             annotate_output.output_streams = output_streams
 
         return annotate_output
+    
+    def _run_with_profiling(self, video_data: VideoStream | MultiviewVideoList, prof: torch.profiler.profile) -> AnnotationPipelineOutput:
+        logger = logging.getLogger(__name__)
+        
+        with record_function("pipeline_initialization"):
+            if isinstance(video_data, MultiviewVideoList):
+                video_streams = [video_data[view_idx] for view_idx in range(len(video_data))]
+                artifact_paths = [io.ArtifactPath(self.out_path, video_stream.name()) for video_stream in video_streams]
+                slam_rig = video_data.rig()
+
+            else:
+                assert isinstance(video_data, VideoStream)
+                video_streams = [video_data]
+                artifact_paths = [io.ArtifactPath(self.out_path, video_data.name())]
+                slam_rig = None
+
+            annotate_output = AnnotationPipelineOutput()
+
+            if all([self.should_filter(video_stream.name()) for video_stream in video_streams]):
+                logger.info(f"{video_data.name()} has been proccessed already, skip it!!")
+                return annotate_output
+
+        with record_function("initialization_processors"):
+            slam_streams: list[VideoStream] = [
+                self._add_init_processors(video_stream).cache("process", online=True) for video_stream in video_streams
+            ]
+
+        with record_function("SLAM_pipeline_execution"):
+            slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg)
+            slam_output = slam_pipeline.run(slam_streams, rig=slam_rig, camera_type=self.camera_type)
+
+        if self.return_payload:
+            annotate_output.payload = slam_output
+            return annotate_output
+
+        with record_function("post_processors"):
+            output_streams = [
+                self._add_post_processors(view_idx, slam_stream, slam_output).cache("depth", online=True)
+                for view_idx, slam_stream in enumerate(slam_streams)
+            ]
+
+        with record_function("artifact_saving"):
+            # Dumping artifacts for all views in the streams
+            for output_stream, artifact_path in zip(output_streams, artifact_paths):
+                artifact_path.meta_info_path.parent.mkdir(exist_ok=True, parents=True)
+                if self.out_cfg.save_artifacts:
+                    logger.info(f"Saving artifacts to {artifact_path}")
+                    io.save_artifacts(artifact_path, output_stream)
+                    with artifact_path.meta_info_path.open("wb") as f:
+                        pickle.dump({"ba_residual": slam_output.ba_residual}, f)
+
+                if self.out_cfg.save_viz:
+                    save_projection_video(
+                        artifact_path.meta_vis_path,
+                        output_stream,
+                        slam_output,
+                        self.out_cfg.viz_downsample,
+                        self.out_cfg.viz_attributes,
+                    )
+
+                if self.out_cfg.save_slam_map and slam_output.slam_map is not None:
+                    logger.info(f"Saving SLAM map to {artifact_path.slam_map_path}")
+                    slam_output.slam_map.save(artifact_path.slam_map_path)
+
+        if self.return_output_streams:
+            annotate_output.output_streams = output_streams
+
+        # Log profiler statistics
+        prof.step()
+        self._log_profiler_stats(prof, logger)
+
+        return annotate_output
+    
+    def _log_profiler_stats(self, prof: torch.profiler.profile, logger):
+        """Log profiler statistics in a structured format"""
+        logger.info("🔍 PyTorch Profiler Statistics (Pipeline):")
+        logger.info("=" * 60)
+        
+        # Get profiler events
+        events = prof.events()
+        
+        # Group events by function name
+        function_stats = {}
+        for event in events:
+            if event.name not in function_stats:
+                function_stats[event.name] = {
+                    'total_time': 0,
+                    'count': 0,
+                    'cpu_time': 0,
+                    'cuda_time': 0
+                }
+            
+            function_stats[event.name]['total_time'] += event.cpu_time_total
+            function_stats[event.name]['count'] += 1
+            function_stats[event.name]['cpu_time'] += event.cpu_time
+            function_stats[event.name]['cuda_time'] += event.cuda_time
+        
+        # Sort by total time
+        sorted_functions = sorted(function_stats.items(), key=lambda x: x[1]['total_time'], reverse=True)
+        
+        total_time = sum(stats['total_time'] for stats in function_stats.values())
+        
+        logger.info(f"{'Function':<30} {'Count':<8} {'Total (ms)':<12} {'Avg (ms)':<12} {'%':<8}")
+        logger.info("-" * 80)
+        
+        for func_name, stats in sorted_functions:
+            if stats['total_time'] > 0:  # Only show functions with actual time
+                percentage = (stats['total_time'] / total_time) * 100
+                avg_time = stats['total_time'] / stats['count']
+                logger.info(f"{func_name:<30} {stats['count']:<8} {stats['total_time']/1000:<12.2f} {avg_time/1000:<12.2f} {percentage:<8.1f}")
+        
+        logger.info("=" * 60)

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import uuid
 
 import numpy as np
@@ -20,6 +21,7 @@ import rerun as rr
 import torch
 from einops import rearrange
 from omegaconf import DictConfig, OmegaConf
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from vipe.ext.lietorch import SE3
 from vipe.priors.depth import make_depth_model
@@ -215,6 +217,29 @@ class SLAMSystem:
         rig: SE3 | None = None,
         camera_type: CameraType = CameraType.PINHOLE,
     ) -> SLAMOutput:
+        # Check if profiling is enabled
+        enable_profiling = os.getenv("VIPE_PROFILE", "0") == "1"
+        
+        if enable_profiling:
+            logger = logging.getLogger(__name__)
+            logger.info("🔍 PyTorch profiling enabled for SLAM system")
+            
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(warmup=1, active=3, repeat=2),
+                record_shapes=True,
+                with_stack=True,
+            ) as prof:
+                return self._run_with_profiling(video_streams, rig, camera_type, prof)
+        else:
+            return self._run_without_profiling(video_streams, rig, camera_type)
+    
+    def _run_without_profiling(
+        self,
+        video_streams: list[VideoStream],
+        rig: SE3 | None = None,
+        camera_type: CameraType = CameraType.PINHOLE,
+    ) -> SLAMOutput:
         assert len(video_streams) > 0
         resizers = [StandardResizeStreamProcessor() for _ in video_streams]
         video_streams = [
@@ -318,3 +343,177 @@ class SLAMSystem:
             rig=SE3(self.buffer.rig.clone()),
             slam_map=slam_map,
         )
+    
+    def _run_with_profiling(
+        self,
+        video_streams: list[VideoStream],
+        rig: SE3 | None = None,
+        camera_type: CameraType = CameraType.PINHOLE,
+        prof: torch.profiler.profile,
+    ) -> SLAMOutput:
+        logger = logging.getLogger(__name__)
+        
+        with record_function("SLAM_initialization"):
+            assert len(video_streams) > 0
+            resizers = [StandardResizeStreamProcessor() for _ in video_streams]
+            video_streams = [
+                ProcessedVideoStream(video_stream, [resizer]) for video_stream, resizer in zip(video_streams, resizers)
+            ]
+
+            frame_size = video_streams[0].frame_size()
+            total_n_frames = len(video_streams[0])
+            for vs in video_streams:
+                assert vs.frame_size() == frame_size
+                assert len(vs) == total_n_frames
+
+            if rig is None:
+                assert len(video_streams) == 1, "Need rig for multiple views"
+                rig = SE3.Identity(1)
+            self.rig = rig
+
+            self.config.update(
+                {
+                    "height": frame_size[0],
+                    "width": frame_size[1],
+                    "n_views": len(video_streams),
+                    "has_init_pose": FrameAttribute.POSE in video_streams[0].attributes(),
+                    "camera_type": camera_type,
+                }
+            )
+
+            self._build_components()
+
+            if self.visualize:
+                rr.init("ViPE Visualization", spawn=True, recording_id=uuid.uuid4())
+                rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_DOWN, static=True)
+
+        # Run frontend to get attributes initialization. This will also populate attribute buffers.
+        frame_data_list: list[VideoFrame]
+        frame_idx: int = 0
+        
+        with record_function("SLAM_pass_1"):
+            for frame_idx, frame_data_list in pbar(
+                enumerate(zip(*video_streams)), desc="SLAM Pass (1/2)", total=total_n_frames
+            ):
+                with record_function("frame_preprocessing"):
+                    images, buffer_masks = self._precompute_features(frame_data_list)
+
+                with record_function("sparse_tracking"):
+                    self.sparse_tracks.track_image(frame_data_list)
+
+                with record_function("motion_filtering"):
+                    if self.motion_filter.check(images, buffer_masks) or frame_idx == total_n_frames - 1:
+                        is_keyframe = True
+                        with record_function("keyframe_addition"):
+                            self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=1)
+                    else:
+                        is_keyframe = False
+
+                with record_function("frontend_execution"):
+                    self.frontend.run()
+
+                if self.visualize:
+                    self.buffer.log(self.config.map_filter_thresh)
+                    self.frontend.graph.log()
+
+                # Run the backend in between to correct intrinsics and extrinsics in advance
+                # to avoid large errors and local minima.
+                if self.buffer.n_frames in self.config.frontend_backend_iters and is_keyframe:
+                    with record_function("intermediate_backend"):
+                        self.backend.run_if_necessary(5, log=self.visualize)
+
+        # Tracks can be determined earlier since it's fixed after frontend.
+        if self.visualize:
+            self.buffer.log_tracks()
+
+        with record_function("global_bundle_adjustment"):
+            # Run the backend to perform a global BA over the keyframes.
+            self.backend.run(7, log=self.visualize)
+
+            # Run backend again with a new graph and cleared GRU states.
+            self.backend.run(self.config.backend_iters, update_depth=False, log=self.visualize)
+
+        with record_function("SLAM_pass_2"):
+            # Infill poses and attributes for non-keyframe frames.
+            self.inner_filler.set_start_idx(self.buffer.n_frames)
+            for frame_idx, frame_data_list in pbar(
+                enumerate(zip(*video_streams)), desc="SLAM Pass (2/2)", total=total_n_frames
+            ):
+                with record_function("frame_preprocessing_pass2"):
+                    images, buffer_masks = self._precompute_features(frame_data_list)
+                
+                with record_function("keyframe_addition_pass2"):
+                    self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=2)
+                
+                if self.inner_filler.check() or frame_idx == total_n_frames - 1:
+                    with record_function("inner_filling"):
+                        self.inner_filler.compute()
+
+        with record_function("SLAM_finalization"):
+            filled_return = self.inner_filler.get_result()
+
+            # This means the iterator is exhausted early than expected in the above loop.
+            # Warn user to use cached video stream.
+            if filled_return.poses.shape[0] != total_n_frames:
+                raise ValueError("Your video might be malformed. Try using streams.cached=true in the config.")
+
+            if self.visualize:
+                self._log_final(video_streams, filled_return)
+
+            slam_map = self.buffer.extract_slam_map(filter_thresh=self.config.map_filter_thresh)
+
+            # Scale back the intrinsics to the original size.
+            original_intrinsics = torch.stack(
+                [resizer.recover_intrinsics(self.buffer.intrinsics[v]) for v, resizer in enumerate(resizers)]
+            )
+
+        # Log profiler statistics
+        prof.step()
+        self._log_profiler_stats(prof, logger)
+        
+        return SLAMOutput(
+            trajectory=filled_return.poses.inv(),
+            intrinsics=original_intrinsics,
+            rig=SE3(self.buffer.rig.clone()),
+            slam_map=slam_map,
+        )
+    
+    def _log_profiler_stats(self, prof: torch.profiler.profile, logger):
+        """Log profiler statistics in a structured format"""
+        logger.info("🔍 PyTorch Profiler Statistics:")
+        logger.info("=" * 60)
+        
+        # Get profiler events
+        events = prof.events()
+        
+        # Group events by function name
+        function_stats = {}
+        for event in events:
+            if event.name not in function_stats:
+                function_stats[event.name] = {
+                    'total_time': 0,
+                    'count': 0,
+                    'cpu_time': 0,
+                    'cuda_time': 0
+                }
+            
+            function_stats[event.name]['total_time'] += event.cpu_time_total
+            function_stats[event.name]['count'] += 1
+            function_stats[event.name]['cpu_time'] += event.cpu_time
+            function_stats[event.name]['cuda_time'] += event.cuda_time
+        
+        # Sort by total time
+        sorted_functions = sorted(function_stats.items(), key=lambda x: x[1]['total_time'], reverse=True)
+        
+        total_time = sum(stats['total_time'] for stats in function_stats.values())
+        
+        logger.info(f"{'Function':<30} {'Count':<8} {'Total (ms)':<12} {'Avg (ms)':<12} {'%':<8}")
+        logger.info("-" * 80)
+        
+        for func_name, stats in sorted_functions:
+            if stats['total_time'] > 0:  # Only show functions with actual time
+                percentage = (stats['total_time'] / total_time) * 100
+                avg_time = stats['total_time'] / stats['count']
+                logger.info(f"{func_name:<30} {stats['count']:<8} {stats['total_time']/1000:<12.2f} {avg_time/1000:<12.2f} {percentage:<8.1f}")
+        
+        logger.info("=" * 60)
