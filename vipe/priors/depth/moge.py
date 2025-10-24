@@ -15,9 +15,9 @@
 
 import torch
 
-
+import torch.nn as nn
 try:
-    from moge.model.v1 import MoGeModel
+    from moge.model.v1 import MoGeModel 
 except ModuleNotFoundError:
     MoGeModel = None
 
@@ -34,16 +34,16 @@ def focal_length_to_fov_degrees(focal_length: float, image_width: float) -> floa
     return fov_deg.item()
 
 
-class MogeModel(DepthEstimationModel):
+class MogeModel(DepthEstimationModel,nn.Module):
     """https://github.com/microsoft/MoGe"""
 
-    def __init__(self) -> None:
+    def __init__(self, cache_dir: str|None = None) -> None:
         super().__init__()
         if MoGeModel is None:
             raise RuntimeError(
                 "moge is not found in the environment. You can install it via pip install `git+https://github.com/microsoft/MoGe.git`"
             )
-        self.model = MoGeModel.from_pretrained("Ruicheng/moge-vitl")
+        self.model = MoGeModel.from_pretrained("Ruicheng/moge-vitl", cache_dir=cache_dir)
         self.model = self.model.cuda().eval()
 
     @property
@@ -85,3 +85,10 @@ class MogeModel(DepthEstimationModel):
             moge_mask_hw_full = moge_mask_hw_full.squeeze(0)
 
         return DepthEstimationResult(metric_depth=moge_depth_tensor)
+    @torch.no_grad()
+    def forward_image(self, image: torch.Tensor, **kwargs):
+        # image: b, 3, h, w 0,1
+        output = self.model.infer(image, resolution_level=9, apply_mask=False, **kwargs)
+        points = output['points'] # b,h,w,3
+        masks = output['mask'] # b,h,w
+        return points, masks

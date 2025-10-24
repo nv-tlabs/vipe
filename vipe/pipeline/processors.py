@@ -25,6 +25,12 @@ from vipe.priors.depth import DepthEstimationInput, make_depth_model
 from vipe.priors.depth.alignment import align_inv_depth_to_depth
 from vipe.priors.depth.priorda import PriorDAModel
 from vipe.priors.depth.videodepthanything import VideoDepthAnythingDepthModel
+from vipe.priors.depth.geometrycrafter import (
+    GeometryCrafterDiffPipeline,
+    GeometryCrafterDetermPipeline,
+    PMapAutoencoderKLTemporalDecoder,
+    UNetSpatioTemporalConditionModelVid2vid
+)
 from vipe.priors.geocalib import GeoCalib
 from vipe.priors.track_anything import TrackAnythingPipeline
 from vipe.slam.interface import SLAMOutput
@@ -33,6 +39,7 @@ from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
 from vipe.utils.morph import erode
+from vipe.priors.depth.moge import MogeModel
 
 
 logger = logging.getLogger(__name__)
@@ -166,8 +173,36 @@ class AdaptiveDepthProcessor(StreamProcessor):
 
         try:
             prefix, metric_model, video_model = model.split("_")
-            assert video_model in ["svda", "vda"]
-            self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
+            assert video_model in ["svda", "vda", "gc"]
+            if video_model == "gc":
+                model_type = "diff" #TODO: provide flexibility to the user to choose the model type
+                cache_dir = "/home/afridi/Depth/GeometryCrafter/workspace/cache"
+                unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
+                    'TencentARC/GeometryCrafter',
+                    subfolder='unet_diff' if model_type == 'diff' else 'unet_determ',
+                    low_cpu_mem_usage=True,
+                    torch_dtype=torch.float16,
+                    cache_dir=cache_dir
+                ).requires_grad_(False).to("cuda", dtype=torch.float16)
+                self.point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
+                    'TencentARC/GeometryCrafter',
+                    subfolder='point_map_vae',
+                    low_cpu_mem_usage=True,
+                    torch_dtype=torch.float32,
+                    cache_dir=cache_dir
+                ).requires_grad_(False).to("cuda", dtype=torch.float32)
+                self.prior_model = MogeModel( #TODO: check if this is redundant
+                    cache_dir=cache_dir,
+                ).requires_grad_(False).to('cuda', dtype=torch.float32)
+                self.video_depth_model = GeometryCrafterDiffPipeline.from_pretrained(
+                    "stabilityai/stable-video-diffusion-img2vid-xt",
+                    unet=unet,
+                    torch_dtype=torch.float16,
+                    variant="fp16",
+                    cache_dir=cache_dir
+                ).to("cuda")
+            else:
+                self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
 
         except ValueError:
             prefix, metric_model = model.split("_")
@@ -205,6 +240,50 @@ class AdaptiveDepthProcessor(StreamProcessor):
             self.video_depth_model.estimate(DepthEstimationInput(video_frame_list=frame_list)).relative_inv_depth
         )
         return video_depth_result, frame_data_list
+    def _compute_video_gc(self, frame_iterator: Iterator[VideoFrame]) -> tuple[torch.Tensor, list[VideoFrame]]:
+        frame_list: list[np.ndarray] = []
+        frame_data_list: list[VideoFrame] = []
+        for frame in frame_iterator:
+            frame_data_list.append(frame.cpu())
+            frame_list.append(frame.rgb)
+        frames_tensor = torch.stack(frame_list).permute(0, 3, 1, 2)
+        num_inference_steps = 5
+        guidance_scale = 1.0
+        window_size = 110
+        decode_chunk_size = 8
+        overlap = 25
+        force_projection = True
+        force_fixed_focal = True
+        use_extract_interp = False
+        track_time = False
+        low_memory_usage = False
+        height = frame.rgb.shape[0]
+        width = frame.rgb.shape[1]
+        assert height % 64 == 0
+        assert width % 64 == 0
+        with torch.inference_mode():
+            rec_point_map, _ = self.video_depth_model(
+                frames_tensor,
+                self.point_map_vae,
+                self.prior_model,
+                height=height,
+                width=width,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                window_size=window_size,
+                decode_chunk_size=decode_chunk_size,
+                overlap=overlap,
+                force_projection=force_projection,
+                force_fixed_focal=force_fixed_focal,
+                use_extract_interp=use_extract_interp,
+                track_time=track_time,
+                low_memory_usage=low_memory_usage
+            )
+        
+        print(f"Rec point map range: {rec_point_map[:,:,:,2].min()} to {rec_point_map[:,:,:,2].max()}")
+        rec_depth = 1/(rec_point_map[:,:,:,2]) # Inverse depth
+        print(f"Inverse Rec depth range: {rec_depth.min()} to {rec_depth.max()}")
+        return rec_depth, frame_data_list
 
     def update_iterator(self, previous_iterator: Iterator[VideoFrame]) -> Iterator[VideoFrame]:
         # Determine the percentage score of the SLAM map.
@@ -213,7 +292,12 @@ class AdaptiveDepthProcessor(StreamProcessor):
         min_uv_score: float = 1.0
 
         if self.video_depth_model is not None:
-            video_depth_result, data_iterator = self._compute_video_da(previous_iterator)
+            if isinstance(self.video_depth_model, VideoDepthAnythingDepthModel):
+                video_depth_result, data_iterator = self._compute_video_da(previous_iterator)
+            elif isinstance(self.video_depth_model, GeometryCrafterDiffPipeline):
+                video_depth_result, data_iterator = self._compute_video_gc(previous_iterator)
+            else:
+                raise ValueError(f"Unknown video depth model: {self.video_depth_model}")
         else:
             video_depth_result = None
             data_iterator = previous_iterator
