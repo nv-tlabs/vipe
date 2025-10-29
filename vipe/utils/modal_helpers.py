@@ -45,15 +45,15 @@ def load_geometrycrafter_models_cpu(cache_dir: str = "/home/afridi/Depth/Geometr
     
     model_type = "diff"  # TODO: make configurable
     
-    # Load UNet on CPU
+    # Load UNet on CPU (use float32 to avoid CPU float16 issues)
     logger.info("  Loading UNet...")
     unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
         'TencentARC/GeometryCrafter',
         subfolder='unet_diff' if model_type == 'diff' else 'unet_determ',
         low_cpu_mem_usage=True,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
         cache_dir=cache_dir
-    ).requires_grad_(False).to("cpu", dtype=torch.float16)
+    ).requires_grad_(False).to("cpu", dtype=torch.float32)
     
     # Load VAE on CPU
     logger.info("  Loading VAE...")
@@ -71,13 +71,12 @@ def load_geometrycrafter_models_cpu(cache_dir: str = "/home/afridi/Depth/Geometr
         cache_dir=cache_dir,
     ).requires_grad_(False).to('cpu', dtype=torch.float32)
     
-    # Load full pipeline on CPU
+    # Load full pipeline on CPU (use float32 to avoid CPU float16 issues)
     logger.info("  Loading GeometryCrafter pipeline...")
     video_depth_model = GeometryCrafterDiffPipeline.from_pretrained(
         "stabilityai/stable-video-diffusion-img2vid-xt",
         unet=unet,
-        torch_dtype=torch.float16,
-        variant="fp16",
+        torch_dtype=torch.float32,
         cache_dir=cache_dir
     ).to("cpu")
     
@@ -101,10 +100,11 @@ def move_geometrycrafter_models_to_gpu(gc_models: dict):
     """
     logger.info("⚡ Moving GeometryCrafter models from CPU to GPU...")
     
-    # Move each model to GPU
+    # Move each model to GPU (convert to float16 for efficiency)
     gc_models["point_map_vae"] = gc_models["point_map_vae"].to("cuda", dtype=torch.float32)
     gc_models["prior_model"] = gc_models["prior_model"].to("cuda", dtype=torch.float32)
-    gc_models["video_depth_model"] = gc_models["video_depth_model"].to("cuda")
+    # Convert pipeline to float16 on GPU for better performance
+    gc_models["video_depth_model"] = gc_models["video_depth_model"].to("cuda", dtype=torch.float16)
     
     logger.info("✓ GeometryCrafter models now on GPU")
     
