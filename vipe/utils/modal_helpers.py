@@ -128,6 +128,7 @@ def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str =
     """
     from vipe.slam.system import SLAMSystem
     from vipe.utils.cameras import CameraType
+    from vipe.ext.lietorch import SE3
     
     logger.info("Pre-building SLAM components on CPU for Modal snapshot...")
     
@@ -143,6 +144,10 @@ def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str =
         "n_views": 1,
         "camera_type": CameraType(camera_type_str),
     })
+    
+    # Initialize default rig (SE3 identity for single-view)
+    # This will be overridden during actual run() with real rig
+    slam_system.rig = SE3.Identity(1)
     
     # Build all components on CPU
     slam_system._build_components_cpu()
