@@ -136,9 +136,10 @@ def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str =
     
     # Set default video dimensions and camera type to build components
     # These are typical values - actual dimensions will override during run()
+    # Note: Both dimensions must be divisible by 8 for GraphBuffer
     slam_system.config.update({
-        "height": 480,
-        "width": 854,  
+        "height": 480,  # 480 % 8 == 0 ✓
+        "width": 848,   # 848 % 8 == 0 ✓ (closest to 854)
         "n_views": 1,
         "camera_type": CameraType(camera_type_str),
     })
