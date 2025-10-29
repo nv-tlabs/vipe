@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class DefaultAnnotationPipeline(Pipeline):
-    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig, preloaded_gc_models: dict | None = None) -> None:
+    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig, preloaded_gc_models: dict | None = None, prebuilt_slam_system=None) -> None:
         super().__init__()
         self.init_cfg = init
         self.slam_cfg = slam
@@ -55,6 +55,7 @@ class DefaultAnnotationPipeline(Pipeline):
         self.out_path.mkdir(exist_ok=True, parents=True)
         self.camera_type = CameraType(self.init_cfg.camera_type)
         self.preloaded_gc_models = preloaded_gc_models  # For Modal optimization
+        self.prebuilt_slam_system = prebuilt_slam_system  # For Modal optimization
 
     def _add_init_processors(self, video_stream: VideoStream) -> ProcessedVideoStream:
         init_processors: list[StreamProcessor] = []
@@ -139,7 +140,11 @@ class DefaultAnnotationPipeline(Pipeline):
             self._add_init_processors(video_stream).cache("process", online=True) for video_stream in video_streams
         ]
 
-        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg)
+        # Use pre-built SLAM system if available (Modal optimization), otherwise create new one
+        if self.prebuilt_slam_system is not None:
+            slam_pipeline = self.prebuilt_slam_system
+        else:
+            slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg)
         slam_output = slam_pipeline.run(slam_streams, rig=slam_rig, camera_type=self.camera_type)
 
         if self.return_payload:

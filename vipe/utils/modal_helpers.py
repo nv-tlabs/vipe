@@ -18,6 +18,7 @@
 import logging
 
 import torch
+from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
@@ -110,5 +111,62 @@ def move_geometrycrafter_models_to_gpu(gc_models: dict):
     logger.info("✓ GeometryCrafter models now on GPU")
     
     return gc_models
+
+
+def prebuild_slam_components_cpu(slam_config: DictConfig):
+    """Pre-build SLAM components on CPU for Modal snapshot optimization.
+    
+    Builds SLAM models with default dimensions so they're included in the snapshot.
+    The models will be transferred to GPU after snapshot restore.
+    
+    Args:
+        slam_config: SLAM configuration from Hydra
+        
+    Returns:
+        SLAMSystem instance with components built on CPU
+    """
+    from vipe.slam.system import SLAMSystem
+    
+    logger.info("Pre-building SLAM components on CPU for Modal snapshot...")
+    
+    # Create SLAM system on CPU
+    slam_system = SLAMSystem(device=torch.device("cpu"), config=slam_config)
+    
+    # Set default video dimensions to build components
+    # These are typical values - actual dimensions will override during run()
+    slam_system.config.update({
+        "height": 480,
+        "width": 854,  
+        "n_views": 1,
+    })
+    
+    # Build all components on CPU
+    slam_system._build_components_cpu()
+    
+    logger.info("✓ SLAM components pre-built on CPU")
+    
+    return slam_system
+
+
+def move_slam_to_gpu(slam_system):
+    """Transfer pre-built SLAM components from CPU to GPU.
+    
+    Args:
+        slam_system: SLAMSystem instance from prebuild_slam_components_cpu()
+        
+    Returns:
+        SLAMSystem instance with components on GPU
+    """
+    logger.info("⚡ Moving SLAM components from CPU to GPU...")
+    
+    # Update device to GPU
+    slam_system.device = torch.device("cuda")
+    
+    # Move components to GPU
+    slam_system.move_to_gpu()
+    
+    logger.info("✓ SLAM components now on GPU")
+    
+    return slam_system
 
 
