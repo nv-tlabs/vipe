@@ -142,6 +142,7 @@ def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str =
         "height": 480,  # 480 % 8 == 0 ✓
         "width": 848,   # 848 % 8 == 0 ✓ (closest to 854)
         "n_views": 1,
+        "has_init_pose": False,  # Default: no initial pose (will be determined during run())
         "camera_type": CameraType(camera_type_str),
     })
     
