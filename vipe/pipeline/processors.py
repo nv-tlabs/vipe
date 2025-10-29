@@ -77,13 +77,14 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
         video_stream: VideoStream,
         gap_sec: float = 1.0,
         camera_type: CameraType = CameraType.PINHOLE,
+        device: torch.device = torch.device("cuda"),
     ) -> None:
         super().__init__(video_stream, gap_sec)
 
         is_pinhole = camera_type == CameraType.PINHOLE
         weights = "pinhole" if is_pinhole else "distorted"
 
-        model = GeoCalib(weights=weights).cuda()
+        model = GeoCalib(weights=weights).to(device)
         indexable_stream = CachedVideoStream(video_stream)
 
         if is_pinhole:
@@ -110,6 +111,11 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
             # Assign distortion parameter
             self.distortion = [res["camera"].dist[0, 0].item()]
 
+    def move_to_gpu(self):
+        """Move model to GPU device"""
+        if hasattr(self, 'model'):
+            self.model = self.model.to("cuda")
+
 
 class TrackAnythingProcessor(StreamProcessor):
     """
@@ -122,6 +128,7 @@ class TrackAnythingProcessor(StreamProcessor):
         add_sky: bool,
         sam_run_gap: int = 30,
         mask_expand: int = 5,
+        device: torch.device = torch.device("cuda"),
     ) -> None:
         self.mask_phrases = mask_phrases
         self.sam_run_gap = sam_run_gap
@@ -148,6 +155,12 @@ class TrackAnythingProcessor(StreamProcessor):
         frame.mask = erode(frame_instance_mask, self.mask_expand)
         return frame
 
+    def move_to_gpu(self):
+        """Move tracker to GPU device"""
+        if hasattr(self, 'tracker'):
+            # TrackAnythingPipeline doesn't support device parameter
+            pass
+
 
 class AdaptiveDepthProcessor(StreamProcessor):
     """
@@ -162,6 +175,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
         view_idx: int = 0,
         model: str = "adaptive_unidepth-l_svda",
         share_depth_model: bool = False,
+        device: torch.device = torch.device("cuda"),
+        preloaded_gc_models: dict | None = None,
     ):
         super().__init__()
         self.slam_output = slam_output
@@ -170,37 +185,46 @@ class AdaptiveDepthProcessor(StreamProcessor):
         assert not share_depth_model, "Adaptive depth processor does not support shared depth model"
         self.require_cache = True
         self.model = model
+        self.device = device
 
         try:
             prefix, metric_model, video_model = model.split("_")
             assert video_model in ["svda", "vda", "gc"]
             if video_model == "gc":
-                model_type = "diff" #TODO: provide flexibility to the user to choose the model type
-                cache_dir = "/home/afridi/Depth/GeometryCrafter/workspace/cache"
-                unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
-                    'TencentARC/GeometryCrafter',
-                    subfolder='unet_diff' if model_type == 'diff' else 'unet_determ',
-                    low_cpu_mem_usage=True,
-                    torch_dtype=torch.float16,
-                    cache_dir=cache_dir
-                ).requires_grad_(False).to("cuda", dtype=torch.float16)
-                self.point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
-                    'TencentARC/GeometryCrafter',
-                    subfolder='point_map_vae',
-                    low_cpu_mem_usage=True,
-                    torch_dtype=torch.float32,
-                    cache_dir=cache_dir
-                ).requires_grad_(False).to("cuda", dtype=torch.float32)
-                self.prior_model = MogeModel( #TODO: check if this is redundant
-                    cache_dir=cache_dir,
-                ).requires_grad_(False).to('cuda', dtype=torch.float32)
-                self.video_depth_model = GeometryCrafterDiffPipeline.from_pretrained(
-                    "stabilityai/stable-video-diffusion-img2vid-xt",
-                    unet=unet,
-                    torch_dtype=torch.float16,
-                    variant="fp16",
-                    cache_dir=cache_dir
-                ).to("cuda")
+                # Use pre-loaded models if available (Modal optimization)
+                if preloaded_gc_models is not None:
+                    logger.info("Using pre-loaded GeometryCrafter models (Modal optimized)")
+                    self.point_map_vae = preloaded_gc_models["point_map_vae"]
+                    self.prior_model = preloaded_gc_models["prior_model"]
+                    self.video_depth_model = preloaded_gc_models["video_depth_model"]
+                else:
+                    # Load models fresh (original behavior)
+                    model_type = "diff" #TODO: provide flexibility to the user to choose the model type
+                    cache_dir = "/home/afridi/Depth/GeometryCrafter/workspace/cache"
+                    unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
+                        'TencentARC/GeometryCrafter',
+                        subfolder='unet_diff' if model_type == 'diff' else 'unet_determ',
+                        low_cpu_mem_usage=True,
+                        torch_dtype=torch.float16,
+                        cache_dir=cache_dir
+                    ).requires_grad_(False).to(device, dtype=torch.float16)
+                    self.point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
+                        'TencentARC/GeometryCrafter',
+                        subfolder='point_map_vae',
+                        low_cpu_mem_usage=True,
+                        torch_dtype=torch.float32,
+                        cache_dir=cache_dir
+                    ).requires_grad_(False).to(device, dtype=torch.float32)
+                    self.prior_model = MogeModel( #TODO: check if this is redundant
+                        cache_dir=cache_dir,
+                    ).requires_grad_(False).to(device, dtype=torch.float32)
+                    self.video_depth_model = GeometryCrafterDiffPipeline.from_pretrained(
+                        "stabilityai/stable-video-diffusion-img2vid-xt",
+                        unet=unet,
+                        torch_dtype=torch.float16,
+                        variant="fp16",
+                        cache_dir=cache_dir
+                    ).to(device)
             else:
                 self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
 

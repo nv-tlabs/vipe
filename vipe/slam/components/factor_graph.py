@@ -487,6 +487,81 @@ class FactorGraph:
         ii, jj = torch.as_tensor(es, device=self.device).unbind(dim=-1)
         self.add_factors(ii, jj, remove)
 
+    def move_to_gpu(self):
+        """Move all tensors to GPU device"""
+        self.device = torch.device("cuda")
+        
+        # Move all tensor attributes to GPU
+        self.coords0 = self.coords0.to(self.device)
+        self.ii = self.ii.to(self.device)
+        self.jj = self.jj.to(self.device)
+        self.age = self.age.to(self.device)
+        self.damping = self.damping.to(self.device)
+        self.target = self.target.to(self.device)
+        self.weight = self.weight.to(self.device)
+        self.ii_inac = self.ii_inac.to(self.device)
+        self.jj_inac = self.jj_inac.to(self.device)
+        self.target_inac = self.target_inac.to(self.device)
+        self.weight_inac = self.weight_inac.to(self.device)
+        
+        # Move optional tensors if they exist
+        if self.corr is not None:
+            self.corr = self.corr.to(self.device)
+        if self.f_net is not None:
+            self.f_net = self.f_net.to(self.device)
+        if self.inp is not None:
+            self.inp = self.inp.to(self.device)
+
+    def log(self):
+        center_pos = SE3(self.buffer.poses).inv().translation()[:, :3]
+        active_edges = torch.stack([center_pos[self.ii], center_pos[self.jj]], dim=1)
+        inactive_edges = torch.stack([center_pos[self.ii_inac], center_pos[self.jj_inac]], dim=1)
+        rr.log("world/active_edges", rr.LineStrips3D(active_edges.cpu().numpy()))
+        rr.log("world/inactive_edges", rr.LineStrips3D(inactive_edges.cpu().numpy()))
+
+        self.jj = self.jj.to(self.device)
+        self.age = self.age.to(self.device)
+        self.damping = self.damping.to(self.device)
+        self.target = self.target.to(self.device)
+        self.weight = self.weight.to(self.device)
+        self.ii_inac = self.ii_inac.to(self.device)
+        self.jj_inac = self.jj_inac.to(self.device)
+        self.target_inac = self.target_inac.to(self.device)
+        self.weight_inac = self.weight_inac.to(self.device)
+        
+        # Move optional tensors if they exist
+        if self.corr is not None:
+            self.corr = self.corr.to(self.device)
+        if self.f_net is not None:
+            self.f_net = self.f_net.to(self.device)
+        if self.inp is not None:
+            self.inp = self.inp.to(self.device)
+
+    def log(self):
+        center_pos = SE3(self.buffer.poses).inv().translation()[:, :3]
+        active_edges = torch.stack([center_pos[self.ii], center_pos[self.jj]], dim=1)
+        inactive_edges = torch.stack([center_pos[self.ii_inac], center_pos[self.jj_inac]], dim=1)
+        rr.log("world/active_edges", rr.LineStrips3D(active_edges.cpu().numpy()))
+        rr.log("world/inactive_edges", rr.LineStrips3D(inactive_edges.cpu().numpy()))
+
+        self.jj = self.jj.to(self.device)
+        self.age = self.age.to(self.device)
+        self.damping = self.damping.to(self.device)
+        self.target = self.target.to(self.device)
+        self.weight = self.weight.to(self.device)
+        self.ii_inac = self.ii_inac.to(self.device)
+        self.jj_inac = self.jj_inac.to(self.device)
+        self.target_inac = self.target_inac.to(self.device)
+        self.weight_inac = self.weight_inac.to(self.device)
+        
+        # Move optional tensors if they exist
+        if self.corr is not None:
+            self.corr = self.corr.to(self.device)
+        if self.f_net is not None:
+            self.f_net = self.f_net.to(self.device)
+        if self.inp is not None:
+            self.inp = self.inp.to(self.device)
+
     def log(self):
         center_pos = SE3(self.buffer.poses).inv().translation()[:, :3]
         active_edges = torch.stack([center_pos[self.ii], center_pos[self.jj]], dim=1)

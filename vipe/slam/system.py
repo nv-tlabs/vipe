@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import uuid
 
@@ -40,6 +41,9 @@ from .components.motion_filter import MotionFilter
 from .components.sparse_tracks import build_sparse_tracks
 from .interface import SLAMOutput
 from .networks.droid_net import DroidNet
+
+
+logger = logging.getLogger(__name__)
 
 
 class StandardResizeStreamProcessor(StreamProcessor):
@@ -88,10 +92,27 @@ class SLAMSystem:
         self.visualize = config.visualize
         self.config = config.copy()
         OmegaConf.set_struct(self.config, False)
+        
+        # Flags for Modal optimization
+        self._components_built = False  # Track if components have been built
+        self._on_gpu = False  # Track if components are on GPU
 
-    def _build_components(self):
-        self.droid_net = DroidNet().to(self.device)
+    def _build_components_cpu(self):
+        """Build all components on CPU for Modal snapshot optimization.
+        
+        This is called during run() after video dimensions are known.
+        For Modal: first run builds on CPU (captured in snapshot),
+        then move_to_gpu() transfers to GPU.
+        """
+        if self._components_built:
+            return  # Already built, skip
+            
+        logger.info(f"🔧 Building SLAM components on CPU (for Modal snapshot)")
+        
+        self.droid_net = DroidNet().to("cpu")
         self.sparse_tracks = build_sparse_tracks(self.config.sparse_tracks, self.config.n_views)
+        # NOTE: GraphBuffer is always created on final target device (GPU)
+        # because it doesn't benefit from Modal snapshot (video-specific state)
         self.buffer = GraphBuffer(
             height=self.config.height,
             width=self.config.width,
@@ -102,18 +123,18 @@ class SLAMSystem:
             ba_config=self.config.ba,
             sparse_tracks=self.sparse_tracks,
             camera_type=self.config.camera_type,
-            device=self.device,
+            device=self.device,  # Use target device, not CPU
         )
         self.buffer.rig[:] = self.rig.to(self.device).data
         self.motion_filter = MotionFilter(
             self.droid_net,
             sparse_tracks=self.sparse_tracks,
             thresh=self.config.filter_thresh,
-            device=self.device,
+            device="cpu",
         )
-        self.frontend = SLAMFrontend(self.droid_net, self.buffer, self.config, device=self.device)
-        self.backend = SLAMBackend(self.droid_net, self.buffer, self.config, device=self.device)
-        self.inner_filler = InnerFiller(self.droid_net, self.buffer, self.config, device=self.device)
+        self.frontend = SLAMFrontend(self.droid_net, self.buffer, self.config, device="cpu")
+        self.backend = SLAMBackend(self.droid_net, self.buffer, self.config, device="cpu")
+        self.inner_filler = InnerFiller(self.droid_net, self.buffer, self.config, device="cpu")
 
         if self.config.keyframe_depth is not None:
             assert self.config.n_views == 1, """Currently the global scale lies in the null-space of the SLAM problem. 
@@ -133,6 +154,53 @@ class SLAMSystem:
             self.metric_depth = None
 
         self.backend.depth_model = self.metric_depth
+        self._components_built = True
+        logger.info(f"✓ SLAM components built on CPU")
+
+    def move_to_gpu(self):
+        """Move all components from CPU to GPU. Call this after Modal snapshot restore."""
+        if self._on_gpu:
+            return
+            
+        logger = logging.getLogger(__name__)
+        logger.info(f"⚡ Moving SLAM components from CPU to {self.device}")
+        
+        # Move DroidNet
+        self.droid_net = self.droid_net.to(self.device)
+        
+        # GraphBuffer is already on target device (created in _build_components_cpu)
+        # No need to recreate it
+        
+        # Update MotionFilter
+        self.motion_filter.device = self.device
+        self.motion_filter.droid_net = self.droid_net
+        
+        # Update Frontend
+        self.frontend.device = self.device
+        self.frontend.buffer = self.buffer
+        self.frontend.droid_net = self.droid_net
+        
+        # Move frontend's factor graph to GPU
+        self.frontend.graph.move_to_gpu()
+        
+        # Update Backend
+        self.backend.device = self.device
+        self.backend.buffer = self.buffer
+        self.backend.droid_net = self.droid_net
+        
+        # Update InnerFiller
+        self.inner_filler.device = self.device
+        self.inner_filler.buffer = self.buffer
+        self.inner_filler.droid_net = self.droid_net
+        
+        # Move metric depth model to GPU
+        if self.metric_depth is not None:
+            if hasattr(self.metric_depth, 'model'):
+                self.metric_depth.model = self.metric_depth.model.to(self.device)
+            self.backend.depth_model = self.metric_depth
+        
+        self._on_gpu = True
+        logger.info(f"✓ SLAM components now on {self.device}")
 
     def _add_keyframe(
         self,
@@ -230,7 +298,7 @@ class SLAMSystem:
                 record_shapes=True,
                 with_stack=True,
             ) as prof:
-                return self._run_with_profiling(video_streams, rig, camera_type, prof)
+                return self._run_with_profiling(video_streams, prof, rig, camera_type)
         else:
             return self._run_without_profiling(video_streams, rig, camera_type)
     
@@ -267,7 +335,11 @@ class SLAMSystem:
             }
         )
 
-        self._build_components()
+        # Build components on CPU (first time only, gets captured in Modal snapshot)
+        self._build_components_cpu()
+        
+        # Move components to GPU (quick transfer after Modal snapshot restore)
+        self.move_to_gpu()
 
         if self.visualize:
             rr.init("ViPE Visualization", spawn=True, recording_id=uuid.uuid4())
@@ -347,9 +419,9 @@ class SLAMSystem:
     def _run_with_profiling(
         self,
         video_streams: list[VideoStream],
+        prof: torch.profiler.profile,
         rig: SE3 | None = None,
         camera_type: CameraType = CameraType.PINHOLE,
-        prof: torch.profiler.profile,
     ) -> SLAMOutput:
         logger = logging.getLogger(__name__)
         
@@ -381,7 +453,11 @@ class SLAMSystem:
                 }
             )
 
-            self._build_components()
+            # Build components on CPU (first time only, gets captured in Modal snapshot)
+            self._build_components_cpu()
+            
+            # Move components to GPU (quick transfer after Modal snapshot restore)
+            self.move_to_gpu()
 
             if self.visualize:
                 rr.init("ViPE Visualization", spawn=True, recording_id=uuid.uuid4())

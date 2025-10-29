@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class DefaultAnnotationPipeline(Pipeline):
-    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig) -> None:
+    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig, preloaded_gc_models: dict | None = None) -> None:
         super().__init__()
         self.init_cfg = init
         self.slam_cfg = slam
@@ -54,6 +54,7 @@ class DefaultAnnotationPipeline(Pipeline):
         self.out_path = Path(self.out_cfg.path)
         self.out_path.mkdir(exist_ok=True, parents=True)
         self.camera_type = CameraType(self.init_cfg.camera_type)
+        self.preloaded_gc_models = preloaded_gc_models  # For Modal optimization
 
     def _add_init_processors(self, video_stream: VideoStream) -> ProcessedVideoStream:
         init_processors: list[StreamProcessor] = []
@@ -88,7 +89,14 @@ class DefaultAnnotationPipeline(Pipeline):
             )
         ]
         if (depth_align_model := self.post_cfg.depth_align_model) is not None:
-            post_processors.append(AdaptiveDepthProcessor(slam_output, view_idx, depth_align_model))
+            post_processors.append(
+                AdaptiveDepthProcessor(
+                    slam_output, 
+                    view_idx, 
+                    depth_align_model,
+                    preloaded_gc_models=self.preloaded_gc_models
+                )
+            )
         return ProcessedVideoStream(video_stream, post_processors)
 
     def run(self, video_data: VideoStream | MultiviewVideoList) -> AnnotationPipelineOutput:
