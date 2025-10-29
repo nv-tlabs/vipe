@@ -69,6 +69,7 @@ def load_geometrycrafter_models_cpu(cache_dir: str = "/home/afridi/Depth/Geometr
     logger.info("  Loading MoGe prior...")
     prior_model = MogeModel(
         cache_dir=cache_dir,
+        device="cpu",  # Keep on CPU for Modal snapshot
     ).requires_grad_(False).to('cpu', dtype=torch.float32)
     
     # Load full pipeline on CPU (use float32 to avoid CPU float16 issues)

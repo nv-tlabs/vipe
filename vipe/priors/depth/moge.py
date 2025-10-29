@@ -37,14 +37,15 @@ def focal_length_to_fov_degrees(focal_length: float, image_width: float) -> floa
 class MogeModel(DepthEstimationModel,nn.Module):
     """https://github.com/microsoft/MoGe"""
 
-    def __init__(self, cache_dir: str|None = None) -> None:
+    def __init__(self, cache_dir: str|None = None, device: str = "cuda") -> None:
         super().__init__()
         if MoGeModel is None:
             raise RuntimeError(
                 "moge is not found in the environment. You can install it via pip install `git+https://github.com/microsoft/MoGe.git`"
             )
         self.model = MoGeModel.from_pretrained("Ruicheng/moge-vitl", cache_dir=cache_dir)
-        self.model = self.model.cuda().eval()
+        self.device = device
+        self.model = self.model.to(device).eval()
 
     @property
     def depth_type(self) -> DepthType:
@@ -63,7 +64,7 @@ class MogeModel(DepthEstimationModel,nn.Module):
             batch_dim = True
 
         w = rgb.shape[2]
-        input_image_for_depth = rgb.moveaxis(-1, 1)
+        input_image_for_depth = rgb.moveaxis(-1, 1).to(self.device)
 
         # MoGe inference
         moge_input_dict = {"fov_x": focal_length_to_fov_degrees(focal_length, w)}
