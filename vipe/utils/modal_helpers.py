@@ -158,25 +158,50 @@ def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str =
     return slam_system
 
 
-def move_slam_to_gpu(slam_system):
-    """Transfer pre-built SLAM components from CPU to GPU.
+def preload_slam_models_cpu():
+    """Pre-load SLAM models (DroidNet) on CPU for Modal snapshot optimization.
+    
+    Only loads the heavy neural network models, not video-specific components
+    like GraphBuffer which depend on video dimensions and must be created fresh
+    for each video.
+    
+    Returns:
+        dict: Dictionary containing pre-loaded models
+            - 'droid_net': DroidNet model on CPU
+    """
+    from vipe.slam.networks.droid_net import DroidNet
+    
+    logger.info("Pre-loading SLAM models (DroidNet) on CPU for Modal snapshot...")
+    
+    # Load DroidNet on CPU - this is the heavy model (~200MB)
+    droid_net = DroidNet().to("cpu")
+    
+    models = {
+        'droid_net': droid_net,
+    }
+    
+    logger.info("✓ SLAM models pre-loaded on CPU")
+    
+    return models
+
+
+def move_slam_models_to_gpu(slam_models: dict):
+    """Transfer pre-loaded SLAM models from CPU to GPU.
     
     Args:
-        slam_system: SLAMSystem instance from prebuild_slam_components_cpu()
+        slam_models: Dictionary from preload_slam_models_cpu()
         
     Returns:
-        SLAMSystem instance with components on GPU
+        dict: Dictionary with models moved to GPU
     """
-    logger.info("⚡ Moving SLAM components from CPU to GPU...")
+    logger.info("⚡ Moving SLAM models from CPU to GPU...")
     
-    # Update device to GPU
-    slam_system.device = torch.device("cuda")
+    moved_models = {}
+    if 'droid_net' in slam_models:
+        moved_models['droid_net'] = slam_models['droid_net'].to("cuda")
     
-    # Move components to GPU
-    slam_system.move_to_gpu()
+    logger.info("✓ SLAM models moved to GPU")
     
-    logger.info("✓ SLAM components now on GPU")
-    
-    return slam_system
+    return moved_models
 
 

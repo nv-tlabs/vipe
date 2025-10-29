@@ -87,11 +87,14 @@ class StandardResizeStreamProcessor(StreamProcessor):
 class SLAMSystem:
     """Solver-defined SLAM"""
 
-    def __init__(self, device: torch.device, config: DictConfig) -> None:
+    def __init__(self, device: torch.device, config: DictConfig, preloaded_models: dict | None = None) -> None:
         self.device = device
         self.visualize = config.visualize
         self.config = config.copy()
         OmegaConf.set_struct(self.config, False)
+        
+        # Store preloaded models for Modal optimization
+        self.preloaded_models = preloaded_models
         
         # Flags for Modal optimization
         self._components_built = False  # Track if components have been built
@@ -109,7 +112,12 @@ class SLAMSystem:
             
         logger.info(f"🔧 Building SLAM components on CPU (for Modal snapshot)")
         
-        self.droid_net = DroidNet().to("cpu")
+        # Use preloaded DroidNet if available (Modal optimization), otherwise create new
+        if self.preloaded_models and 'droid_net' in self.preloaded_models:
+            logger.info("Using preloaded DroidNet model")
+            self.droid_net = self.preloaded_models['droid_net']
+        else:
+            self.droid_net = DroidNet().to("cpu")
         self.sparse_tracks = build_sparse_tracks(self.config.sparse_tracks, self.config.n_views)
         # NOTE: GraphBuffer is always created on final target device (GPU)
         # because it doesn't benefit from Modal snapshot (video-specific state)
