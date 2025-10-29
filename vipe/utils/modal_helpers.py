@@ -113,7 +113,7 @@ def move_geometrycrafter_models_to_gpu(gc_models: dict):
     return gc_models
 
 
-def prebuild_slam_components_cpu(slam_config: DictConfig):
+def prebuild_slam_components_cpu(slam_config: DictConfig, camera_type_str: str = "pinhole"):
     """Pre-build SLAM components on CPU for Modal snapshot optimization.
     
     Builds SLAM models with default dimensions so they're included in the snapshot.
@@ -121,23 +121,26 @@ def prebuild_slam_components_cpu(slam_config: DictConfig):
     
     Args:
         slam_config: SLAM configuration from Hydra
+        camera_type_str: Camera type string (default: "pinhole")
         
     Returns:
         SLAMSystem instance with components built on CPU
     """
     from vipe.slam.system import SLAMSystem
+    from vipe.utils.cameras import CameraType
     
     logger.info("Pre-building SLAM components on CPU for Modal snapshot...")
     
     # Create SLAM system on CPU
     slam_system = SLAMSystem(device=torch.device("cpu"), config=slam_config)
     
-    # Set default video dimensions to build components
+    # Set default video dimensions and camera type to build components
     # These are typical values - actual dimensions will override during run()
     slam_system.config.update({
         "height": 480,
         "width": 854,  
         "n_views": 1,
+        "camera_type": CameraType(camera_type_str),
     })
     
     # Build all components on CPU
