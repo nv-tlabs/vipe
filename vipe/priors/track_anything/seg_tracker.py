@@ -10,12 +10,12 @@ from .segmentor import Segmentor
 
 
 class SegTracker:
-    def __init__(self, segtracker_args, sam_args, aot_args) -> None:
+    def __init__(self, segtracker_args, sam_args, aot_args, preloaded_sam=None, preloaded_aot=None) -> None:
         """
         Initialize SAM and AOT.
         """
-        self.sam = Segmentor(sam_args)
-        self.tracker = get_aot(aot_args)
+        self.sam = Segmentor(sam_args, preloaded_sam=preloaded_sam)
+        self.tracker = get_aot(aot_args, preloaded_model=preloaded_aot)
         self.detector = Detector(self.sam.device)
         self.sam_gap = segtracker_args["sam_gap"]
         self.min_area = segtracker_args["min_area"]

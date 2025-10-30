@@ -25,11 +25,12 @@ from .models.unidepthv2.unidepthv2 import Pinhole, UniDepthV2
 
 
 class UniDepth2Model(DepthEstimationModel):
-    def __init__(self, type: Literal["s", "b", "l"] = "l") -> None:
+    def __init__(self, type: Literal["s", "b", "l"] = "l", device: str = "cuda") -> None:
         super().__init__()
         self.model = UniDepthV2.from_pretrained(f"lpiccinelli/unidepth-v2-vit{type}14")
         self.model.interpolation_mode = "bilinear"
-        self.model = self.model.cuda().eval()
+        self.device = device
+        self.model = self.model.to(device).eval()
 
     @property
     def depth_type(self) -> DepthType:

@@ -18,10 +18,18 @@ from .aot.utils.checkpoint import load_network
 
 
 class AOTTracker(object):
-    def __init__(self, cfg, gpu_id=0):
+    def __init__(self, cfg, gpu_id=0, device="cuda", preloaded_model=None):
         self.gpu_id = gpu_id
-        self.model = build_vos_model(cfg.MODEL_VOS, cfg).cuda(gpu_id)
-        self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id)
+        self.device = device
+        if preloaded_model is not None:
+            self.model = preloaded_model.to(device)
+        else:
+            self.model = build_vos_model(cfg.MODEL_VOS, cfg)
+            if device == "cuda":
+                self.model = self.model.cuda(gpu_id)
+            else:
+                self.model = self.model.to(device)
+            self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id if device == "cuda" else device)
         self.engine = build_engine(
             cfg.MODEL_ENGINE,
             phase="eval",
@@ -180,11 +188,12 @@ class DeAOTTrackerInferEngine(DeAOTInferEngine):
         self.update_size()
 
 
-def get_aot(args):
+def get_aot(args, preloaded_model=None):
     # build vos engine
     cfg = engine_config.EngineConfig(args["phase"])
     cfg.TEST_CKPT_PATH = args["model_path"]
     cfg.TEST_LONG_TERM_MEM_GAP = args["long_term_mem_gap"]
     cfg.MAX_LEN_LONG_TERM = args["max_len_long_term"]
-    tracker = AOTTracker(cfg, args["gpu_id"])
+    device = "cuda" if args["gpu_id"] == 0 else f"cuda:{args['gpu_id']}"
+    tracker = AOTTracker(cfg, args["gpu_id"], device=device, preloaded_model=preloaded_model)
     return tracker

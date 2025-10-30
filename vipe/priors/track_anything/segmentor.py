@@ -9,16 +9,20 @@ from .sam import SamAutomaticMaskGenerator, sam_model_registry
 
 
 class Segmentor:
-    def __init__(self, sam_args):
+    def __init__(self, sam_args, preloaded_sam=None):
         """
         sam_args:
             sam_checkpoint: path of SAM checkpoint
             generator_args: args for everything_generator
             gpu_id: device
+        preloaded_sam: Pre-loaded SAM model (for Modal optimization)
         """
         self.device = sam_args["gpu_id"]
-        self.sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
-        self.sam.to(device=self.device)
+        if preloaded_sam is not None:
+            self.sam = preloaded_sam.to(device=self.device)
+        else:
+            self.sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
+            self.sam.to(device=self.device)
         self.everything_generator = SamAutomaticMaskGenerator(model=self.sam, **sam_args["generator_args"])
         self.interactive_predictor = self.everything_generator.predictor
         self.have_embedded = False

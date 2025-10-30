@@ -129,6 +129,8 @@ class TrackAnythingProcessor(StreamProcessor):
         sam_run_gap: int = 30,
         mask_expand: int = 5,
         device: torch.device = torch.device("cuda"),
+        preloaded_sam=None,
+        preloaded_aot=None,
     ) -> None:
         self.mask_phrases = mask_phrases
         self.sam_run_gap = sam_run_gap
@@ -137,7 +139,13 @@ class TrackAnythingProcessor(StreamProcessor):
         if self.add_sky:
             self.mask_phrases.append(VideoFrame.SKY_PROMPT)
 
-        self.tracker = TrackAnythingPipeline(self.mask_phrases, sam_points_per_side=50, sam_run_gap=self.sam_run_gap)
+        self.tracker = TrackAnythingPipeline(
+            self.mask_phrases, 
+            sam_points_per_side=50, 
+            sam_run_gap=self.sam_run_gap,
+            preloaded_sam=preloaded_sam,
+            preloaded_aot=preloaded_aot
+        )
         self.mask_expand = mask_expand
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
@@ -177,6 +185,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
         share_depth_model: bool = False,
         device: torch.device = torch.device("cuda"),
         preloaded_gc_models: dict | None = None,
+        preloaded_unidepth=None,
     ):
         super().__init__()
         self.slam_output = slam_output
@@ -235,7 +244,12 @@ class AdaptiveDepthProcessor(StreamProcessor):
 
         assert prefix == "adaptive", "Model name should start with 'adaptive_'"
 
-        self.depth_model = make_depth_model(metric_model)
+        # Use pre-loaded UniDepthV2 if available (Modal optimization)
+        if preloaded_unidepth is not None:
+            logger.info("Using pre-loaded UniDepthV2 model (Modal optimized)")
+            self.depth_model = preloaded_unidepth
+        else:
+            self.depth_model = make_depth_model(metric_model)
         self.prompt_model = PriorDAModel()
         self.update_momentum = 0.99
 

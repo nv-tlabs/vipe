@@ -205,3 +205,107 @@ def move_slam_models_to_gpu(slam_models: dict):
     return moved_models
 
 
+def load_unidepth_model_cpu(model_type: str = "l"):
+    """Load UniDepthV2 on CPU for Modal snapshot.
+    
+    This loads the UniDepthV2 model on CPU (captured in Modal snapshot), then it
+    can be quickly transferred to GPU after snapshot restore. This model is shared
+    between SLAM (keyframe depth) and AdaptiveDepthProcessor (metric depth) to
+    avoid loading it twice.
+    
+    Args:
+        model_type: Model size - "s" (small), "b" (base), or "l" (large)
+        
+    Returns:
+        UniDepth2Model instance on CPU
+    """
+    from vipe.priors.depth.unidepth import UniDepth2Model
+    
+    logger.info(f"Loading UniDepthV2-{model_type} on CPU for Modal snapshot...")
+    model = UniDepth2Model(type=model_type, device="cpu")
+    logger.info("✓ UniDepthV2 loaded on CPU")
+    
+    return model
+
+
+def move_unidepth_to_gpu(model):
+    """Move UniDepthV2 from CPU to GPU.
+    
+    Args:
+        model: UniDepth2Model instance from load_unidepth_model_cpu()
+        
+    Returns:
+        UniDepth2Model instance on GPU
+    """
+    logger.info("⚡ Moving UniDepthV2 from CPU to GPU...")
+    model.model = model.model.to("cuda")
+    model.device = "cuda"
+    logger.info("✓ UniDepthV2 moved to GPU")
+    
+    return model
+
+
+def load_trackanything_models_cpu():
+    """Load SAM and AOT models on CPU for Modal snapshot.
+    
+    This loads the TrackAnything models (SAM for segmentation, AOT for tracking)
+    on CPU, so they're captured in the Modal snapshot and can be quickly moved
+    to GPU after snapshot restore.
+    
+    Returns:
+        dict: Dictionary containing pre-loaded models
+            - 'sam': SAM model on CPU
+            - 'aot': AOT model on CPU
+    """
+    import torch
+    from pathlib import Path
+    from vipe.priors.track_anything.sam import sam_model_registry
+    from vipe.priors.track_anything.aot import config as engine_config
+    from vipe.priors.track_anything.aot.networks.models import build_vos_model
+    
+    logger.info("Loading TrackAnything models on CPU for Modal snapshot...")
+    
+    # Load SAM on CPU
+    logger.info("  Loading SAM...")
+    sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
+    sam_model = sam_model_registry["vit_b"](checkpoint=str(sam_ckpt_path))
+    sam_model = sam_model.to("cpu")
+    logger.info("  ✓ SAM loaded")
+    
+    # Load AOT on CPU
+    logger.info("  Loading AOT...")
+    aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
+    cfg = engine_config.EngineConfig("PRE_YTB_DAV")
+    cfg.TEST_CKPT_PATH = str(aot_ckpt_path)
+    aot_model = build_vos_model(cfg.MODEL_VOS, cfg)
+    # Load checkpoint weights on CPU
+    # Note: weights_only=False is needed for older checkpoints with numpy types
+    checkpoint = torch.load(str(aot_ckpt_path), map_location="cpu", weights_only=False)
+    # Training checkpoints have nested structure - extract just the model state dict
+    if "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    aot_model.load_state_dict(checkpoint)
+    logger.info("  ✓ AOT loaded")
+    
+    logger.info("✓ TrackAnything models loaded on CPU")
+    
+    return {"sam": sam_model, "aot": aot_model}
+
+
+def move_trackanything_to_gpu(models_dict):
+    """Move TrackAnything models from CPU to GPU.
+    
+    Args:
+        models_dict: Dictionary from load_trackanything_models_cpu()
+        
+    Returns:
+        dict: Dictionary with models moved to GPU
+    """
+    logger.info("⚡ Moving TrackAnything models from CPU to GPU...")
+    models_dict["sam"] = models_dict["sam"].to("cuda")
+    models_dict["aot"] = models_dict["aot"].to("cuda")
+    logger.info("✓ TrackAnything models moved to GPU")
+    
+    return models_dict
+
+

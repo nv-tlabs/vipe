@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class DefaultAnnotationPipeline(Pipeline):
-    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig, preloaded_gc_models: dict | None = None, preloaded_slam_models: dict | None = None) -> None:
+    def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig, preloaded_gc_models: dict | None = None, preloaded_slam_models: dict | None = None, preloaded_unidepth=None, preloaded_sam=None, preloaded_aot=None) -> None:
         super().__init__()
         self.init_cfg = init
         self.slam_cfg = slam
@@ -56,6 +56,9 @@ class DefaultAnnotationPipeline(Pipeline):
         self.camera_type = CameraType(self.init_cfg.camera_type)
         self.preloaded_gc_models = preloaded_gc_models  # For Modal optimization
         self.preloaded_slam_models = preloaded_slam_models  # For Modal optimization (DroidNet)
+        self.preloaded_unidepth = preloaded_unidepth  # For Modal optimization (UniDepthV2)
+        self.preloaded_sam = preloaded_sam  # For Modal optimization (SAM)
+        self.preloaded_aot = preloaded_aot  # For Modal optimization (AOT)
 
     def _add_init_processors(self, video_stream: VideoStream) -> ProcessedVideoStream:
         init_processors: list[StreamProcessor] = []
@@ -74,6 +77,8 @@ class DefaultAnnotationPipeline(Pipeline):
                     self.init_cfg.instance.phrases,
                     add_sky=self.init_cfg.instance.add_sky,
                     sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    preloaded_sam=self.preloaded_sam,
+                    preloaded_aot=self.preloaded_aot,
                 )
             )
         return ProcessedVideoStream(video_stream, init_processors)
@@ -95,7 +100,8 @@ class DefaultAnnotationPipeline(Pipeline):
                     slam_output, 
                     view_idx, 
                     depth_align_model,
-                    preloaded_gc_models=self.preloaded_gc_models
+                    preloaded_gc_models=self.preloaded_gc_models,
+                    preloaded_unidepth=self.preloaded_unidepth
                 )
             )
         return ProcessedVideoStream(video_stream, post_processors)
