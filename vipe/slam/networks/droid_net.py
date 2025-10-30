@@ -540,8 +540,10 @@ class DroidNet(nn.Module):
                 fuzzy=True,
             )
 
+        # Load checkpoint with map_location to handle CPU/GPU loading
+        device = next(self.parameters()).device if len(list(self.parameters())) > 0 else torch.device("cpu")
         state_dict = OrderedDict(
-            [(k.replace("module.", ""), v) for (k, v) in torch.load(ckpt_path, weights_only=True).items()]
+            [(k.replace("module.", ""), v) for (k, v) in torch.load(ckpt_path, weights_only=True, map_location=device).items()]
         )
 
         state_dict["update.weight.2.weight"] = state_dict["update.weight.2.weight"][:2]
