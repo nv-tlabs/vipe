@@ -147,7 +147,11 @@ class DefaultAnnotationPipeline(Pipeline):
         ]
 
         # Create SLAM system (pass preloaded models if available for Modal optimization)
-        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, preloaded_models=self.preloaded_slam_models)
+        # Combine SLAM models (DroidNet) with UniDepthV2 for keyframe depth
+        preloaded_slam = self.preloaded_slam_models.copy() if self.preloaded_slam_models else {}
+        if self.preloaded_unidepth is not None:
+            preloaded_slam['unidepth'] = self.preloaded_unidepth
+        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, preloaded_models=preloaded_slam)
         slam_output = slam_pipeline.run(slam_streams, rig=slam_rig, camera_type=self.camera_type)
 
         if self.return_payload:
@@ -213,7 +217,11 @@ class DefaultAnnotationPipeline(Pipeline):
             ]
 
         with record_function("SLAM_pipeline_execution"):
-            slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, preloaded_models=self.preloaded_slam_models)
+            # Combine SLAM models (DroidNet) with UniDepthV2 for keyframe depth
+            preloaded_slam = self.preloaded_slam_models.copy() if self.preloaded_slam_models else {}
+            if self.preloaded_unidepth is not None:
+                preloaded_slam['unidepth'] = self.preloaded_unidepth
+            slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, preloaded_models=preloaded_slam)
             slam_output = slam_pipeline.run(slam_streams, rig=slam_rig, camera_type=self.camera_type)
 
         if self.return_payload:

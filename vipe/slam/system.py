@@ -149,7 +149,13 @@ class SLAMSystem:
             Adding more views requires adding factors to the graph to keep the null-space. 
             This is currently not supported for now."""
 
-            self.metric_depth = make_depth_model(self.config.keyframe_depth)
+            # Use preloaded UniDepthV2 if available (Modal optimization), otherwise create new
+            if self.preloaded_models and 'unidepth' in self.preloaded_models:
+                logger.info("Using preloaded UniDepthV2 model (Modal optimized)")
+                self.metric_depth = self.preloaded_models['unidepth']
+            else:
+                self.metric_depth = make_depth_model(self.config.keyframe_depth)
+            
             if self.config.camera_type not in self.metric_depth.supported_camera_types:
                 self.metric_depth = PinholeDepthAdapter(self.metric_depth)
 
