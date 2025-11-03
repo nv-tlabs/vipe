@@ -97,16 +97,35 @@ def read_binary_format(binary_path: Path):
         poses_inv_array = np.cumsum(poses_inv_delta, axis=0)
         print(f"Poses inverse (world2cam): shape={poses_inv_array.shape}, encoding={poses_inv_info.get('encoding', 'raw')}")
         
-        # Verify poses are inverses
-        identity_check = np.matmul(poses_array[0], poses_inv_array[0])
+        # Verify poses are inverses (check middle frame for better test)
+        test_idx = len(poses_array) // 2
+        identity_check = np.matmul(poses_array[test_idx], poses_inv_array[test_idx])
         identity_error = np.abs(identity_check - np.eye(4)).max()
-        print(f"  Pose inverse check: max error = {identity_error:.8f} {'✓' if identity_error < 1e-5 else '✗'}")
+        print(f"  Pose inverse check (frame {test_idx}): max error = {identity_error:.8f} {'✓' if identity_error < 1e-5 else '✗'}")
         
         # Metadata
         print(f"\n=== Metadata ===")
         meta = header['meta']
         for key, value in meta.items():
             print(f"{key}: {value}")
+        
+        # Compression summary
+        print(f"\n=== Compression Summary ===")
+        total_compressed = len(data_blob)
+        T, H, W = depth_shape
+        
+        # Calculate uncompressed sizes
+        rgb_uncompressed = T * H * W * 3  # uint8
+        depth_uncompressed = T * H * W * 2  # float16
+        intr_uncompressed = T * 3 * 3 * 8  # float64
+        poses_uncompressed = T * 4 * 4 * 4  # float32
+        poses_inv_uncompressed = T * 4 * 4 * 4  # float32
+        total_uncompressed = rgb_uncompressed + depth_uncompressed + intr_uncompressed + poses_uncompressed + poses_inv_uncompressed
+        
+        print(f"Total uncompressed: {total_uncompressed / (1024**2):.1f} MB")
+        print(f"Total compressed: {total_compressed / (1024**2):.1f} MB")
+        print(f"Compression ratio: {(1 - total_compressed / total_uncompressed) * 100:.1f}% reduction")
+        print(f"File size on disk: {binary_path.stat().st_size / (1024**2):.1f} MB")
         
         print("\n✅ Binary format validation successful!")
         return True
