@@ -159,14 +159,14 @@ class ArtifactPath:
 
 
 def save_pose_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
-    # Save OpenCV cam2world matrices as 4x4 matrix in npz file
+    # Save OpenCV cam2world matrices as binary file
     # Also compute and save world2cam (inverse) matrices
     if gt:
         pose_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.POSE)
-        path = out_path.eval_gt_pose_path
+        base_path = out_path.base_path / "pose"
     else:
         pose_list = cached_final_stream.get_stream_attribute(FrameAttribute.POSE)
-        path = out_path.pose_path
+        base_path = out_path.base_path / "pose"
 
     pose_list = [
         (frame_idx, pose_data.matrix().cpu().numpy())
@@ -174,14 +174,28 @@ def save_pose_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream
         if pose_data is not None
     ]
     if len(pose_list) > 0:
-        pose_data = np.stack([pose for _, pose in pose_list], axis=0)
+        pose_data = np.stack([pose for _, pose in pose_list], axis=0).astype(np.float32)
         pose_inds = np.array([frame_idx for frame_idx, _ in pose_list])
         
         # Compute inverse poses (world2cam)
         poses_inv = np.linalg.inv(pose_data.astype(np.float64)).astype(np.float32)
         
-        path.parent.mkdir(exist_ok=True, parents=True)
-        np.savez(path, data=pose_data, inds=pose_inds, poses_inv=poses_inv)
+        base_path.mkdir(exist_ok=True, parents=True)
+        
+        # Save cam2world poses
+        pose_data.tofile(base_path / "poses.bin")
+        
+        # Save world2cam poses
+        poses_inv.tofile(base_path / "poses_inv.bin")
+        
+        # Save metadata
+        metadata = {
+            "shape": pose_data.shape,
+            "dtype": "float32",
+            "frame_indices": pose_inds.tolist()
+        }
+        with open(base_path / "poses_meta.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
 
 
 def read_pose_artifacts(npz_file_path: Path) -> tuple[np.ndarray, SE3]:
@@ -201,16 +215,16 @@ def read_pose_artifacts_benchmark(npz_file_path: Path) -> dict:
 
 
 def save_intrinsics_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
-    # Save intrinsics as [fx, fy, cx, cy] in npz file
+    # Save intrinsics as [fx, fy, cx, cy] in binary file
     if gt:
         intrinsics_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.INTRINSICS)
         camera_type_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.CAMERA_TYPE)
-        intr_path = out_path.eval_gt_intrinsics_path
+        base_path = out_path.base_path / "intrinsics"
         camera_type_path = out_path.eval_gt_camera_type_path
     else:
         intrinsics_list = cached_final_stream.get_stream_attribute(FrameAttribute.INTRINSICS)
         camera_type_list = cached_final_stream.get_stream_attribute(FrameAttribute.CAMERA_TYPE)
-        intr_path = out_path.intrinsics_path
+        base_path = out_path.base_path / "intrinsics"
         camera_type_path = out_path.camera_type_path
 
     intrinsics_list = [
@@ -219,10 +233,22 @@ def save_intrinsics_artifacts(out_path: ArtifactPath, cached_final_stream: Video
         if intr_data is not None
     ]
     if len(intrinsics_list) > 0:
-        intrinsics_data = np.stack([intrinsics for _, intrinsics in intrinsics_list], axis=0)
+        intrinsics_data = np.stack([intrinsics for _, intrinsics in intrinsics_list], axis=0).astype(np.float32)
         intrinsics_inds = np.array([frame_idx for frame_idx, _ in intrinsics_list])
-        intr_path.parent.mkdir(exist_ok=True, parents=True)
-        np.savez(intr_path, data=intrinsics_data, inds=intrinsics_inds)
+        base_path.mkdir(exist_ok=True, parents=True)
+        
+        # Save intrinsics as binary
+        intrinsics_data.tofile(base_path / "intrinsics.bin")
+        
+        # Save metadata
+        metadata = {
+            "shape": intrinsics_data.shape,
+            "dtype": "float32",
+            "format": "[fx, fy, cx, cy] per frame",
+            "frame_indices": intrinsics_inds.tolist()
+        }
+        with open(base_path / "intrinsics_meta.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
 
     camera_type_list = [
         (frame_idx, camera_type_data)
@@ -561,23 +587,28 @@ def save_manifest(out_path: ArtifactPath, cached_final_stream: VideoStream) -> N
                 "description": "Zipped fp16 binary files with shape.txt"
             },
             "poses": {
-                "file": "pose/pose.npz",
+                "file": "pose/poses.bin",
+                "meta_file": "pose/poses_meta.json",
                 "dtype": "float32",
                 "shape": [0, 4, 4],
-                "description": "cam2world transforms (OpenCV convention)"
+                "byte_order": "little",
+                "description": "cam2world transforms (OpenCV convention) - raw binary float32"
             },
             "poses_inv": {
-                "file": "pose/pose.npz",
-                "key": "poses_inv",
+                "file": "pose/poses_inv.bin",
+                "meta_file": "pose/poses_meta.json",
                 "dtype": "float32",
                 "shape": [0, 4, 4],
-                "description": "world2cam transforms (computed as inverse)"
+                "byte_order": "little",
+                "description": "world2cam transforms (computed as inverse) - raw binary float32"
             },
             "intrinsics": {
-                "file": "intrinsics/intrinsics.npz",
-                "dtype": "float64",
+                "file": "intrinsics/intrinsics.bin",
+                "meta_file": "intrinsics/intrinsics_meta.json",
+                "dtype": "float32",
                 "shape": [0, 4],
-                "description": "camera intrinsics per frame [fx, fy, cx, cy]"
+                "byte_order": "little",
+                "description": "camera intrinsics per frame [fx, fy, cx, cy] - raw binary float32"
             }
         },
         "metadata": {}
