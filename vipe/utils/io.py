@@ -621,7 +621,7 @@ def save_manifest(out_path: ArtifactPath, cached_final_stream: VideoStream) -> N
     
     T = len(frames)
     first_frame = frames[0]
-    H, W = first_frame.rgb.shape[1], first_frame.rgb.shape[2]
+    H, W = first_frame.rgb.shape[0], first_frame.rgb.shape[1]
     
     # Update frame counts and resolution
     manifest["data"]["rgb"]["frame_count"] = T
