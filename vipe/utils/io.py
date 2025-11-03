@@ -13,9 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gzip
+import json
 import logging
+import struct
 import tempfile
 import zipfile
+
+try:
+    import zstandard as zstd
+    HAS_ZSTD = True
+except ImportError:
+    HAS_ZSTD = False
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +87,10 @@ class ArtifactPath:
     @property
     def meta_info_path(self) -> Path:
         return self.base_path / "vipe" / f"{self.artifact_name}_info.pkl"
+
+    @property
+    def binary_path(self) -> Path:
+        return self.base_path / "binary" / f"{self.artifact_name}.bin"
 
     @classmethod
     def glob_artifacts(cls, base_path: Path, use_video: bool = False) -> Iterator["ArtifactPath"]:
@@ -252,7 +265,7 @@ def read_rgb_artifacts(rgb_file_path: Path) -> Iterator[tuple[int, torch.Tensor]
 
 
 def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
-    # Save metric depth as zipped exr files.
+    # Save metric depth as zipped fp16 binary files.
     if gt:
         metric_depth_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.METRIC_DEPTH)
         path = out_path.eval_gt_depth_path
@@ -268,48 +281,59 @@ def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStrea
     if len(metric_depth_list) > 0:
         path.parent.mkdir(exist_ok=True, parents=True)
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            # Save shape metadata
+            if len(metric_depth_list) > 0:
+                first_depth = metric_depth_list[0][1]
+                shape_str = f"{first_depth.shape[0]},{first_depth.shape[1]}"
+                z.writestr("shape.txt", shape_str)
+            
             for frame_idx, metric_depth in metric_depth_list:
-                height, width = metric_depth.shape
-                header = OpenEXR.Header(width, height)
-                header["channels"] = {"Z": Imath.Channel(Imath.PixelType(Imath.PixelType.HALF))}
-                with tempfile.NamedTemporaryFile(suffix=".exr") as f:
-                    exr = OpenEXR.OutputFile(f.name, header)
-                    exr.writePixels({"Z": metric_depth.astype(np.float16).tobytes()})
-                    exr.close()
-                    z.write(f.name, f"{frame_idx:05d}.exr")
+                # Save as raw fp16 binary
+                depth_bytes = metric_depth.astype(np.float16).tobytes()
+                z.writestr(f"{frame_idx:05d}.bin", depth_bytes)
 
 
 def read_depth_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
     """
-    Read metric depth from zipped exr files.
+    Read metric depth from zipped fp16 binary files.
     """
     valid_width, valid_height = 0, 0
     with zipfile.ZipFile(zip_file_path, "r") as z:
+        # Read shape metadata first
+        if "shape.txt" in z.namelist():
+            with z.open("shape.txt") as f:
+                shape_str = f.read().decode("utf-8")
+                valid_height, valid_width = map(int, shape_str.split(","))
+        
         for file_name in sorted(z.namelist()):
+            if file_name == "shape.txt":
+                continue
+            
             frame_idx = int(file_name.split(".")[0])
             with z.open(file_name) as f:
                 try:
-                    exr = OpenEXR.InputFile(f)
-                except OSError:
-                    # Sometimes EXR loader might fail, we return all nan maps.
-                    logger.warning(f"Failed to load EXR file {zip_file_path}-{file_name}. Returning all nan maps.")
-                    assert valid_width > 0 and valid_height > 0
-                    yield (
-                        frame_idx,
-                        torch.full(
-                            (valid_height, valid_width),
-                            float("nan"),
-                            dtype=torch.float32,
-                        ),
-                    )
-                    continue
-                header = exr.header()
-                dw = header["dataWindow"]
-                valid_width = width = dw.max.x - dw.min.x + 1
-                valid_height = height = dw.max.y - dw.min.y + 1
-                channels = exr.channels(["Z"])
-                depth_data = np.frombuffer(channels[0], dtype=np.float16).reshape((height, width))
-                yield frame_idx, torch.from_numpy(depth_data.copy()).float()
+                    depth_bytes = f.read()
+                    depth_data = np.frombuffer(depth_bytes, dtype=np.float16)
+                    
+                    if valid_width > 0 and valid_height > 0:
+                        depth_data = depth_data.reshape((valid_height, valid_width))
+                    else:
+                        raise ValueError(f"Shape metadata not found in {zip_file_path}")
+                    
+                    yield frame_idx, torch.from_numpy(depth_data.copy()).float()
+                except Exception as e:
+                    logger.warning(f"Failed to load depth file {zip_file_path}-{file_name}: {e}. Returning all nan maps.")
+                    if valid_width > 0 and valid_height > 0:
+                        yield (
+                            frame_idx,
+                            torch.full(
+                                (valid_height, valid_width),
+                                float("nan"),
+                                dtype=torch.float32,
+                            ),
+                        )
+                    else:
+                        raise ValueError(f"Cannot determine shape for depth frame {frame_idx}")
 
 
 def read_instance_artifacts(
@@ -339,6 +363,179 @@ def read_instance_phrases(instance_phrase_path: Path) -> dict[int, str]:
     return instance_phrases
 
 
+def save_binary_artifacts(
+    out_path: ArtifactPath,
+    cached_final_stream: VideoStream,
+    rgb_format: str = "webp",
+    rgb_quality: int = 95,
+) -> None:
+    """Save RGB, depth, poses, and intrinsics in a single binary file with JSON header."""
+    # Collect all frame data
+    rgb_list = []
+    depth_list = []
+    pose_list = []
+    intrinsics_list = []
+    
+    for frame_data in cached_final_stream:
+        assert isinstance(frame_data, VideoFrame)
+        
+        # RGB
+        rgb = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
+        rgb_list.append(rgb)
+        
+        # Depth
+        if frame_data.metric_depth is not None:
+            depth = frame_data.metric_depth.cpu().numpy().astype(np.float16)
+        else:
+            depth = np.full(rgb.shape[:2], float('nan'), dtype=np.float16)
+        depth_list.append(depth)
+        
+        # Pose
+        if frame_data.pose is not None:
+            pose = frame_data.pose.matrix().cpu().numpy().astype(np.float32)
+        else:
+            pose = np.eye(4, dtype=np.float32)
+        pose_list.append(pose)
+        
+        # Intrinsics - convert from [fx, fy, cx, cy] to 3x3 matrix
+        if frame_data.intrinsics is not None:
+            intr = frame_data.intrinsics.cpu().numpy()
+            fx, fy, cx, cy = intr[0], intr[1], intr[2], intr[3]
+            intrinsics_mat = np.array([
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1]
+            ], dtype=np.float64)
+        else:
+            intrinsics_mat = np.eye(3, dtype=np.float64)
+        intrinsics_list.append(intrinsics_mat)
+    
+    if len(rgb_list) == 0:
+        logger.warning("No frames to save in binary format")
+        return
+    
+    # Stack all arrays
+    rgb_array = np.stack(rgb_list, axis=0)  # [T, H, W, 3]
+    depth_array = np.stack(depth_list, axis=0)  # [T, H, W]
+    intrinsics_array = np.stack(intrinsics_list, axis=0)  # [T, 3, 3]
+    poses_array = np.stack(pose_list, axis=0)  # [T, 4, 4]
+    
+    # Compute inverse poses
+    poses_inv_array = np.linalg.inv(poses_array).astype(np.float32)  # [T, 4, 4]
+    
+    # Compute metadata
+    T, H, W = rgb_array.shape[:3]
+    depth_valid = depth_array[~np.isnan(depth_array)]
+    depth_range = [float(depth_valid.min()), float(depth_valid.max())] if len(depth_valid) > 0 else [0.0, 1.0]
+    
+    # Compute FOV from first frame intrinsics
+    fx, fy = intrinsics_array[0, 0, 0], intrinsics_array[0, 1, 1]
+    cx, cy = intrinsics_array[0, 0, 2], intrinsics_array[0, 1, 2]
+    fov_x = float(2 * np.arctan(W / (2 * fx)) * 180 / np.pi)
+    fov_y = float(2 * np.arctan(H / (2 * fy)) * 180 / np.pi)
+    
+    # Get FPS
+    fps = cached_final_stream.fps()
+    
+    data_blob = b""
+    offsets = {}
+    
+    def compress_array(data: bytes) -> bytes:
+        if HAS_ZSTD:
+            return zstd.ZstdCompressor(level=19, threads=-1).compress(data)
+        return gzip.compress(data, compresslevel=9)
+    
+    # RGB compression
+    rgb_format_lower = rgb_format.lower()
+    rgb_compressed_frames = []
+    
+    if rgb_format_lower == "webp":
+        try:
+            success, _ = cv2.imencode('.webp', rgb_array[0], [cv2.IMWRITE_WEBP_QUALITY, rgb_quality])
+            if not success:
+                raise RuntimeError("WebP not available")
+            for i in range(T):
+                _, buf = cv2.imencode('.webp', rgb_array[i], [cv2.IMWRITE_WEBP_QUALITY, rgb_quality])
+                rgb_compressed_frames.append(buf.tobytes())
+            compression_type = "webp"
+        except:
+            rgb_format_lower = "jpeg"
+    
+    if rgb_format_lower == "jpeg":
+        for i in range(T):
+            _, buf = cv2.imencode('.jpg', rgb_array[i], [cv2.IMWRITE_JPEG_QUALITY, rgb_quality])
+            rgb_compressed_frames.append(buf.tobytes())
+        compression_type = "jpeg"
+    elif rgb_format_lower == "png":
+        for i in range(T):
+            _, buf = cv2.imencode('.png', rgb_array[i], [cv2.IMWRITE_PNG_COMPRESSION, 9])
+            rgb_compressed_frames.append(buf.tobytes())
+        compression_type = "png"
+    
+    offsets["rgb"] = {
+        "offset": len(data_blob),
+        "dtype": "uint8",
+        "shape": [T, H, W, 3],
+        "compression": compression_type,
+        "quality": rgb_quality if compression_type != "png" else None,
+        "frame_offsets": []
+    }
+    
+    for frame_data in rgb_compressed_frames:
+        offsets["rgb"]["frame_offsets"].append(len(data_blob))
+        data_blob += struct.pack('<I', len(frame_data))  # Frame size
+        data_blob += frame_data
+    offsets["rgb"]["length"] = len(data_blob) - offsets["rgb"]["offset"]
+    
+    # Depth
+    offsets["depth"] = {"offset": len(data_blob), "dtype": "float16", "shape": [T, H, W]}
+    depth_bytes = compress_array(depth_array.tobytes())
+    offsets["depth"]["length"] = len(depth_bytes)
+    data_blob += depth_bytes
+    
+    # Intrinsics
+    offsets["intrinsics"] = {"offset": len(data_blob), "dtype": "float64", "shape": [T, 3, 3]}
+    intrinsics_bytes = compress_array(intrinsics_array.tobytes())
+    offsets["intrinsics"]["length"] = len(intrinsics_bytes)
+    data_blob += intrinsics_bytes
+    
+    # Poses (delta encoded)
+    offsets["poses"] = {"offset": len(data_blob), "dtype": "float32", "shape": [T, 4, 4], "encoding": "delta"}
+    poses_delta = np.diff(poses_array, axis=0, prepend=poses_array[:1])
+    poses_bytes = compress_array(poses_delta.tobytes())
+    offsets["poses"]["length"] = len(poses_bytes)
+    data_blob += poses_bytes
+    
+    # Poses inverse (delta encoded)
+    offsets["poses_inv"] = {"offset": len(data_blob), "dtype": "float32", "shape": [T, 4, 4], "encoding": "delta"}
+    poses_inv_delta = np.diff(poses_inv_array, axis=0, prepend=poses_inv_array[:1])
+    poses_inv_bytes = compress_array(poses_inv_delta.tobytes())
+    offsets["poses_inv"]["length"] = len(poses_inv_bytes)
+    data_blob += poses_inv_bytes
+    
+    header = {
+        **offsets,
+        "meta": {
+            "depth_range": depth_range,
+            "total_frames": T,
+            "resolution": [W, H],
+            "base_fps": fps,
+            "fov": fov_y,
+            "fov_x": fov_x,
+            "original_aspect_ratio": float(W / H),
+            "fixed_aspect_ratio": float(W / H),
+        }
+    }
+    
+    header_json = json.dumps(header, separators=(',', ':')).encode('utf-8')
+    out_path.binary_path.parent.mkdir(exist_ok=True, parents=True)
+    
+    with out_path.binary_path.open('wb') as f:
+        f.write(struct.pack('<I', len(header_json)))
+        f.write(header_json)
+        f.write(data_blob)
+
+
 def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
     """
     Save each attribute independently.
@@ -353,8 +550,11 @@ def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> 
     # Save original RGB as H264-encoded video.
     save_rgb_artifacts(out_path, cached_final_stream)
 
-    # Save metric depth as zipped exr files.
+    # Save metric depth as zipped fp16 binary files.
     save_depth_artifacts(out_path, cached_final_stream)
+
+    # Save binary format (RGB + depth + poses + intrinsics in single file)
+    save_binary_artifacts(out_path, cached_final_stream)
 
     # Save Instance mask as zipped PNG files.
     instance_list = [
