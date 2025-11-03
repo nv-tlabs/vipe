@@ -160,6 +160,7 @@ class ArtifactPath:
 
 def save_pose_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
     # Save OpenCV cam2world matrices as 4x4 matrix in npz file
+    # Also compute and save world2cam (inverse) matrices
     if gt:
         pose_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.POSE)
         path = out_path.eval_gt_pose_path
@@ -175,8 +176,12 @@ def save_pose_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream
     if len(pose_list) > 0:
         pose_data = np.stack([pose for _, pose in pose_list], axis=0)
         pose_inds = np.array([frame_idx for frame_idx, _ in pose_list])
+        
+        # Compute inverse poses (world2cam)
+        poses_inv = np.linalg.inv(pose_data.astype(np.float64)).astype(np.float32)
+        
         path.parent.mkdir(exist_ok=True, parents=True)
-        np.savez(path, data=pose_data, inds=pose_inds)
+        np.savez(path, data=pose_data, inds=pose_inds, poses_inv=poses_inv)
 
 
 def read_pose_artifacts(npz_file_path: Path) -> tuple[np.ndarray, SE3]:
@@ -536,9 +541,105 @@ def save_binary_artifacts(
         f.write(data_blob)
 
 
+def save_manifest(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
+    """Save manifest.json with metadata and file structure."""
+    manifest = {
+        "format_version": "1.0",
+        "data": {
+            "rgb": {
+                "format": "mp4",
+                "file": "rgb/rgb.mp4",
+                "frame_count": 0,
+                "resolution": [0, 0]
+            },
+            "depth": {
+                "format": "fp16_binary_zipped",
+                "file": "depth/depth.zip",
+                "frame_count": 0,
+                "dtype": "float16",
+                "units": "meters",
+                "description": "Zipped fp16 binary files with shape.txt"
+            },
+            "poses": {
+                "file": "pose/pose.npz",
+                "dtype": "float32",
+                "shape": [0, 4, 4],
+                "description": "cam2world transforms (OpenCV convention)"
+            },
+            "poses_inv": {
+                "file": "pose/pose.npz",
+                "key": "poses_inv",
+                "dtype": "float32",
+                "shape": [0, 4, 4],
+                "description": "world2cam transforms (computed as inverse)"
+            },
+            "intrinsics": {
+                "file": "intrinsics/intrinsics.npz",
+                "dtype": "float64",
+                "shape": [0, 4],
+                "description": "camera intrinsics per frame [fx, fy, cx, cy]"
+            }
+        },
+        "metadata": {}
+    }
+    
+    # Collect frame data to compute metadata
+    frames = list(cached_final_stream)
+    if not frames:
+        return
+    
+    T = len(frames)
+    first_frame = frames[0]
+    H, W = first_frame.rgb.shape[1], first_frame.rgb.shape[2]
+    
+    # Update frame counts and resolution
+    manifest["data"]["rgb"]["frame_count"] = T
+    manifest["data"]["rgb"]["resolution"] = [W, H]
+    manifest["data"]["depth"]["frame_count"] = T
+    manifest["data"]["poses"]["shape"] = [T, 4, 4]
+    manifest["data"]["poses_inv"]["shape"] = [T, 4, 4]
+    manifest["data"]["intrinsics"]["shape"] = [T, 4]
+    
+    # Compute metadata
+    depth_values = []
+    for frame in frames:
+        if frame.metric_depth is not None:
+            depth_valid = frame.metric_depth[~torch.isnan(frame.metric_depth)]
+            if len(depth_valid) > 0:
+                depth_values.extend(depth_valid.cpu().numpy().tolist())
+    
+    if depth_values:
+        manifest["metadata"]["depth_range"] = [float(min(depth_values)), float(max(depth_values))]
+    else:
+        manifest["metadata"]["depth_range"] = [0.0, 1.0]
+    
+    manifest["metadata"]["total_frames"] = T
+    manifest["metadata"]["resolution"] = [W, H]
+    manifest["metadata"]["base_fps"] = cached_final_stream.fps()
+    
+    # Compute FOV from first frame intrinsics
+    if first_frame.intrinsics is not None:
+        intr = first_frame.intrinsics.cpu().numpy()
+        fx, fy = intr[0], intr[1]
+        fov_x = float(2 * np.arctan(W / (2 * fx)) * 180 / np.pi)
+        fov_y = float(2 * np.arctan(H / (2 * fy)) * 180 / np.pi)
+        manifest["metadata"]["fov_x"] = fov_x
+        manifest["metadata"]["fov_y"] = fov_y
+    
+    manifest["metadata"]["aspect_ratio"] = float(W / H)
+    
+    # Save manifest
+    manifest_path = out_path.base_path / "manifest.json"
+    manifest_path.parent.mkdir(exist_ok=True, parents=True)
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
+    
+    logger.info(f"Saved manifest to {manifest_path}")
+
+
 def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
     """
-    Save each attribute independently.
+    Save each attribute independently with manifest.json.
     """
 
     # Save OpenCV cam2world matrices as 4x4 matrix in npz file
@@ -553,8 +654,8 @@ def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> 
     # Save metric depth as zipped fp16 binary files.
     save_depth_artifacts(out_path, cached_final_stream)
 
-    # Save binary format (RGB + depth + poses + intrinsics in single file)
-    save_binary_artifacts(out_path, cached_final_stream)
+    # Save manifest.json with metadata
+    save_manifest(out_path, cached_final_stream)
 
     # Save Instance mask as zipped PNG files.
     instance_list = [
