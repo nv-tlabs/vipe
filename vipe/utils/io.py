@@ -295,8 +295,25 @@ def read_rgb_artifacts(rgb_file_path: Path) -> Iterator[tuple[int, torch.Tensor]
         yield frame_idx, rgb
 
 
-def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
-    # Save metric depth as zipped fp16 binary files.
+def save_depth_artifacts(
+    out_path: ArtifactPath, 
+    cached_final_stream: VideoStream, 
+    gt: bool = False,
+    quantize: bool = False,
+    max_depth: float = 100.0,
+    image_format: str = "webp"
+) -> None:
+    """
+    Save metric depth artifacts.
+    
+    Args:
+        out_path: Output path
+        cached_final_stream: Video stream with depth data
+        gt: Whether this is ground truth data
+        quantize: If True, quantize depth to uint16 and save as images (PNG/WebP)
+        max_depth: Maximum depth value for quantization (meters)
+        image_format: Image format for quantized depth ("png" or "webp")
+    """
     if gt:
         metric_depth_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.METRIC_DEPTH)
         path = out_path.eval_gt_depth_path
@@ -309,49 +326,116 @@ def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStrea
         for frame_idx, depth_data in enumerate(metric_depth_list)
         if depth_data is not None
     ]
-    if len(metric_depth_list) > 0:
-        path.parent.mkdir(exist_ok=True, parents=True)
+    
+    if len(metric_depth_list) == 0:
+        return
+        
+    path.parent.mkdir(exist_ok=True, parents=True)
+    
+    if quantize:
+        # Quantize depth to uint16 and save as images
+        import cv2
+        
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-            # Save shape metadata
-            if len(metric_depth_list) > 0:
-                first_depth = metric_depth_list[0][1]
-                shape_str = f"{first_depth.shape[0]},{first_depth.shape[1]}"
-                z.writestr("shape.txt", shape_str)
+            first_depth = metric_depth_list[0][1]
+            shape_str = f"{first_depth.shape[0]},{first_depth.shape[1]}"
+            
+            # Save metadata
+            metadata = {
+                "shape": shape_str,
+                "format": "quantized_uint16",
+                "image_format": image_format,
+                "max_depth": max_depth,
+                "scale": 65535.0 / max_depth
+            }
+            z.writestr("metadata.json", json.dumps(metadata, indent=2))
             
             for frame_idx, metric_depth in metric_depth_list:
-                # Save as raw fp16 binary
+                # Clip and quantize to uint16
+                depth_clipped = np.clip(metric_depth, 0, max_depth)
+                depth_quantized = (depth_clipped / max_depth * 65535.0).astype(np.uint16)
+                
+                # Save as image
+                if image_format.lower() == "webp":
+                    # WebP lossless for uint16
+                    success, buf = cv2.imencode('.webp', depth_quantized, [cv2.IMWRITE_WEBP_QUALITY, 101])
+                    if not success:
+                        # Fallback to PNG
+                        _, buf = cv2.imencode('.png', depth_quantized, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                        ext = "png"
+                    else:
+                        ext = "webp"
+                else:
+                    _, buf = cv2.imencode('.png', depth_quantized, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                    ext = "png"
+                
+                z.writestr(f"{frame_idx:05d}.{ext}", buf.tobytes())
+    else:
+        # Save as raw fp16 binary files
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            first_depth = metric_depth_list[0][1]
+            shape_str = f"{first_depth.shape[0]},{first_depth.shape[1]}"
+            z.writestr("shape.txt", shape_str)
+            
+            for frame_idx, metric_depth in metric_depth_list:
                 depth_bytes = metric_depth.astype(np.float16).tobytes()
                 z.writestr(f"{frame_idx:05d}.bin", depth_bytes)
 
 
 def read_depth_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
     """
-    Read metric depth from zipped fp16 binary files.
+    Read metric depth from zipped files (fp16 binary or quantized images).
     """
+    import cv2
+    
     valid_width, valid_height = 0, 0
+    is_quantized = False
+    max_depth = 100.0
+    
     with zipfile.ZipFile(zip_file_path, "r") as z:
-        # Read shape metadata first
-        if "shape.txt" in z.namelist():
+        # Check for quantized format
+        if "metadata.json" in z.namelist():
+            with z.open("metadata.json") as f:
+                metadata = json.load(f)
+                is_quantized = metadata.get("format") == "quantized_uint16"
+                max_depth = metadata.get("max_depth", 100.0)
+                shape_str = metadata.get("shape", "0,0")
+                valid_height, valid_width = map(int, shape_str.split(","))
+        elif "shape.txt" in z.namelist():
             with z.open("shape.txt") as f:
                 shape_str = f.read().decode("utf-8")
                 valid_height, valid_width = map(int, shape_str.split(","))
         
         for file_name in sorted(z.namelist()):
-            if file_name == "shape.txt":
+            if file_name in ["shape.txt", "metadata.json"]:
                 continue
             
             frame_idx = int(file_name.split(".")[0])
             with z.open(file_name) as f:
                 try:
-                    depth_bytes = f.read()
-                    depth_data = np.frombuffer(depth_bytes, dtype=np.float16)
-                    
-                    if valid_width > 0 and valid_height > 0:
-                        depth_data = depth_data.reshape((valid_height, valid_width))
+                    if is_quantized:
+                        # Read quantized image and convert back to float
+                        img_bytes = f.read()
+                        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+                        depth_quantized = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+                        
+                        if depth_quantized is None:
+                            raise ValueError(f"Failed to decode image {file_name}")
+                        
+                        # Convert back to metric depth
+                        depth_data = depth_quantized.astype(np.float32) / 65535.0 * max_depth
+                        yield frame_idx, torch.from_numpy(depth_data.copy()).float()
                     else:
-                        raise ValueError(f"Shape metadata not found in {zip_file_path}")
-                    
-                    yield frame_idx, torch.from_numpy(depth_data.copy()).float()
+                        # Read raw fp16 binary
+                        depth_bytes = f.read()
+                        depth_data = np.frombuffer(depth_bytes, dtype=np.float16)
+                        
+                        if valid_width > 0 and valid_height > 0:
+                            depth_data = depth_data.reshape((valid_height, valid_width))
+                        else:
+                            raise ValueError(f"Shape metadata not found in {zip_file_path}")
+                        
+                        yield frame_idx, torch.from_numpy(depth_data.copy()).float()
                 except Exception as e:
                     logger.warning(f"Failed to load depth file {zip_file_path}-{file_name}: {e}. Returning all nan maps.")
                     if valid_width > 0 and valid_height > 0:
@@ -668,9 +752,22 @@ def save_manifest(out_path: ArtifactPath, cached_final_stream: VideoStream) -> N
     logger.info(f"Saved manifest to {manifest_path}")
 
 
-def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
+def save_artifacts(
+    out_path: ArtifactPath, 
+    cached_final_stream: VideoStream,
+    quantize_depth: bool = False,
+    max_depth: float = 100.0,
+    depth_image_format: str = "webp"
+) -> None:
     """
     Save each attribute independently with manifest.json.
+    
+    Args:
+        out_path: Output path
+        cached_final_stream: Video stream with data
+        quantize_depth: If True, quantize depth to uint16 and save as images
+        max_depth: Maximum depth value for quantization (meters)
+        depth_image_format: Image format for quantized depth ("png" or "webp")
     """
 
     # Save OpenCV cam2world matrices as 4x4 matrix in npz file
@@ -682,8 +779,14 @@ def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> 
     # Save original RGB as H264-encoded video.
     save_rgb_artifacts(out_path, cached_final_stream)
 
-    # Save metric depth as zipped fp16 binary files.
-    save_depth_artifacts(out_path, cached_final_stream)
+    # Save metric depth (fp16 binary or quantized images)
+    save_depth_artifacts(
+        out_path, 
+        cached_final_stream, 
+        quantize=quantize_depth,
+        max_depth=max_depth,
+        image_format=depth_image_format
+    )
 
     # Save manifest.json with metadata
     save_manifest(out_path, cached_final_stream)

@@ -168,7 +168,13 @@ class DefaultAnnotationPipeline(Pipeline):
             artifact_path.meta_info_path.parent.mkdir(exist_ok=True, parents=True)
             if self.out_cfg.save_artifacts:
                 logger.info(f"Saving artifacts to {artifact_path}")
-                io.save_artifacts(artifact_path, output_stream)
+                io.save_artifacts(
+                    artifact_path, 
+                    output_stream,
+                    quantize_depth=self.out_cfg.get("quantize_depth", False),
+                    max_depth=self.out_cfg.get("max_depth", 100.0),
+                    depth_image_format=self.out_cfg.get("depth_image_format", "webp")
+                )
                 with artifact_path.meta_info_path.open("wb") as f:
                     pickle.dump({"ba_residual": slam_output.ba_residual}, f)
 
@@ -240,7 +246,13 @@ class DefaultAnnotationPipeline(Pipeline):
                 artifact_path.meta_info_path.parent.mkdir(exist_ok=True, parents=True)
                 if self.out_cfg.save_artifacts:
                     logger.info(f"Saving artifacts to {artifact_path}")
-                    io.save_artifacts(artifact_path, output_stream)
+                    io.save_artifacts(
+                        artifact_path, 
+                        output_stream,
+                        quantize_depth=self.out_cfg.get("quantize_depth", False),
+                        max_depth=self.out_cfg.get("max_depth", 100.0),
+                        depth_image_format=self.out_cfg.get("depth_image_format", "webp")
+                    )
                     with artifact_path.meta_info_path.open("wb") as f:
                         pickle.dump({"ba_residual": slam_output.ba_residual}, f)
 

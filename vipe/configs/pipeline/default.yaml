@@ -38,6 +38,11 @@ output:
   # Save artifacts and a info file
   save_artifacts: false
 
+  # Depth quantization settings
+  quantize_depth: false
+  max_depth: 100.0
+  depth_image_format: "webp"  # "webp" or "png"
+
   # Save reconstruction from SLAM
   save_slam_map: false
 
