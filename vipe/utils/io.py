@@ -391,15 +391,16 @@ def save_depth_artifacts(
             for frame_idx, metric_depth in metric_depth_list:
                 depth_clipped = np.clip(metric_depth, min_depth, max_depth)
                 depth_rgb = pack_depth_24bit(depth_clipped, min_depth, max_depth)
+                depth_bgr = cv2.cvtColor(depth_rgb, cv2.COLOR_RGB2BGR)
                 
                 ext = "webp" if image_format.lower() == "webp" else "png"
                 if ext == "webp":
-                    success, buf = cv2.imencode('.webp', depth_rgb, [cv2.IMWRITE_WEBP_QUALITY, 101])
+                    success, buf = cv2.imencode('.webp', depth_bgr, [cv2.IMWRITE_WEBP_QUALITY, 101])
                     if not success:
-                        _, buf = cv2.imencode('.png', depth_rgb, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                        _, buf = cv2.imencode('.png', depth_bgr, [cv2.IMWRITE_PNG_COMPRESSION, 9])
                         ext = "png"
                 else:
-                    _, buf = cv2.imencode('.png', depth_rgb, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                    _, buf = cv2.imencode('.png', depth_bgr, [cv2.IMWRITE_PNG_COMPRESSION, 9])
                 
                 z.writestr(f"{frame_idx:05d}.{ext}", buf.tobytes())
     else:
@@ -460,15 +461,16 @@ def save_depth_frames_individual(
         for frame_idx, metric_depth in metric_depth_list:
             depth_clipped = np.clip(metric_depth, min_depth, max_depth)
             depth_rgb = pack_depth_24bit(depth_clipped, min_depth, max_depth)
+            depth_bgr = cv2.cvtColor(depth_rgb, cv2.COLOR_RGB2BGR)
             
             ext = "webp" if image_format.lower() == "webp" else "png"
             if ext == "webp":
-                success, buf = cv2.imencode('.webp', depth_rgb, [cv2.IMWRITE_WEBP_QUALITY, 101])
+                success, buf = cv2.imencode('.webp', depth_bgr, [cv2.IMWRITE_WEBP_QUALITY, 101])
                 if not success:
-                    _, buf = cv2.imencode('.png', depth_rgb, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                    _, buf = cv2.imencode('.png', depth_bgr, [cv2.IMWRITE_PNG_COMPRESSION, 9])
                     ext = "png"
             else:
-                _, buf = cv2.imencode('.png', depth_rgb, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+                _, buf = cv2.imencode('.png', depth_bgr, [cv2.IMWRITE_PNG_COMPRESSION, 9])
             
             with open(depth_dir / f"{frame_idx:05d}.{ext}", 'wb') as f:
                 f.write(buf.tobytes())
@@ -529,8 +531,9 @@ def read_depth_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tenso
                         
                         # Convert back to metric depth
                         if is_rgb24:
-                            # 24-bit RGB encoding
-                            depth_data = unpack_depth_24bit(depth_encoded, min_depth, max_depth)
+                            # 24-bit RGB encoding (OpenCV reads as BGR, convert to RGB)
+                            depth_rgb = cv2.cvtColor(depth_encoded, cv2.COLOR_BGR2RGB)
+                            depth_data = unpack_depth_24bit(depth_rgb, min_depth, max_depth)
                         else:
                             # Legacy uint16 encoding
                             depth_data = depth_encoded.astype(np.float32) / 65535.0 * max_depth
