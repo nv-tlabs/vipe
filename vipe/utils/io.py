@@ -352,8 +352,7 @@ def save_depth_artifacts(
     depth_bytes = depth_array.astype(np.float16).tobytes()
     compressed_bytes = zlib.compress(depth_bytes, level=zlib_level)
     
-    # Save metadata + compressed data
-    output_path = path.with_suffix('.bin.zlib')
+    # Save metadata + compressed data (path already has .bin.zlib extension)
     metadata = {
         "format": "fp16_zlib",
         "shape": [T, H, W],
@@ -363,7 +362,7 @@ def save_depth_artifacts(
         "compressed_size": len(compressed_bytes)
     }
     
-    with open(output_path, 'wb') as f:
+    with open(path, 'wb') as f:
         metadata_json = json.dumps(metadata).encode('utf-8')
         f.write(struct.pack('I', len(metadata_json)))
         f.write(metadata_json)
@@ -607,10 +606,11 @@ def save_manifest(
         "format_version": "1.0",
         "data": {
             "rgb": {
-                "format": "mp4",
-                "file": "rgb/rgb.mp4",
+                "format": "webp_frames",
+                "directory": f"rgb/{out_path.artifact_name}/",
                 "frame_count": 0,
-                "resolution": [0, 0]
+                "resolution": [0, 0],
+                "description": "Individual WebP frames (00000.webp, 00001.webp, ...)"
             },
             "depth": depth_format_info,
             "poses": {
@@ -698,11 +698,12 @@ def save_manifest(
 def save_artifacts(
     out_path: ArtifactPath, 
     cached_final_stream: VideoStream,
-    zlib_level: int = 6
+    zlib_level: int = 6,
+    rgb_quality: int = 95
 ) -> None:
     save_pose_artifacts(out_path, cached_final_stream)
     save_intrinsics_artifacts(out_path, cached_final_stream)
-    save_rgb_artifacts(out_path, cached_final_stream)
+    save_rgb_frames_as_webp(out_path, cached_final_stream, quality=rgb_quality)
     save_depth_artifacts(out_path, cached_final_stream, zlib_level=zlib_level)
     save_manifest(out_path, cached_final_stream)
 
