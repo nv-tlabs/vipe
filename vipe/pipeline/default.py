@@ -171,11 +171,7 @@ class DefaultAnnotationPipeline(Pipeline):
                 io.save_artifacts(
                     artifact_path, 
                     output_stream,
-                    quantize_depth=self.out_cfg.get("quantize_depth", False),
-                    max_depth=self.out_cfg.get("max_depth", 100.0),
-                    depth_image_format=self.out_cfg.get("depth_image_format", "webp"),
-                    save_individual_files=self.out_cfg.get("save_individual_files", False),
-                    rgb_webp_quality=self.out_cfg.get("rgb_webp_quality", 95)
+                    zlib_level=self.out_cfg.get("zlib_level", 6)
                 )
                 with artifact_path.meta_info_path.open("wb") as f:
                     pickle.dump({"ba_residual": slam_output.ba_residual}, f)
@@ -251,11 +247,7 @@ class DefaultAnnotationPipeline(Pipeline):
                     io.save_artifacts(
                         artifact_path, 
                         output_stream,
-                        quantize_depth=self.out_cfg.get("quantize_depth", False),
-                        max_depth=self.out_cfg.get("max_depth", 100.0),
-                        depth_image_format=self.out_cfg.get("depth_image_format", "webp"),
-                        save_individual_files=self.out_cfg.get("save_individual_files", False),
-                        rgb_webp_quality=self.out_cfg.get("rgb_webp_quality", 95)
+                        zlib_level=self.out_cfg.get("zlib_level", 6)
                     )
                     with artifact_path.meta_info_path.open("wb") as f:
                         pickle.dump({"ba_residual": slam_output.ba_residual}, f)
