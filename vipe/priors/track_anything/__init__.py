@@ -65,15 +65,15 @@ class TrackAnythingPipeline:
         self.sam_run_gap = sam_run_gap
         # Use flashpack caching for faster loading
         if use_flashpack:
-            flash_start = time.time()
+            flash_start = time.perf_counter()
             sam_ckpt_path, aot_ckpt_path = self._setup_flashpack_checkpoints(
                 sam_ckpt_path=sam_ckpt_path,
                 aot_ckpt_path=aot_ckpt_path,
                 flashpack_cache_dir=flashpack_cache_dir
             )
-            print(f"Flashpack checkpoint setup took {time.time() - flash_start:.2f}s")
+            print(f"Flashpack checkpoint setup took {time.perf_counter() - flash_start:.2f}s")
 
-        segtracker_start = time.time()
+        segtracker_start = time.perf_counter()
         self.segtracker = SegTracker(
             segtracker_args={
                 "sam_gap": sam_run_gap,  # the interval to run sam to segment new objects
@@ -107,14 +107,14 @@ class TrackAnythingPipeline:
             preloaded_sam=preloaded_sam,
             preloaded_aot=preloaded_aot,
         )
-        print(f"SegTracker initialization took {time.time() - segtracker_start:.2f}s")
+        print(f"SegTracker initialization took {time.perf_counter() - segtracker_start:.2f}s")
 
-        restart_start = time.time()
+        restart_start = time.perf_counter()
         self.segtracker.restart_tracker()
-        print(f"Tracker restart took {time.time() - restart_start:.2f}s")
+        print(f"Tracker restart took {time.perf_counter() - restart_start:.2f}s")
 
         self.instance_phrase = {0: "background"}
-        print(f"TrackAnythingPipeline total init took {time.time() - overall_start:.2f}s")
+        print(f"TrackAnythingPipeline total init took {time.perf_counter() - overall_start:.2f}s")
 
     def _setup_flashpack_checkpoints(
         self,
@@ -145,7 +145,7 @@ class TrackAnythingPipeline:
         sam_config_path = flashpack_cache_dir / "sam_config.json"
         if not sam_flashpack_path.exists() and sam_ckpt_path.exists():
             print("Creating flashpack for SAM model...")
-            start = time.time()
+            start = time.perf_counter()
             # Build SAM model and load weights
             sam_model = sam_model_registry["vit_b"](checkpoint=str(sam_ckpt_path))
             # Save config for later
@@ -161,7 +161,7 @@ class TrackAnythingPipeline:
             # Wrap and save as flashpack
             wrapped_sam = FlashPackSAMWrapper(sam_model)
             wrapped_sam.save_flashpack(str(sam_flashpack_path), target_dtype=torch.float32)
-            print(f"SAM flashpack creation took {time.time() - start:.2f}s")
+            print(f"SAM flashpack creation took {time.perf_counter() - start:.2f}s")
             del wrapped_sam, sam_model
             torch.cuda.empty_cache()
 
