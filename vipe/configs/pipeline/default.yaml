@@ -41,7 +41,11 @@ output:
   # Depth quantization settings (24-bit RGB encoding)
   quantize_depth: false
   max_depth: 100.0
-  depth_image_format: "webp"  # "webp" or "png"
+  depth_image_format: "webp"
+  
+  # Individual file output
+  save_individual_files: false
+  rgb_webp_quality: 95
 
   # Save reconstruction from SLAM
   save_slam_map: false
