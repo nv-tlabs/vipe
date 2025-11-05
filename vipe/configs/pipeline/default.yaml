@@ -38,7 +38,7 @@ output:
   # Save artifacts and a info file
   save_artifacts: false
 
-  # Depth quantization settings
+  # Depth quantization settings (24-bit RGB encoding)
   quantize_depth: false
   max_depth: 100.0
   depth_image_format: "webp"  # "webp" or "png"
