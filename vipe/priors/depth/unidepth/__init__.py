@@ -14,8 +14,11 @@
 # limitations under the License.
 
 from typing import Literal
-
+import os
+from pathlib import Path
+import time
 import torch
+from flashpack import FlashPackMixin
 
 from vipe.utils.misc import unpack_optional
 from vipe.utils.cameras import CameraType
@@ -23,11 +26,59 @@ from vipe.utils.cameras import CameraType
 from ..base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 from .models.unidepthv2.unidepthv2 import Pinhole, UniDepthV2
 
-
+class FlashPackUniDepthV2(UniDepthV2, FlashPackMixin):
+    """FlashPack-enabled version of UniDepthV2 for faster model loading."""
+    pass
 class UniDepth2Model(DepthEstimationModel):
-    def __init__(self, type: Literal["s", "b", "l"] = "l", device: str = "cuda") -> None:
+    def __init__(self, type: Literal["s", "b", "l"] = "l", flashpack_cache_dir: Path = None, use_flashpack: bool = True, device: str = "cuda") -> None:
         super().__init__()
-        self.model = UniDepthV2.from_pretrained(f"lpiccinelli/unidepth-v2-vit{type}14")
+        model_name = f"lpiccinelli/unidepth-v2-vit{type}14"
+        start_time = time.time()
+        if use_flashpack:
+            # Setup flashpack cache directory
+            if flashpack_cache_dir is None:
+                flashpack_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "vipe_unidepth_flashpack")
+            os.makedirs(flashpack_cache_dir, exist_ok=True)
+
+            save_dir = os.path.join(flashpack_cache_dir, f"unidepth-v2-vit{type}14")
+            os.makedirs(save_dir, exist_ok=True)
+            model_path = os.path.join(save_dir, "model.flashpack")
+            config_path = os.path.join(save_dir, "config.json")
+
+            # If flashpack doesn't exist, create it
+            if not os.path.exists(model_path):
+                print(f"Creating flashpack for {model_name}...")
+                initial_model = FlashPackUniDepthV2.from_pretrained(model_name)
+
+                # Save config for later loading
+                initial_model._save_pretrained(Path(save_dir))
+
+                initial_model.save_flashpack(model_path, target_dtype=torch.float16)
+                del initial_model
+                torch.cuda.empty_cache()
+
+            # Load config and create model from flashpack
+            print(f"Loading {model_name} from flashpack...")
+            # Load the config from the saved directory
+            from huggingface_hub import hf_hub_download
+            import json
+
+            if not os.path.exists(config_path):
+                config_path = hf_hub_download(repo_id=model_name, filename="config.json")
+
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            self.model = FlashPackUniDepthV2.from_flashpack(
+                model_path,
+                config=config,
+                device="cuda" if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            # Original loading method
+            self.model = UniDepthV2.from_pretrained(model_name)
+        end_time = time.time()
+        print(f"Time taken to load unidepthv2 model: {end_time - start_time} seconds")
         self.model.interpolation_mode = "bilinear"
         self.device = device
         self.model = self.model.to(device).eval()

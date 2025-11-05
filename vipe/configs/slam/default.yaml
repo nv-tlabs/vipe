@@ -44,7 +44,7 @@ map_filter_thresh: 0.05
 visualize: false
 # Use keyframe depth for recovering metric depth
 keyframe_depth: metric3d-small
-
+use_flashpack: true 
 ba:
   dense_disp_alpha: 0.001
 

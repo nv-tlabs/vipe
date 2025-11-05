@@ -100,7 +100,7 @@ class SLAMSystem:
         self._components_built = False  # Track if components have been built
         self._on_gpu = False  # Track if components are on GPU
 
-    def _build_components_cpu(self):
+    def _build_components_cpu(self, flashpack_cache_dir: str = None):
         """Build all components on CPU for Modal snapshot optimization.
         
         This is called during run() after video dimensions are known.
@@ -154,8 +154,10 @@ class SLAMSystem:
                 logger.info("Using preloaded UniDepthV2 model (Modal optimized)")
                 self.metric_depth = self.preloaded_models['unidepth']
             else:
-                self.metric_depth = make_depth_model(self.config.keyframe_depth)
-            
+                use_flashpack = self.config.get("use_flashpack", True)  # Default to True
+                print(f"GPU 0: Using keyframe depth: {self.config.keyframe_depth}")
+                self.metric_depth = make_depth_model(self.config.keyframe_depth, use_flashpack=use_flashpack, flashpack_cache_dir=flashpack_cache_dir)
+                
             if self.config.camera_type not in self.metric_depth.supported_camera_types:
                 self.metric_depth = PinholeDepthAdapter(self.metric_depth)
 
@@ -298,6 +300,7 @@ class SLAMSystem:
         video_streams: list[VideoStream],
         rig: SE3 | None = None,
         camera_type: CameraType = CameraType.PINHOLE,
+        flashpack_cache_dir: str = None,
     ) -> SLAMOutput:
         # Check if profiling is enabled
         enable_profiling = os.getenv("VIPE_PROFILE", "0") == "1"
@@ -312,15 +315,16 @@ class SLAMSystem:
                 record_shapes=True,
                 with_stack=True,
             ) as prof:
-                return self._run_with_profiling(video_streams, prof, rig, camera_type)
+                return self._run_with_profiling(video_streams, prof, rig, camera_type, flashpack_cache_dir=flashpack_cache_dir)
         else:
-            return self._run_without_profiling(video_streams, rig, camera_type)
+            return self._run_without_profiling(video_streams, rig, camera_type, flashpack_cache_dir=flashpack_cache_dir)
     
     def _run_without_profiling(
         self,
         video_streams: list[VideoStream],
         rig: SE3 | None = None,
         camera_type: CameraType = CameraType.PINHOLE,
+        flashpack_cache_dir: str = None,
     ) -> SLAMOutput:
         assert len(video_streams) > 0
         resizers = [StandardResizeStreamProcessor() for _ in video_streams]
@@ -350,7 +354,7 @@ class SLAMSystem:
         )
 
         # Build components on CPU (first time only, gets captured in Modal snapshot)
-        self._build_components_cpu()
+        self._build_components_cpu(flashpack_cache_dir=flashpack_cache_dir)
         
         # Move components to GPU (quick transfer after Modal snapshot restore)
         self.move_to_gpu()
@@ -436,6 +440,7 @@ class SLAMSystem:
         prof: torch.profiler.profile,
         rig: SE3 | None = None,
         camera_type: CameraType = CameraType.PINHOLE,
+        flashpack_cache_dir: str = None,
     ) -> SLAMOutput:
         logger = logging.getLogger(__name__)
         
@@ -468,7 +473,7 @@ class SLAMSystem:
             )
 
             # Build components on CPU (first time only, gets captured in Modal snapshot)
-            self._build_components_cpu()
+            self._build_components_cpu(flashpack_cache_dir=flashpack_cache_dir)
             
             # Move components to GPU (quick transfer after Modal snapshot restore)
             self.move_to_gpu()

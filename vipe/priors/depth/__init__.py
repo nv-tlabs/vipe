@@ -14,9 +14,9 @@
 # limitations under the License.
 
 from .base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
+from pathlib import Path
 
-
-def make_depth_model(model: str):
+def make_depth_model(model: str, flashpack_cache_dir: Path = None, use_flashpack: bool = True):
     if "-" not in model:
         model_name, model_sub = model, ""
     else:
@@ -30,12 +30,12 @@ def make_depth_model(model: str):
     elif model_name == "unidepth":
         from .unidepth import UniDepth2Model
 
-        return UniDepth2Model(type=model_sub)
+        return UniDepth2Model(type=model_sub, flashpack_cache_dir=flashpack_cache_dir, use_flashpack=use_flashpack)
 
     elif model_name == "moge":
         from .moge import MogeModel
 
-        return MogeModel()
+        return MogeModel(flashpack_cache_dir=flashpack_cache_dir, use_flashpack=use_flashpack)
 
     else:
         raise ValueError(f"Unknown depth model: {model}")

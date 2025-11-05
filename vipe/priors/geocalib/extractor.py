@@ -3,11 +3,11 @@
 # Licensed under the Apache-2.0 License. See THIRD_PARTY_LICENSES.md for details.
 
 """Simple interface for GeoCalib model."""
-
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
-import torch
+import torch, os
 import torch.nn as nn
 
 from torch.nn.functional import interpolate
@@ -20,7 +20,8 @@ from .utils import ImagePreprocessor, load_image
 class GeoCalib(nn.Module):
     """Simple interface for GeoCalib model."""
 
-    def __init__(self, weights: str = "pinhole"):
+    def __init__(self, weights: str = "pinhole",flashpack_cache_dir: str = None, use_flashpack: bool = True):
+
         """Initialize the model with optional config overrides.
 
         Args:
@@ -28,24 +29,63 @@ class GeoCalib(nn.Module):
             Note that in case of custom weights, the architecture must match the original model.
             If this is not the case, use the extractor from the 'siclib' package
             (from siclib.models.extractor import GeoCalib).
+            flashpack_cache_dir (str): Path to the flashpack cache directory.
+            use_flashpack (bool): Whether to use flashpack.
         """
         super().__init__()
-        if weights in {"pinhole", "distorted"}:
-            url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
+        if use_flashpack and weights in {"pinhole", "distorted"}:
+            # GeoCalib has mixed dtypes - use full model caching like GroundingDINO
+            if flashpack_cache_dir is None:
+                flashpack_cache_dir = Path.home() / ".cache" / "vipe_geocalib_flashpack"
+                flashpack_cache_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                os.makedirs(flashpack_cache_dir, exist_ok=True)
+                flashpack_cache_dir = Path(flashpack_cache_dir)
 
-            # load checkpoint
-            model_dir = f"{torch.hub.get_dir()}/geocalib"
-            state_dict = torch.hub.load_state_dict_from_url(
-                url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
-            )
-        elif Path(weights).exists():
-            state_dict = torch.load(weights, map_location="cpu")
+            model_cache_path = flashpack_cache_dir / f"geocalib_{weights}_full.pt"
+
+            # Load full cached model or create it
+            if model_cache_path.exists():
+                print(f"Loading GeoCalib ({weights}) from full model cache...")
+                start = time.time()
+                # Load entire model object (structure + weights) directly to GPU
+                self.model = torch.load(model_cache_path, map_location="cuda", weights_only=False)
+                print(f"GeoCalib cached loading took {time.time() - start:.2f}s")
+            else:
+                print(f"Creating full model cache for GeoCalib ({weights})...")
+                start = time.time()
+
+                # Download checkpoint
+                url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
+                model_dir = f"{torch.hub.get_dir()}/geocalib"
+                state_dict = torch.hub.load_state_dict_from_url(
+                    url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
+                )
+
+                # Create model and load
+                self.model = Model()
+                self.model.flexible_load(state_dict["model"])
+                self.model.eval()
+
+                # Save entire model for next time
+                torch.save(self.model, model_cache_path)
+                print(f"GeoCalib cache creation took {time.time() - start:.2f}s")
         else:
-            raise ValueError(f"Invalid weights: {weights}")
+            # Original loading
+            if weights in {"pinhole", "distorted"}:
+                url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
+                model_dir = f"{torch.hub.get_dir()}/geocalib"
+                state_dict = torch.hub.load_state_dict_from_url(
+                    url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
+                )
+            elif Path(weights).exists():
+                state_dict = torch.load(weights, map_location="cpu")
+            else:
+                raise ValueError(f"Invalid weights: {weights}")
 
-        self.model = Model()
-        self.model.flexible_load(state_dict["model"])
-        self.model.eval()
+            self.model = Model()
+            self.model.flexible_load(state_dict["model"])
+            self.model.eval()
 
         self.image_processor = ImagePreprocessor({"resize": 320, "edge_divisible_by": 32})
 

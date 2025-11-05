@@ -51,7 +51,17 @@ def predict(
 ) -> Tuple[torch.Tensor, torch.Tensor, List[str]]:
     caption = preprocess_caption(caption=caption)
 
-    model = model.to(device)
+    #prevents metadata errors from threading
+
+    # Check if model has meta tensors
+    if any(p.is_meta for p in model.parameters()):
+        # Materialize meta tensors: can't clone meta tensors, skip them
+        state = {k: v.to(device) for k, v in model.state_dict().items() if not v.is_meta}
+        model = model.to_empty(device=device)  # Creates real (empty) tensors on device
+        model.load_state_dict(state, assign=True)
+        print("Fixed meta tensor issue!")
+    else:
+        model = model.to(device)
     image = image.to(device)
 
     with torch.no_grad():

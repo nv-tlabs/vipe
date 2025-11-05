@@ -16,7 +16,7 @@
 
 import logging
 import os
-import pickle
+import pickle, time 
 
 from pathlib import Path
 
@@ -70,17 +70,23 @@ class DefaultAnnotationPipeline(Pipeline):
         assert FrameAttribute.METRIC_DEPTH not in video_stream.attributes()
         assert FrameAttribute.INSTANCE not in video_stream.attributes()
 
-        init_processors.append(GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type))
+        use_flashpack = self.init_cfg.get("use_flashpack", True)  # Default to True
+        start_time = time.perf_counter()
+        init_processors.append(GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type, use_flashpack=use_flashpack))
+        print(f"GPU 0: GeoCalibIntrinsicsProcessor loaded in {time.perf_counter() - start_time:.2f}s")
         if self.init_cfg.instance is not None:
+            start_time = time.perf_counter()
             init_processors.append(
                 TrackAnythingProcessor(
                     self.init_cfg.instance.phrases,
                     add_sky=self.init_cfg.instance.add_sky,
                     sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    use_flashpack=use_flashpack,
                     preloaded_sam=self.preloaded_sam,
                     preloaded_aot=self.preloaded_aot,
                 )
             )
+            print(f"TrackAnythingProcessor loaded in {time.perf_counter() - start_time:.2f}s")
         return ProcessedVideoStream(video_stream, init_processors)
 
     def _add_post_processors(
@@ -95,13 +101,15 @@ class DefaultAnnotationPipeline(Pipeline):
             )
         ]
         if (depth_align_model := self.post_cfg.depth_align_model) is not None:
+            use_flashpack = self.post_cfg.get("use_flashpack", True)  # Default to True
             post_processors.append(
                 AdaptiveDepthProcessor(
                     slam_output, 
                     view_idx, 
                     depth_align_model,
                     preloaded_gc_models=self.preloaded_gc_models,
-                    preloaded_unidepth=self.preloaded_unidepth
+                    preloaded_unidepth=self.preloaded_unidepth,
+                    use_flashpack=use_flashpack
                 )
             )
         return ProcessedVideoStream(video_stream, post_processors)

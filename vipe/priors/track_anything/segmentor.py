@@ -4,10 +4,28 @@
 
 import numpy as np
 import torch
-
+import os
+from pathlib import Path
+import time
 from .sam import SamAutomaticMaskGenerator, sam_model_registry
 
+from flashpack import FlashPackMixin
+class FlashPackSAMWrapper(torch.nn.Module, FlashPackMixin):
+    """FlashPack wrapper for SAM model."""
 
+    def __init__(self, sam_model=None, sam_config=None, **kwargs):
+        super().__init__()
+        if sam_model is not None:
+            self.sam = sam_model
+        elif sam_config is not None:
+            # Build SAM from config (no weights loaded yet)
+            model_type = sam_config.get("model_type", "vit_b")
+            self.sam = sam_model_registry[model_type](checkpoint=None)
+        else:
+            # Extract config from kwargs if provided by flashpack
+            sam_config = kwargs.get('config', {})
+            model_type = sam_config.get("model_type", "vit_b")
+            self.sam = sam_model_registry[model_type](checkpoint=None)
 class Segmentor:
     def __init__(self, sam_args, preloaded_sam=None):
         """
@@ -21,9 +39,53 @@ class Segmentor:
         if preloaded_sam is not None:
             self.sam = preloaded_sam.to(device=self.device)
         else:
-            self.sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
+            # Check if using flashpack format
+            sam_checkpoint = sam_args["sam_checkpoint"]
+            if sam_checkpoint.endswith('.flashpack'):
+                # Load from flashpack
+                print("Loading SAM from flashpack...")
+                start = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+                start.record()
+
+                # Load config
+                config_path = Path(sam_checkpoint).parent / "sam_config.json"
+                if config_path.exists():
+                    import json
+                    with open(config_path, 'r') as f:
+                        sam_config = json.load(f)
+                else:
+                    sam_config = {"model_type": sam_args["model_type"]}
+
+                # Convert device to torch.device if it's an integer
+                device = torch.device(f"cuda:{self.device}") if isinstance(self.device, int) else self.device
+
+                # Load from flashpack
+                wrapped_sam = FlashPackSAMWrapper.from_flashpack(
+                    sam_checkpoint,
+                    config=sam_config,
+                    device=device
+                )
+                self.sam = wrapped_sam.sam
+
+                end.record()
+                torch.cuda.synchronize()
+                print(f"SAM flashpack loading took {start.elapsed_time(end)/1000:.2f}s")
+            else:
+                # Original loading
+                self.sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
+
+            # Move to device
+            import time
+            move_start = time.time()
+
             self.sam.to(device=self.device)
+            print(f"    SAM .to(device) took {time.time() - move_start:.2f}s")
+
+            # Create generator
+        gen_start = time.time()
         self.everything_generator = SamAutomaticMaskGenerator(model=self.sam, **sam_args["generator_args"])
+        print(f"    SamAutomaticMaskGenerator init took {time.time() - gen_start:.2f}s")
         self.interactive_predictor = self.everything_generator.predictor
         self.have_embedded = False
 

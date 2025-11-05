@@ -1,7 +1,10 @@
 # This file includes code originally from the Segment and Track Anything repository:
 # https://github.com/z-x-yang/Segment-and-Track-Anything
 # Licensed under the AGPL-3.0 License. See THIRD_PARTY_LICENSES.md for details.
-
+import json
+import os
+import time
+from pathlib import Path
 import numpy as np
 import PIL
 import torch
@@ -15,20 +18,106 @@ from .groundingdino.util.inference import predict
 from .groundingdino.util.utils import clean_state_dict
 
 
+# Patch GroundingDINO with FlashPack support
+from flashpack import FlashPackMixin
+from .groundingdino.models.main.groundingdino import GroundingDINO
+
+# Create FlashPack-enabled version  
+class FlashPackGroundingDINO(GroundingDINO, FlashPackMixin):
+    """FlashPack-enabled GroundingDINO"""
+    # CRITICAL: Only ignore int64 buffers (relative_position_index)
+    # Include relative_position_bias_table in FlashPack so it gets correct dtype
+    flashpack_ignore_suffixes = ["relative_position_index"]
+
+    @classmethod
+    def from_config(cls, cfg):
+        """Build from config like build_grounding_dino does"""
+        model = build_grounding_dino(cfg)
+        model.__class__ = cls
+        return model
+
 class Detector:
-    def __init__(self, device):
+    def __init__(self, device, use_flashpack: bool = True, flashpack_cache_dir: str = None):
         args = config
         args.device = device
         self.deivce = device
-        self.gd = build_grounding_dino(args)
+        # Check environment variable to disable FlashPack (for debugging)
+        disable_flashpack = os.environ.get('DISABLE_GROUNDINGDINO_FLASHPACK') == '1'
+        if disable_flashpack:
+            print(f"DISABLE_GROUNDINGDINO_FLASHPACK=1, skipping FlashPack for GroundingDINO")
+            use_flashpack = False
 
-        checkpoint = torch.hub.load_state_dict_from_url(
-            "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
-            map_location="cpu",
-        )
-        self.gd.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+        if use_flashpack:
+            if flashpack_cache_dir is None:
+                flashpack_cache_dir = Path.home() / ".cache" / "vipe_trackanything_flashpack"
+            else:
+                flashpack_cache_dir = Path(flashpack_cache_dir)
+                flashpack_cache_dir.mkdir(parents=True, exist_ok=True)
+            # Use different cache files for different dtypes
+            dtype_suffix = "fp32"
+            model_path = flashpack_cache_dir / f"groundingdino_{dtype_suffix}.flashpack"
+
+            if not model_path.exists():
+                print("Creating GroundingDINO flashpack...")
+                start = time.time()
+                # Build model normally
+                gd_model = build_grounding_dino(args)
+                checkpoint = torch.hub.load_state_dict_from_url(
+                    "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
+                    map_location="cpu",
+                )
+                gd_model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False, assign=True)
+
+                # Filter out ONLY int64 buffers (relative_position_index)
+                # Keep everything else including bbox_embed and relative_position_bias_table (float tensors)
+                state_dict = gd_model.state_dict()
+                filtered_state_dict = {
+                    k: v for k, v in state_dict.items()
+                    if not k.endswith("relative_position_index")  # Only int64 buffer
+                }
+
+                # Save filtered state_dict with flashpack
+                # CRITICAL: Use specified dtype (default float16 for memory efficiency)
+                from flashpack import pack_to_file
+                pack_to_file(
+                    filtered_state_dict,
+                    str(model_path),
+                    target_dtype=torch.float32,  # Use specified dtype instead of hardcoded float32
+                    silent=False
+                )
+
+                print(f"GroundingDINO flashpack creation took {time.time() - start:.2f}s")
+                del gd_model
+                torch.cuda.empty_cache()
+
+            # Load from flashpack  
+            print(f"Loading GroundingDINO from flashpack...")
+            start = time.time()
+            device_str = f"cuda:{args.device}" if isinstance(args.device, int) else str(args.device)
+
+            # Step 1: Build model structure and load bbox_embed from checkpoint
+            self.gd = build_grounding_dino(args)
+            checkpoint = torch.hub.load_state_dict_from_url(
+                "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
+                map_location="cpu",
+            )
+            self.gd.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False, assign=True)
+
+            # Step 2: Overwrite main weights from flashpack (fast! skip bbox_embed already loaded)
+            from flashpack import assign_from_file  
+            assign_from_file(
+                self.gd,
+                str(model_path),
+                device=device_str,
+                strict_buffers=False,  # Missing int64 relative_position_index OK
+                ignore_prefixes=["bbox_embed", "transformer.decoder.bbox_embed", "transformer.enc_out_bbox_embed"]  # Already loaded from checkpoint
+            )
+            print(f"GroundingDINO flashpack loading took {time.time() - start:.2f}s")
+
         self.gd.eval()
-
+        # Store reference to model (for compatibility with code that accesses detector.model)
+        self.model = self.gd
+        self.backbone = self.gd.backbone if hasattr(self.gd, 'backbone') else None
     def image_transform_grounding(self, init_image):
         transform = T.Compose(
             [
