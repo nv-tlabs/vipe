@@ -298,11 +298,13 @@ def save_rgb_frames_as_webp(
     
     for frame_idx, frame_data in enumerate(cached_final_stream):
         rgb = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
+        # Convert RGB to BGR for OpenCV
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         frame_path = rgb_dir / f"{frame_idx:05d}.webp"
         
-        success, buf = cv2.imencode('.webp', rgb, [cv2.IMWRITE_WEBP_QUALITY, quality])
+        success, buf = cv2.imencode('.webp', bgr, [cv2.IMWRITE_WEBP_QUALITY, quality])
         if not success:
-            _, buf = cv2.imencode('.png', rgb, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+            _, buf = cv2.imencode('.png', bgr, [cv2.IMWRITE_PNG_COMPRESSION, 9])
             frame_path = rgb_dir / f"{frame_idx:05d}.png"
         
         with open(frame_path, 'wb') as f:
