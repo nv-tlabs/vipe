@@ -263,7 +263,7 @@ class GeometryCrafterDiffPipeline(StableVideoDiffusionPipeline):
         force_projection: bool = True,
         force_fixed_focal: bool = True,
         use_extract_interp: bool = False,
-        track_time: bool = False,
+        track_time: bool = True,
         low_memory_usage: bool = False
     ):
         

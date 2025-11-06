@@ -8,15 +8,24 @@ from .aot_tracker import get_aot
 from .detector import Detector
 from .segmentor import Segmentor
 
-
+import time
 class SegTracker:
-    def __init__(self, segtracker_args, sam_args, aot_args, preloaded_sam=None, preloaded_aot=None) -> None:
+    def __init__(self, segtracker_args, sam_args, aot_args, preloaded_sam=None, preloaded_aot=None, use_flashpack: bool = True, flashpack_cache_dir: str = None) -> None:
         """
         Initialize SAM and AOT.
         """
+        sam_start = time.time()
         self.sam = Segmentor(sam_args, preloaded_sam=preloaded_sam)
-        self.tracker = get_aot(aot_args, preloaded_model=preloaded_aot)
-        self.detector = Detector(self.sam.device)
+
+        print(f"  Segmentor init took {time.time() - sam_start:.2f}s")
+
+        aot_start = time.time()
+        self.tracker = get_aot(aot_args, use_flashpack=use_flashpack, flashpack_cache_dir=flashpack_cache_dir, preloaded_model=preloaded_aot)
+        print(f"  AOT tracker init took {time.time() - aot_start:.2f}s")
+
+        detector_start = time.time()
+        self.detector = Detector(self.sam.device, use_flashpack=use_flashpack, flashpack_cache_dir=flashpack_cache_dir)
+        print(f"  Detector init took {time.time() - detector_start:.2f}s")
         self.sam_gap = segtracker_args["sam_gap"]
         self.min_area = segtracker_args["min_area"]
         self.max_obj_num = segtracker_args["max_obj_num"]

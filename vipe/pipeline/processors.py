@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+from pathlib import Path
+import time, os 
 import logging
 
 from typing import Iterator
@@ -27,7 +28,7 @@ from vipe.priors.depth.priorda import PriorDAModel
 from vipe.priors.depth.videodepthanything import VideoDepthAnythingDepthModel
 from vipe.priors.depth.geometrycrafter import (
     GeometryCrafterDiffPipeline,
-    GeometryCrafterDetermPipeline,
+    # GeometryCrafterDetermPipeline,
     PMapAutoencoderKLTemporalDecoder,
     UNetSpatioTemporalConditionModelVid2vid
 )
@@ -41,6 +42,81 @@ from vipe.utils.misc import unpack_optional
 from vipe.utils.morph import erode
 from vipe.priors.depth.moge import MogeModel
 
+def load_geometrycrafter_with_flashpack(
+    model_class,
+    flashpack_class,
+    repo_id: str,
+    subfolder: str,
+    cache_name: str,
+    use_flashpack: bool = True,
+    **load_kwargs
+):
+    """Helper function to load GeometryCrafter models with FlashPack caching."""
+    from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
+
+    class FlashPackUNetSpatioTemporal(UNetSpatioTemporalConditionModelVid2vid, FlashPackDiffusersModelMixin):
+        pass
+
+    class FlashPackPMapVAE(PMapAutoencoderKLTemporalDecoder, FlashPackDiffusersModelMixin):
+        pass
+
+    # Update flashpack_class parameter if needed
+    if flashpack_class.__name__ == "FlashPackUNetSpatioTemporal":
+        flashpack_class = FlashPackUNetSpatioTemporal
+    elif flashpack_class.__name__ == "FlashPackPMapVAE":
+        flashpack_class = FlashPackPMapVAE
+
+    if not use_flashpack:
+        return model_class.from_pretrained(repo_id, subfolder=subfolder, **load_kwargs)
+
+    # Setup flashpack cache directory
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "vipe_geometrycrafter_flashpack")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    save_dir = os.path.join(cache_dir, cache_name)
+    os.makedirs(save_dir, exist_ok=True)
+    model_path = os.path.join(save_dir, "model.flashpack")
+
+    # If flashpack doesn't exist, create it
+    if not os.path.exists(model_path):
+        print(f"Creating flashpack for {cache_name}...")
+        start = time.perf_counter()
+        # Remove cache_dir from load_kwargs to avoid conflict
+        filtered_kwargs = {k: v for k, v in load_kwargs.items() if k != 'cache_dir'}
+        initial_model = flashpack_class.from_pretrained(repo_id, subfolder=subfolder, **filtered_kwargs)
+
+        # Save model as flashpack
+        initial_model.save_pretrained_flashpack(
+            save_dir,
+            target_dtype=load_kwargs.get('torch_dtype', torch.float16)
+        )
+        print(f"Flashpack creation took {time.perf_counter() - start:.2f}s")
+        del initial_model
+        torch.cuda.empty_cache()
+
+    # Load from flashpack using the built-in method
+    print(f"Loading {cache_name} from flashpack...")
+    start = time.perf_counter()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = flashpack_class.from_pretrained_flashpack(
+        save_dir,
+        device=device,
+        silent=False
+    )
+
+    # Ensure gradient_checkpointing is initialized for UNet (not VAE)
+    # Only for UNetSpatioTemporal models which have the custom implementation
+    if 'unet' in cache_name.lower() and hasattr(model, 'disable_gradient_checkpointing'):
+        try:
+            model.disable_gradient_checkpointing()
+        except TypeError:
+            # Some models have different gradient checkpointing interface
+            if not hasattr(model, 'gradient_checkpointing'):
+                model.gradient_checkpointing = False
+
+    print(f"Flashpack loading took {time.perf_counter() - start:.2f}s")
+    return model
 
 logger = logging.getLogger(__name__)
 
@@ -78,18 +154,22 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
         gap_sec: float = 1.0,
         camera_type: CameraType = CameraType.PINHOLE,
         device: torch.device = torch.device("cuda"),
+        use_flashpack: bool = True,
+        flashpack_cache_dir: Path = None,
     ) -> None:
         super().__init__(video_stream, gap_sec)
 
         is_pinhole = camera_type == CameraType.PINHOLE
         weights = "pinhole" if is_pinhole else "distorted"
 
-        model = GeoCalib(weights=weights).to(device)
+        start_time = time.perf_counter()
+        self._model = GeoCalib(weights=weights, flashpack_cache_dir=flashpack_cache_dir, use_flashpack=use_flashpack).to(device)
+        logger.info(f"GeoCalib model loaded in {time.perf_counter() - start_time:.2f}s")
         indexable_stream = CachedVideoStream(video_stream)
 
         if is_pinhole:
             sample_frames = torch.stack([indexable_stream[i].rgb.moveaxis(-1, 0) for i in self.sample_frame_inds])
-            res = model.calibrate(
+            res = self._model.calibrate(
                 sample_frames,
                 shared_intrinsics=True,
             )
@@ -99,7 +179,7 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
                 CameraType.PINHOLE: "pinhole",
                 CameraType.MEI: "simple_mei",
             }[camera_type]
-            res = model.calibrate(
+            res = self._model.calibrate(
                 indexable_stream[self.sample_frame_inds[0]].rgb.moveaxis(-1, 0)[None],
                 camera_model=camera_model,
             )
@@ -131,6 +211,8 @@ class TrackAnythingProcessor(StreamProcessor):
         device: torch.device = torch.device("cuda"),
         preloaded_sam=None,
         preloaded_aot=None,
+        use_flashpack: bool = True,
+        flashpack_cache_dir: Path = None,
     ) -> None:
         self.mask_phrases = mask_phrases
         self.sam_run_gap = sam_run_gap
@@ -144,7 +226,9 @@ class TrackAnythingProcessor(StreamProcessor):
             sam_points_per_side=50, 
             sam_run_gap=self.sam_run_gap,
             preloaded_sam=preloaded_sam,
-            preloaded_aot=preloaded_aot
+            preloaded_aot=preloaded_aot,
+            use_flashpack=use_flashpack,
+            flashpack_cache_dir=flashpack_cache_dir,
         )
         self.mask_expand = mask_expand
 
@@ -183,6 +267,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
         view_idx: int = 0,
         model: str = "adaptive_unidepth-l_svda",
         share_depth_model: bool = False,
+        use_flashpack: bool = True,
+        flashpack_cache_dir: Path = None,
         device: torch.device = torch.device("cuda"),
         preloaded_gc_models: dict | None = None,
         preloaded_unidepth=None,
@@ -194,6 +280,9 @@ class AdaptiveDepthProcessor(StreamProcessor):
         assert not share_depth_model, "Adaptive depth processor does not support shared depth model"
         self.require_cache = True
         self.model = model
+        self.use_flashpack = use_flashpack
+        start_time_total = time.perf_counter()
+        logger.info(f"Loading video depth model (flashpack={'enabled' if use_flashpack else 'disabled'})...")
         self.device = device
 
         try:
@@ -210,23 +299,44 @@ class AdaptiveDepthProcessor(StreamProcessor):
                     # Load models fresh (original behavior)
                     model_type = "diff" #TODO: provide flexibility to the user to choose the model type
                     cache_dir = "/home/afridi/Depth/GeometryCrafter/workspace/cache"
-                    unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
-                        'TencentARC/GeometryCrafter',
+                    # Load UNet with FlashPack
+                    start_time = time.perf_counter()
+                    unet = load_geometrycrafter_with_flashpack(
+                        model_class=UNetSpatioTemporalConditionModelVid2vid,
+                        flashpack_class=FlashPackUNetSpatioTemporal,
+                        repo_id='TencentARC/GeometryCrafter',
                         subfolder='unet_diff' if model_type == 'diff' else 'unet_determ',
+                        cache_name=f'unet_{model_type}',
+                        use_flashpack=use_flashpack,
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.float16,
                         cache_dir=cache_dir
                     ).requires_grad_(False).to(device, dtype=torch.float16)
-                    self.point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
-                        'TencentARC/GeometryCrafter',
+                    logger.info(f"Time taken to load UNet: {time.time() - start_time} seconds")
+                    # Load Point Map VAE with FlashPack
+                    start_time = time.time()
+                    self.point_map_vae = load_geometrycrafter_with_flashpack(
+                        model_class=PMapAutoencoderKLTemporalDecoder,
+                        flashpack_class=FlashPackPMapVAE,
+                        repo_id='TencentARC/GeometryCrafter',
                         subfolder='point_map_vae',
+                        cache_name='point_map_vae',
+                        use_flashpack=use_flashpack,
                         low_cpu_mem_usage=True,
                         torch_dtype=torch.float32,
                         cache_dir=cache_dir
                     ).requires_grad_(False).to(device, dtype=torch.float32)
+                    logger.info(f"Time taken to load Point Map VAE: {time.time() - start_time} seconds")
+
+                    start_time = time.perf_counter()
                     self.prior_model = MogeModel( #TODO: check if this is redundant
                         cache_dir=cache_dir,
+                        flashpack_cache_dir=flashpack_cache_dir,
+                        use_flashpack=use_flashpack,
                     ).requires_grad_(False).to(device, dtype=torch.float32)
+                    logger.info(f"Time taken to load MoGe model: {time.perf_counter() - start_time} seconds")
+
+                    start_time = time.perf_counter()
                     self.video_depth_model = GeometryCrafterDiffPipeline.from_pretrained(
                         "stabilityai/stable-video-diffusion-img2vid-xt",
                         unet=unet,
@@ -234,6 +344,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
                         variant="fp16",
                         cache_dir=cache_dir
                     ).to(device)
+                    logger.info(f"Time taken to load GeometryCrafterDiffPipeline: {time.perf_counter() - start_time} seconds")
             else:
                 self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
 
@@ -242,6 +353,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
             video_model = None
             self.video_depth_model = None
 
+        logger.info(f"Loading entire GC pipeline took {time.perf_counter() - start_time_total} seconds")
         assert prefix == "adaptive", "Model name should start with 'adaptive_'"
 
         # Use pre-loaded UniDepthV2 if available (Modal optimization)
@@ -249,7 +361,9 @@ class AdaptiveDepthProcessor(StreamProcessor):
             logger.info("Using pre-loaded UniDepthV2 model (Modal optimized)")
             self.depth_model = preloaded_unidepth
         else:
-            self.depth_model = make_depth_model(metric_model)
+            start_time = time.perf_counter()
+            self.depth_model = make_depth_model(metric_model, use_flashpack=use_flashpack)
+            logger.info(f"Time taken to load {metric_model}: {time.perf_counter() - start_time} seconds")
         self.prompt_model = PriorDAModel()
         self.update_momentum = 0.99
 
@@ -293,12 +407,13 @@ class AdaptiveDepthProcessor(StreamProcessor):
         force_projection = True
         force_fixed_focal = True
         use_extract_interp = False
-        track_time = False
+        track_time = True
         low_memory_usage = False
         height = frame.rgb.shape[0]
         width = frame.rgb.shape[1]
         assert height % 64 == 0
         assert width % 64 == 0
+        start_time = time.perf_counter()
         with torch.inference_mode():
             rec_point_map, _ = self.video_depth_model(
                 frames_tensor,
@@ -318,9 +433,10 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 low_memory_usage=low_memory_usage
             )
         
-        print(f"Rec point map range: {rec_point_map[:,:,:,2].min()} to {rec_point_map[:,:,:,2].max()}")
+        logger.info(f"Rec point map range: {rec_point_map[:,:,:,2].min()} to {rec_point_map[:,:,:,2].max()}")
         rec_depth = 1/(rec_point_map[:,:,:,2]) # Inverse depth
-        print(f"Inverse Rec depth range: {rec_depth.min()} to {rec_depth.max()}")
+        logger.info(f"Time taken to compute video depth: {time.perf_counter() - start_time} seconds")
+        logger.info(f"Inverse Rec depth range: {rec_depth.min()} to {rec_depth.max()}")
         return rec_depth, frame_data_list
 
     def update_iterator(self, previous_iterator: Iterator[VideoFrame]) -> Iterator[VideoFrame]:

@@ -1,10 +1,13 @@
 # This file includes code originally from the Segment and Track Anything repository:
 # https://github.com/z-x-yang/Segment-and-Track-Anything
 # Licensed under the AGPL-3.0 License. See THIRD_PARTY_LICENSES.md for details.
-
+import time
+from pathlib import Path
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
+from flashpack import FlashPackMixin
 
 from torchvision import transforms
 
@@ -15,21 +18,82 @@ from .aot.networks.engines.deaot_engine import DeAOTEngine, DeAOTInferEngine
 from .aot.networks.models import build_vos_model
 from .aot.transforms import video_transforms as tr
 from .aot.utils.checkpoint import load_network
+class FlashPackAOTWrapper(torch.nn.Module, FlashPackMixin):
+    """FlashPack wrapper for AOT tracker model."""
+
+    def __init__(self, aot_model=None, cfg=None, **kwargs):
+        super().__init__()
+        if aot_model is not None:
+            self.aot = aot_model
+        elif cfg is not None:
+            self.aot = build_vos_model(cfg.MODEL_VOS, cfg)
+        else:
+            cfg = kwargs.get('config', None)
+            if cfg is not None:
+                self.aot = build_vos_model(cfg.MODEL_VOS, cfg)
+
 
 
 class AOTTracker(object):
-    def __init__(self, cfg, gpu_id=0, device="cuda", preloaded_model=None):
+    def __init__(self, cfg, gpu_id=0, device="cuda", preloaded_model=None, use_flashpack: bool = True, flashpack_cache_dir: str = None):
         self.gpu_id = gpu_id
         self.device = device
         if preloaded_model is not None:
             self.model = preloaded_model.to(device)
         else:
-            self.model = build_vos_model(cfg.MODEL_VOS, cfg)
-            if device == "cuda":
-                self.model = self.model.cuda(gpu_id)
+            if use_flashpack:
+                # Setup flashpack cache
+                if flashpack_cache_dir is None:
+                    flashpack_cache_dir = Path.home() / ".cache" / "vipe_trackanything_flashpack"
+                else:
+                    flashpack_cache_dir = os.path.join(flashpack_cache_dir, "vipe_trackanything_flashpack")
+                    os.makedirs(flashpack_cache_dir, exist_ok=True)
+                    flashpack_cache_dir = Path(flashpack_cache_dir)
+                flashpack_cache_dir.mkdir(parents=True, exist_ok=True)
+                aot_flashpack_path = flashpack_cache_dir / "aot_tracker.flashpack"
+
+                # Create flashpack if doesn't exist
+                if not aot_flashpack_path.exists():
+                    print("Creating flashpack for AOT tracker...")
+                    start = time.time()
+                    # Build model and load weights normally
+                    self.model = build_vos_model(cfg.MODEL_VOS, cfg)
+                    if device == "cuda":
+                        self.model = self.model.cuda(gpu_id)
+                    else:
+                        self.model = self.model.to(device)
+                    self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id if device == "cuda" else device)
+
+                    # Wrap and save as flashpack
+                    wrapped_aot = FlashPackAOTWrapper(self.model)
+                    wrapped_aot.save_flashpack(str(aot_flashpack_path), target_dtype=torch.float32)
+                    print(f"AOT flashpack creation took {time.time() - start:.2f}s")
+                    del wrapped_aot
+                    torch.cuda.empty_cache()
+                else:
+                    # Load from flashpack
+                    print("Loading AOT tracker from flashpack...")
+                    start = time.time()
+
+                    device = torch.device(f"cuda:{gpu_id}") if isinstance(gpu_id, int) else gpu_id
+                    wrapped_aot = FlashPackAOTWrapper.from_flashpack(
+                        str(aot_flashpack_path),
+                        config=cfg,
+                        device=device
+                    )
+                    self.model = wrapped_aot.aot
+                    print(f"AOT flashpack loading took {time.time() - start:.2f}s")
             else:
-                self.model = self.model.to(device)
-            self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id if device == "cuda" else device)
+                # Original loading
+                self.model = build_vos_model(cfg.MODEL_VOS, cfg)
+                if device == "cuda":
+                    self.model = self.model.cuda(gpu_id)
+                else:
+                    self.model = self.model.to(device)
+                self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id if device == "cuda" else device)
+
+            
+            
         self.engine = build_engine(
             cfg.MODEL_ENGINE,
             phase="eval",
@@ -188,12 +252,12 @@ class DeAOTTrackerInferEngine(DeAOTInferEngine):
         self.update_size()
 
 
-def get_aot(args, preloaded_model=None):
+def get_aot(args, preloaded_model=None, use_flashpack: bool = True, flashpack_cache_dir: str = None):
     # build vos engine
     cfg = engine_config.EngineConfig(args["phase"])
     cfg.TEST_CKPT_PATH = args["model_path"]
     cfg.TEST_LONG_TERM_MEM_GAP = args["long_term_mem_gap"]
     cfg.MAX_LEN_LONG_TERM = args["max_len_long_term"]
     device = "cuda" if args["gpu_id"] == 0 else f"cuda:{args['gpu_id']}"
-    tracker = AOTTracker(cfg, args["gpu_id"], device=device, preloaded_model=preloaded_model)
+    tracker = AOTTracker(cfg, args["gpu_id"], device=device, preloaded_model=preloaded_model, use_flashpack=use_flashpack, flashpack_cache_dir=flashpack_cache_dir)
     return tracker

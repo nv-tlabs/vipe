@@ -1,18 +1,28 @@
 # This file includes code originally from the Segment and Track Anything repository:
 # https://github.com/z-x-yang/Segment-and-Track-Anything
 # Licensed under the AGPL-3.0 License. See THIRD_PARTY_LICENSES.md for details.
-
+import json
+import time, os
 from pathlib import Path
 
 import gdown
 import numpy as np
 import torch
+from flashpack import FlashPackMixin
 
 from vipe.streams.base import VideoFrame
 
 from .seg_tracker import SegTracker
 
+from .sam import sam_model_registry
 
+
+class FlashPackSAMWrapper(torch.nn.Module, FlashPackMixin):
+    """FlashPack wrapper for SAM model."""
+
+    def __init__(self, sam_model):
+        super().__init__()
+        self.sam = sam_model
 class TrackAnythingPipeline:
     def __init__(
         self,
@@ -21,16 +31,19 @@ class TrackAnythingPipeline:
         sam_run_gap: int = 10,
         preloaded_sam=None,
         preloaded_aot=None,
+        use_flashpack: bool = True,
+        dtype=None,
+        flashpack_cache_dir: Path = None,
     ) -> None:
+        overall_start = time.perf_counter()
         # Prepare checkpoints.
-        sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
+        sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth" #TODO: Verify if this exists in modal cache
         if not sam_ckpt_path.exists():
             sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.hub.download_url_to_file(
                 "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
                 dst=str(sam_ckpt_path),
             )
-
         aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
         if not aot_ckpt_path.exists():
             aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +52,7 @@ class TrackAnythingPipeline:
                 output=str(aot_ckpt_path),
                 fuzzy=True,
             )
+            print(f"Checkpoint preparation took {time.perf_counter() - overall_start:.2f}s")
 
         self.threshold_args = {
             "box_threshold": 0.35,
@@ -49,6 +63,17 @@ class TrackAnythingPipeline:
         self.frame_idx = 0
         self.caption = "".join([m + "." for m in mask_phrases])
         self.sam_run_gap = sam_run_gap
+        # Use flashpack caching for faster loading
+        if use_flashpack:
+            flash_start = time.perf_counter()
+            sam_ckpt_path, aot_ckpt_path = self._setup_flashpack_checkpoints(
+                sam_ckpt_path=sam_ckpt_path,
+                aot_ckpt_path=aot_ckpt_path,
+                flashpack_cache_dir=flashpack_cache_dir
+            )
+            print(f"Flashpack checkpoint setup took {time.perf_counter() - flash_start:.2f}s")
+
+        segtracker_start = time.perf_counter()
         self.segtracker = SegTracker(
             segtracker_args={
                 "sam_gap": sam_run_gap,  # the interval to run sam to segment new objects
@@ -77,11 +102,77 @@ class TrackAnythingPipeline:
                 "max_len_long_term": 9999,
                 "gpu_id": 0,
             },
+            use_flashpack=use_flashpack,
+            flashpack_cache_dir=flashpack_cache_dir,
             preloaded_sam=preloaded_sam,
             preloaded_aot=preloaded_aot,
         )
+        print(f"SegTracker initialization took {time.perf_counter() - segtracker_start:.2f}s")
+
+        restart_start = time.perf_counter()
         self.segtracker.restart_tracker()
+        print(f"Tracker restart took {time.perf_counter() - restart_start:.2f}s")
+
         self.instance_phrase = {0: "background"}
+        print(f"TrackAnythingPipeline total init took {time.perf_counter() - overall_start:.2f}s")
+
+    def _setup_flashpack_checkpoints(
+        self,
+        sam_ckpt_path: Path,
+        aot_ckpt_path: Path,
+        flashpack_cache_dir: Path = None
+    ) -> tuple[Path, Path]:
+        """
+        Setup flashpack-optimized checkpoints for SAM and AOT models.
+        Args:
+            sam_ckpt_path (Path): Path to the SAM checkpoint.
+            aot_ckpt_path (Path): Path to the AOT checkpoint.
+            flashpack_cache_dir (Path, optional): Directory to store flashpack caches.
+                Defaults to ~/.cache/vipe_trackanything_flashpack.
+        Returns:
+            tuple[Path, Path]: The paths to the (potentially flashpacked) sam and aot checkpoints.
+        """
+        if flashpack_cache_dir is None:
+            flashpack_cache_dir = Path.home() / ".cache" / "vipe_trackanything_flashpack"
+            flashpack_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        else:
+            flashpack_cache_dir = os.path.join(flashpack_cache_dir, "vipe_trackanything_flashpack")
+            os.makedirs(flashpack_cache_dir, exist_ok=True)
+            flashpack_cache_dir = Path(flashpack_cache_dir)
+        # SAM flashpack cache
+        sam_flashpack_path = flashpack_cache_dir / "sam_vit_b.flashpack"
+        sam_config_path = flashpack_cache_dir / "sam_config.json"
+        if not sam_flashpack_path.exists() and sam_ckpt_path.exists():
+            print("Creating flashpack for SAM model...")
+            start = time.perf_counter()
+            # Build SAM model and load weights
+            sam_model = sam_model_registry["vit_b"](checkpoint=str(sam_ckpt_path))
+            # Save config for later
+            sam_config = {
+                "model_type": "vit_b",
+                "encoder_embed_dim": 768,
+                "encoder_depth": 12,
+                "encoder_num_heads": 12,
+                "encoder_global_attn_indexes": [2, 5, 8, 11],
+            }
+            with open(sam_config_path, 'w') as f:
+                json.dump(sam_config, f)
+            # Wrap and save as flashpack
+            wrapped_sam = FlashPackSAMWrapper(sam_model)
+            wrapped_sam.save_flashpack(str(sam_flashpack_path), target_dtype=torch.float32)
+            print(f"SAM flashpack creation took {time.perf_counter() - start:.2f}s")
+            del wrapped_sam, sam_model
+            torch.cuda.empty_cache()
+
+        # Use flashpack checkpoint if it exists
+        if sam_flashpack_path.exists():
+            sam_ckpt_path = sam_flashpack_path
+
+        # For AOT, just use regular caching since it's smaller
+        # (FlashPack overhead might not be worth it for smaller models)
+
+        return sam_ckpt_path, aot_ckpt_path
 
     def track(self, frame_data: VideoFrame) -> tuple[torch.Tensor, dict[int, str]]:
         """

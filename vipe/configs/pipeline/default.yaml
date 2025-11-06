@@ -7,6 +7,7 @@ instance: vipe.pipeline.default.DefaultAnnotationPipeline
 init:
   camera_type: "pinhole"
   intrinsics: "geocalib"
+  use_flashpack: true # Use FlashPack for faster TrackAnything (SAM) loading
   instance:
     kf_gap_sec: 2.0
     phrases: 
@@ -28,6 +29,7 @@ slam:
 # Post-processing configs
 post:
   depth_align_model: "adaptive_unidepth-l_gc"
+  use_flashpack: true # Use FlashPack for faster GeometryCrafter/MoGe loading
 
 # Output configs
 output:
