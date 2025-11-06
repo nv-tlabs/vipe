@@ -181,11 +181,27 @@ class DefaultAnnotationPipeline(Pipeline):
             for view_idx, slam_stream in enumerate(slam_streams)
         ]
         
-        # Dumping artifacts for all views in the streams
+        # Force eager caching by triggering one full iteration
+        # This processes all frames while models are loaded, stores them in CPU memory
+        logger.info("Pre-caching all frames with models loaded...")
+        for view_idx, output_stream in enumerate(output_streams):
+            logger.info(f"Pre-caching view {view_idx}...")
+            # Trigger full iteration to populate cache
+            _ = [frame for frame in output_stream]
+            logger.info(f"View {view_idx} cached {len(output_stream)} frames")
+        
+        # Now clear all models - frames are cached, no longer need GPU models
+        logger.info("Clearing depth models from all processors...")
+        for output_stream in output_streams:
+            output_stream.clear_processor_models()
+        torch.cuda.empty_cache()
+        logger.info("All depth models cleared, GPU memory freed")
+        
+        # Dumping artifacts for all views from the cache (no models needed)
         for output_stream, artifact_path in zip(output_streams, artifact_paths):
             artifact_path.meta_info_path.parent.mkdir(exist_ok=True, parents=True)
             if self.out_cfg.save_artifacts:
-                logger.info(f"Saving artifacts to {artifact_path}")
+                logger.info(f"Saving artifacts to {artifact_path} (from cache)")
                 io.save_artifacts(
                     artifact_path, 
                     output_stream,
