@@ -463,6 +463,24 @@ class ProcessedVideoStream(VideoStream):
 
     def name(self) -> str:
         return self.stream.name()
+    
+    def clear_processor_models(self) -> None:
+        """Clear GPU models from processors to free memory."""
+        for processor in self.processors:
+            # Clear models from AdaptiveDepthProcessor
+            if hasattr(processor, 'video_depth_model'):
+                del processor.video_depth_model
+                processor.video_depth_model = None
+            if hasattr(processor, 'depth_model'):
+                del processor.depth_model
+                processor.depth_model = None
+            if hasattr(processor, 'prior_model'):
+                del processor.prior_model
+                processor.prior_model = None
+            if hasattr(processor, 'point_map_vae'):
+                del processor.point_map_vae
+                processor.point_map_vae = None
+        torch.cuda.empty_cache()
 
     def cache(self, desc: str = "Caching", online: bool = False) -> CachedVideoStream:
         vs = CachedVideoStream(self, desc)

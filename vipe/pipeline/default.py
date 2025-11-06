@@ -158,11 +158,23 @@ class DefaultAnnotationPipeline(Pipeline):
             annotate_output.payload = slam_output
             return annotate_output
 
+        # Create post-processors and cache ALL frames eagerly to ensure processing completes
+        # before we try to save artifacts (prevents OOM during lazy iteration)
+        logger.info("Processing and caching all frames...")
         output_streams = [
-            self._add_post_processors(view_idx, slam_stream, slam_output).cache("depth", online=True)
+            self._add_post_processors(view_idx, slam_stream, slam_output).cache("depth", online=False)
             for view_idx, slam_stream in enumerate(slam_streams)
         ]
 
+        # Clear GPU memory before saving artifacts to prevent OOM
+        # Delete SLAM pipeline and depth models from processors
+        logger.info("Clearing GPU memory before artifact saving...")
+        del slam_pipeline
+        for stream in output_streams:
+            if hasattr(stream, 'stream') and hasattr(stream.stream, 'clear_processor_models'):
+                stream.stream.clear_processor_models()
+        torch.cuda.empty_cache()
+        
         # Dumping artifacts for all views in the streams
         for output_stream, artifact_path in zip(output_streams, artifact_paths):
             artifact_path.meta_info_path.parent.mkdir(exist_ok=True, parents=True)
