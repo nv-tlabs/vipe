@@ -284,6 +284,8 @@ class UniDepthV2(
             )
         rgb = F.pad(rgb, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
         rgb = F.interpolate(rgb, size=(new_H, new_W), mode="bilinear", align_corners=False)
+        # Match input dtype to model weights (e.g., fp16 when loaded via FlashPack)
+        rgb = rgb.to(next(self.parameters()).dtype)
         # -> camera preprocess
         if camera is not None:
             camera = camera.crop(left=-pad_left, top=-pad_top, right=-pad_right, bottom=-pad_bottom)
