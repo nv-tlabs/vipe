@@ -374,7 +374,7 @@ class Decoder(nn.Module):
         device = intrinsics.device
         dtype = intrinsics.dtype
 
-        id_coords = coords_grid(B, H, W, device=features.device, homogeneous=True)
+        id_coords = coords_grid(B, H, W, device=features.device, homogeneous=True).to(dtype)
         intrinsics_matrix_inverse = torch.eye(3, device=device, dtype=dtype).repeat(
             B, 1, 1
         )

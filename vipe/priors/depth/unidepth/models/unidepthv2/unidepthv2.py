@@ -267,6 +267,7 @@ class UniDepthV2(
             camera = camera.to(self.device)
         B, _, H, W = rgb.shape
 
+        target_dtype = next(self.parameters()).dtype
         rgb = rgb.to(self.device)
         if camera is not None:
             camera = camera.to(self.device)
@@ -284,12 +285,17 @@ class UniDepthV2(
             )
         rgb = F.pad(rgb, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
         rgb = F.interpolate(rgb, size=(new_H, new_W), mode="bilinear", align_corners=False)
-        # Match input dtype to model weights (e.g., fp16 when loaded via FlashPack)
-        rgb = rgb.to(next(self.parameters()).dtype)
+        rgb = rgb.to(target_dtype)
         # -> camera preprocess
         if camera is not None:
             camera = camera.crop(left=-pad_left, top=-pad_top, right=-pad_right, bottom=-pad_bottom)
             camera = camera.resize(resize_factor)
+            camera.K = camera.K.to(target_dtype)
+            camera.params = camera.params.to(target_dtype)
+
+            for cam in Camera.flatten_cameras([camera]):
+                cam.K = cam.K.to(target_dtype)
+                cam.params = cam.params.to(target_dtype)
 
         # run model
         _, model_outputs = self.encode_decode(inputs={"image": rgb, "camera": camera}, image_metas=[])
