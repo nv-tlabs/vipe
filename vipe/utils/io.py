@@ -640,12 +640,13 @@ def save_manifest(
     """Save manifest.json with metadata and file structure."""
     
     depth_format_info = {
-        "format": "fp16_zlib",
-        "file": f"depth/{out_path.artifact_name}.bin.zlib",
+        "format": "fp16_zlib_per_frame",
+        "directory": f"depth/{out_path.artifact_name}/",
         "frame_count": 0,
+        "resolution": [0, 0],
         "dtype": "float16",
         "units": "meters",
-        "description": "Single-file zlib-compressed fp16 binary"
+        "description": "Per-frame zlib-compressed fp16 binary files"
     }
     
     manifest = {
@@ -700,6 +701,7 @@ def save_manifest(
     manifest["data"]["rgb"]["frame_count"] = T
     manifest["data"]["rgb"]["resolution"] = [W, H]
     manifest["data"]["depth"]["frame_count"] = T
+    manifest["data"]["depth"]["resolution"] = [W, H]
     manifest["data"]["poses"]["shape"] = [T, 4, 4]
     manifest["data"]["poses_inv"]["shape"] = [T, 4, 4]
     manifest["data"]["intrinsics"]["shape"] = [T, 4]
