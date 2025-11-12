@@ -366,20 +366,6 @@ def save_depth_artifacts(
     depth_dir = base_path / out_path.artifact_name
     depth_dir.mkdir(exist_ok=True, parents=True)
     
-    # Get frame shape from first frame
-    first_depth = metric_depth_list[0][1]
-    H, W = first_depth.shape
-    
-    # Create manifest with metadata
-    manifest = {
-        "format": "fp16_zlib_per_frame",
-        "dtype": "float16",
-        "compression": f"zlib_level_{zlib_level}",
-        "total_frames": len(metric_depth_list),
-        "frame_shape": [H, W],
-        "frames": {}
-    }
-    
     # Use lower compression for per-frame (faster, still good ratio)
     # Per-frame compression is less efficient, so we use level 3 instead of 6
     # This trades ~5% larger files for ~2x faster compression
@@ -401,18 +387,6 @@ def save_depth_artifacts(
         # Save frame data
         with open(frame_path, 'wb') as f:
             f.write(compressed_bytes)
-        
-        # Record frame metadata
-        manifest["frames"][frame_idx] = {
-            "uncompressed_size": len(depth_bytes),
-            "compressed_size": len(compressed_bytes),
-            "shape": [H, W]
-        }
-    
-    # Save manifest
-    manifest_path = depth_dir / "manifest.json"
-    with open(manifest_path, 'w') as f:
-        json.dump(manifest, f, indent=2)
 
 
 def read_depth_artifacts(depth_path: Path, start_idx: int = 0, end_idx: int = -1) -> tuple[np.ndarray, dict]:
