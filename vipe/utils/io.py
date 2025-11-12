@@ -328,17 +328,17 @@ def save_depth_artifacts(
     zlib_level: int = 6,
     separate_frames: bool = True,
 ) -> None:
-    """Save depth frames as individual per-frame binaries (default) or single compressed file.
+    """Save depth frames as individual per-frame binaries.
     
     Args:
         out_path: Output artifact path
         cached_final_stream: Video stream with depth data
         gt: Whether this is ground truth depth
         zlib_level: Compression level (0-9). Set to 0 to disable compression.
-        separate_frames: If True, save each frame as separate .bin file. If False, use legacy single file.
+        separate_frames: If True, save each frame as separate .bin file (default, recommended).
     
     Note:
-        For separate_frames=True, uses lower compression (level 3) automatically for better speed.
+        Uses compression level 3 automatically for optimal speed/size balance.
         Compression adds ~10-20ms per frame but reduces size by ~50%.
     """
     if gt:
@@ -359,86 +359,60 @@ def save_depth_artifacts(
     
     base_path.mkdir(exist_ok=True, parents=True)
     
-    if separate_frames:
-        # Save each depth frame as individual binary file
-        depth_dir = base_path / out_path.artifact_name
-        depth_dir.mkdir(exist_ok=True, parents=True)
+    if not separate_frames:
+        logger.warning("separate_frames=False is deprecated. Using separate_frames=True.")
+    
+    # Save each depth frame as individual binary file
+    depth_dir = base_path / out_path.artifact_name
+    depth_dir.mkdir(exist_ok=True, parents=True)
+    
+    # Get frame shape from first frame
+    first_depth = metric_depth_list[0][1]
+    H, W = first_depth.shape
+    
+    # Create manifest with metadata
+    manifest = {
+        "format": "fp16_zlib_per_frame",
+        "dtype": "float16",
+        "compression": f"zlib_level_{zlib_level}",
+        "total_frames": len(metric_depth_list),
+        "frame_shape": [H, W],
+        "frames": {}
+    }
+    
+    # Use lower compression for per-frame (faster, still good ratio)
+    # Per-frame compression is less efficient, so we use level 3 instead of 6
+    # This trades ~5% larger files for ~2x faster compression
+    frame_zlib_level = min(3, zlib_level) if zlib_level > 0 else 0
+    
+    # Save each frame
+    for frame_idx, depth_data in metric_depth_list:
+        frame_path = depth_dir / f"{frame_idx:05d}.bin"
         
-        # Get frame shape from first frame
-        first_depth = metric_depth_list[0][1]
-        H, W = first_depth.shape
+        # Convert to fp16
+        depth_bytes = depth_data.astype(np.float16).tobytes()
         
-        # Create manifest with metadata
-        manifest = {
-            "format": "fp16_zlib_per_frame",
-            "dtype": "float16",
-            "compression": f"zlib_level_{zlib_level}",
-            "total_frames": len(metric_depth_list),
-            "frame_shape": [H, W],
-            "frames": {}
-        }
+        # Compress if requested, otherwise save raw
+        if frame_zlib_level > 0:
+            compressed_bytes = zlib.compress(depth_bytes, level=frame_zlib_level)
+        else:
+            compressed_bytes = depth_bytes
         
-        # Use lower compression for per-frame (faster, still good ratio)
-        # Per-frame compression is less efficient, so we use level 3 instead of 6
-        # This trades ~5% larger files for ~2x faster compression
-        frame_zlib_level = min(3, zlib_level) if zlib_level > 0 else 0
-        
-        # Save each frame
-        for frame_idx, depth_data in metric_depth_list:
-            frame_path = depth_dir / f"{frame_idx:05d}.bin"
-            
-            # Convert to fp16
-            depth_bytes = depth_data.astype(np.float16).tobytes()
-            
-            # Compress if requested, otherwise save raw
-            if frame_zlib_level > 0:
-                compressed_bytes = zlib.compress(depth_bytes, level=frame_zlib_level)
-            else:
-                compressed_bytes = depth_bytes
-            
-            # Save frame data
-            with open(frame_path, 'wb') as f:
-                f.write(compressed_bytes)
-            
-            # Record frame metadata
-            manifest["frames"][frame_idx] = {
-                "uncompressed_size": len(depth_bytes),
-                "compressed_size": len(compressed_bytes),
-                "shape": [H, W]
-            }
-        
-        # Save manifest
-        manifest_path = depth_dir / "manifest.json"
-        with open(manifest_path, 'w') as f:
-            json.dump(manifest, f, indent=2)
-            
-    else:
-        # Legacy: Save all frames in a single zlib-compressed binary file
-        path = out_path.eval_gt_depth_path if gt else out_path.depth_path
-        
-        # Stack all frames into single array [T, H, W]
-        depth_array = np.stack([depth for _, depth in metric_depth_list], axis=0)
-        T, H, W = depth_array.shape
-        
-        # Convert to fp16 and compress
-        depth_bytes = depth_array.astype(np.float16).tobytes()
-        compressed_bytes = zlib.compress(depth_bytes, level=zlib_level)
-        
-        # Save metadata + compressed data (path already has .bin.zlib extension)
-        metadata = {
-            "format": "fp16_zlib",
-            "shape": [T, H, W],
-            "dtype": "float16",
-            "compression": f"zlib_level_{zlib_level}",
-            "uncompressed_size": len(depth_bytes),
-            "compressed_size": len(compressed_bytes)
-        }
-        
-        with open(path, 'wb') as f:
-            metadata_json = json.dumps(metadata).encode('utf-8')
-            f.write(struct.pack('I', len(metadata_json)))
-            f.write(metadata_json)
+        # Save frame data
+        with open(frame_path, 'wb') as f:
             f.write(compressed_bytes)
+        
+        # Record frame metadata
+        manifest["frames"][frame_idx] = {
+            "uncompressed_size": len(depth_bytes),
+            "compressed_size": len(compressed_bytes),
+            "shape": [H, W]
+        }
+    
+    # Save manifest
+    manifest_path = depth_dir / "manifest.json"
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
 
 
 def read_depth_artifacts(depth_path: Path, start_idx: int = 0, end_idx: int = -1) -> tuple[np.ndarray, dict]:
