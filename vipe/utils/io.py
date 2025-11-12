@@ -366,10 +366,8 @@ def save_depth_artifacts(
     depth_dir = base_path / out_path.artifact_name
     depth_dir.mkdir(exist_ok=True, parents=True)
     
-    # Use lower compression for per-frame (faster, still good ratio)
-    # Per-frame compression is less efficient, so we use level 3 instead of 6
-    # This trades ~5% larger files for ~2x faster compression
-    frame_zlib_level = min(3, zlib_level) if zlib_level > 0 else 0
+    # Use the requested compression level for per-frame
+    frame_zlib_level = zlib_level
     
     # Save each frame
     for frame_idx, depth_data in metric_depth_list:
