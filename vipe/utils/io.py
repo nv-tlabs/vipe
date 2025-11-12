@@ -669,13 +669,20 @@ def save_manifest(
     
     T = len(frames)
     first_frame = frames[0]
-    H, W = first_frame.rgb.shape[0], first_frame.rgb.shape[1]
+    H_rgb, W_rgb = first_frame.rgb.shape[0], first_frame.rgb.shape[1]
+    
+    # Get actual depth dimensions (may differ from RGB)
+    if first_frame.metric_depth is not None:
+        H_depth, W_depth = first_frame.metric_depth.shape[0], first_frame.metric_depth.shape[1]
+    else:
+        # Fallback to RGB dimensions if depth not available
+        H_depth, W_depth = H_rgb, W_rgb
     
     # Update frame counts and resolution
     manifest["data"]["rgb"]["frame_count"] = T
-    manifest["data"]["rgb"]["resolution"] = [W, H]
+    manifest["data"]["rgb"]["resolution"] = [W_rgb, H_rgb]
     manifest["data"]["depth"]["frame_count"] = T
-    manifest["data"]["depth"]["resolution"] = [W, H]
+    manifest["data"]["depth"]["resolution"] = [W_depth, H_depth]
     manifest["data"]["poses"]["shape"] = [T, 4, 4]
     manifest["data"]["poses_inv"]["shape"] = [T, 4, 4]
     manifest["data"]["intrinsics"]["shape"] = [T, 4]
