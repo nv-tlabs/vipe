@@ -706,19 +706,19 @@ def save_manifest(
         manifest["metadata"]["depth_range"] = [0.0, 1.0]
     
     manifest["metadata"]["total_frames"] = T
-    manifest["metadata"]["resolution"] = [W, H]
+    manifest["metadata"]["resolution"] = [W_rgb, H_rgb]
     manifest["metadata"]["base_fps"] = cached_final_stream.fps()
     
     # Compute FOV from first frame intrinsics
     if first_frame.intrinsics is not None:
         intr = first_frame.intrinsics.cpu().numpy()
         fx, fy = intr[0], intr[1]
-        fov_x = float(2 * np.arctan(W / (2 * fx)) * 180 / np.pi)
-        fov_y = float(2 * np.arctan(H / (2 * fy)) * 180 / np.pi)
+        fov_x = float(2 * np.arctan(W_rgb / (2 * fx)) * 180 / np.pi)
+        fov_y = float(2 * np.arctan(H_rgb / (2 * fy)) * 180 / np.pi)
         manifest["metadata"]["fov_x"] = fov_x
         manifest["metadata"]["fov_y"] = fov_y
     
-    manifest["metadata"]["aspect_ratio"] = float(W / H)
+    manifest["metadata"]["aspect_ratio"] = float(W_rgb / H_rgb)
     
     # Save manifest
     manifest_path = out_path.base_path / "manifest.json"
