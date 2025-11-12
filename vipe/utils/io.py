@@ -326,14 +326,23 @@ def save_depth_artifacts(
     cached_final_stream: VideoStream, 
     gt: bool = False,
     zlib_level: int = 6,
+    separate_frames: bool = True,
 ) -> None:
-    """Save all depth frames in a single zlib-compressed binary file (fp16)."""
+    """Save depth frames as individual per-frame binaries (default) or single compressed file.
+    
+    Args:
+        out_path: Output artifact path
+        cached_final_stream: Video stream with depth data
+        gt: Whether this is ground truth depth
+        zlib_level: Compression level (0-9)
+        separate_frames: If True, save each frame as separate .bin file. If False, use legacy single file.
+    """
     if gt:
         metric_depth_list = cached_final_stream.get_gt_stream_attribute(FrameAttribute.METRIC_DEPTH)
-        path = out_path.eval_gt_depth_path
+        base_path = out_path.eval_gt_depth_path.parent
     else:
         metric_depth_list = cached_final_stream.get_stream_attribute(FrameAttribute.METRIC_DEPTH)
-        path = out_path.depth_path
+        base_path = out_path.depth_path.parent
 
     metric_depth_list = [
         (frame_idx, depth_data.cpu().numpy())
@@ -344,31 +353,78 @@ def save_depth_artifacts(
     if len(metric_depth_list) == 0:
         return
     
-    path.parent.mkdir(exist_ok=True, parents=True)
+    base_path.mkdir(exist_ok=True, parents=True)
     
-    # Stack all frames into single array [T, H, W]
-    depth_array = np.stack([depth for _, depth in metric_depth_list], axis=0)
-    T, H, W = depth_array.shape
-    
-    # Convert to fp16 and compress
-    depth_bytes = depth_array.astype(np.float16).tobytes()
-    compressed_bytes = zlib.compress(depth_bytes, level=zlib_level)
-    
-    # Save metadata + compressed data (path already has .bin.zlib extension)
-    metadata = {
-        "format": "fp16_zlib",
-        "shape": [T, H, W],
-        "dtype": "float16",
-        "compression": f"zlib_level_{zlib_level}",
-        "uncompressed_size": len(depth_bytes),
-        "compressed_size": len(compressed_bytes)
-    }
-    
-    with open(path, 'wb') as f:
-        metadata_json = json.dumps(metadata).encode('utf-8')
-        f.write(struct.pack('I', len(metadata_json)))
-        f.write(metadata_json)
-        f.write(compressed_bytes)
+    if separate_frames:
+        # Save each depth frame as individual binary file
+        depth_dir = base_path / out_path.artifact_name
+        depth_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Get frame shape from first frame
+        first_depth = metric_depth_list[0][1]
+        H, W = first_depth.shape
+        
+        # Create manifest with metadata
+        manifest = {
+            "format": "fp16_zlib_per_frame",
+            "dtype": "float16",
+            "compression": f"zlib_level_{zlib_level}",
+            "total_frames": len(metric_depth_list),
+            "frame_shape": [H, W],
+            "frames": {}
+        }
+        
+        # Save each frame
+        for frame_idx, depth_data in metric_depth_list:
+            frame_path = depth_dir / f"{frame_idx:05d}.bin"
+            
+            # Convert to fp16 and compress
+            depth_bytes = depth_data.astype(np.float16).tobytes()
+            compressed_bytes = zlib.compress(depth_bytes, level=zlib_level)
+            
+            # Save compressed frame
+            with open(frame_path, 'wb') as f:
+                f.write(compressed_bytes)
+            
+            # Record frame metadata
+            manifest["frames"][frame_idx] = {
+                "uncompressed_size": len(depth_bytes),
+                "compressed_size": len(compressed_bytes),
+                "shape": [H, W]
+            }
+        
+        # Save manifest
+        manifest_path = depth_dir / "manifest.json"
+        with open(manifest_path, 'w') as f:
+            json.dump(manifest, f, indent=2)
+            
+    else:
+        # Legacy: Save all frames in a single zlib-compressed binary file
+        path = out_path.eval_gt_depth_path if gt else out_path.depth_path
+        
+        # Stack all frames into single array [T, H, W]
+        depth_array = np.stack([depth for _, depth in metric_depth_list], axis=0)
+        T, H, W = depth_array.shape
+        
+        # Convert to fp16 and compress
+        depth_bytes = depth_array.astype(np.float16).tobytes()
+        compressed_bytes = zlib.compress(depth_bytes, level=zlib_level)
+        
+        # Save metadata + compressed data (path already has .bin.zlib extension)
+        metadata = {
+            "format": "fp16_zlib",
+            "shape": [T, H, W],
+            "dtype": "float16",
+            "compression": f"zlib_level_{zlib_level}",
+            "uncompressed_size": len(depth_bytes),
+            "compressed_size": len(compressed_bytes)
+        }
+        
+        with open(path, 'wb') as f:
+            metadata_json = json.dumps(metadata).encode('utf-8')
+            f.write(struct.pack('I', len(metadata_json)))
+            f.write(metadata_json)
+            f.write(compressed_bytes)
 
 
 def read_depth_artifacts(depth_path: Path, start_idx: int = 0, end_idx: int = -1) -> tuple[np.ndarray, dict]:
