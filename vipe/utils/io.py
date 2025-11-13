@@ -607,18 +607,27 @@ def save_binary_artifacts(
 
 def save_manifest(
     out_path: ArtifactPath, 
-    cached_final_stream: VideoStream
+    cached_final_stream: VideoStream,
+    zlib_level: int = 6
 ) -> None:
     """Save manifest.json with metadata and file structure."""
     
+    # Determine format based on compression level
+    if zlib_level > 0:
+        depth_format = "fp16_zlib_per_frame"
+        depth_description = f"Per-frame zlib-compressed (level {zlib_level}) fp16 binary files"
+    else:
+        depth_format = "fp16_raw_per_frame"
+        depth_description = "Per-frame raw (uncompressed) fp16 binary files"
+    
     depth_format_info = {
-        "format": "fp16_zlib_per_frame",
+        "format": depth_format,
         "directory": f"depth/{out_path.artifact_name}/",
         "frame_count": 0,
         "resolution": [0, 0],
         "dtype": "float16",
         "units": "meters",
-        "description": "Per-frame zlib-compressed fp16 binary files"
+        "description": depth_description
     }
     
     manifest = {
