@@ -26,7 +26,7 @@ def get_func(func_name):
         module_name = ".".join(parts[:-1])
         module = importlib.import_module(module_name)
         return getattr(module, parts[-1])
-    except:
+    except Exception:
         raise RuntimeError(f"Failed to find function: {func_name}")
 
 

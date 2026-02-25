@@ -1155,14 +1155,14 @@ def load_ckpt_dino(checkpoint, model):
         try:
             with open(checkpoint, "rb") as f:
                 state_dict = torch.load(f)
-        except:
+        except Exception:
             print("NO pretrained imagenet ckpt available! Check your path!")
             del model.mask_token
             return
 
         try:
             model.load_state_dict(state_dict, strict=True)
-        except:
+        except Exception:
             new_state_dict = {}
             for key, value in state_dict.items():
                 if "blocks" in key:
@@ -1226,7 +1226,7 @@ def vit_large(patch_size=14, num_register_tokens=0, checkpoint=None, **kwargs):
             state_dict = torch.load(f)
         try:
             model.load_state_dict(state_dict, strict=True)
-        except:
+        except Exception:
             new_state_dict = {}
             for key, value in state_dict.items():
                 if "blocks" in key:
@@ -1338,7 +1338,7 @@ def vit_giant2_reg(patch_size=14, num_register_tokens=4, checkpoint=None, tuning
 if __name__ == "__main__":
     try:
         from mmcv.utils import Config
-    except:
+    except Exception:
         from mmengine import Config
 
     # rgb = torch.rand((2, 3, 518, 518)).cuda()
