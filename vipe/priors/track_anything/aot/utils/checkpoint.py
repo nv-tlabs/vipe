@@ -113,7 +113,7 @@ def save_network(net, opt, step, save_path, max_keep=8, backup_dir="./saved_mode
         save_file = "save_step_%s.pth" % (step)
         save_dir = os.path.join(save_path, save_file)
         torch.save(ckpt, save_dir)
-    except:
+    except Exception:
         save_path = backup_dir
         if not os.path.exists(save_path):
             os.makedirs(save_path)

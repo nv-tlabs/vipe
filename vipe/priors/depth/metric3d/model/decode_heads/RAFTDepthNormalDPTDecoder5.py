@@ -1012,7 +1012,7 @@ class RAFTDepthNormalDPT5(nn.Module):
         self.regress_scale = 100.0
         try:
             tuning_mode = cfg.model.decode_head.tuning_mode
-        except:
+        except Exception:
             tuning_mode = None
         self.tuning_mode = tuning_mode
 
