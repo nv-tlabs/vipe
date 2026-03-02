@@ -229,12 +229,14 @@ class DefaultAnnotationPipeline(Pipeline):
                         depth_o3d = o3d.geometry.Image(depth)
                         
                         # --- Dynamic Depth Truncation ---
-                        # If "auto", dynamically calculate the 95th percentile to cut off noisy distant background
+                        # If "auto", use Median + 3*MAD to robustly bound the scene and drop distant outliers (like sky/windows)
                         raw_trunc = self.out_cfg.get("tsdf_depth_trunc", "auto")
                         if str(raw_trunc).lower() == "auto":
                             valid_depths = depth[depth > 0]
                             if len(valid_depths) > 0:
-                                depth_trunc_val = float(np.percentile(valid_depths, 95))
+                                median_depth = float(np.median(valid_depths))
+                                mad = float(np.median(np.abs(valid_depths - median_depth)))
+                                depth_trunc_val = median_depth + (3.0 * mad)
                             else:
                                 depth_trunc_val = 10.0 # Fallback
                         else:
