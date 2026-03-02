@@ -228,8 +228,20 @@ class DefaultAnnotationPipeline(Pipeline):
                         rgb_o3d = o3d.geometry.Image(rgb)
                         depth_o3d = o3d.geometry.Image(depth)
                         
+                        # --- Dynamic Depth Truncation ---
+                        # If "auto", dynamically calculate the 95th percentile to cut off noisy distant background
+                        raw_trunc = self.out_cfg.get("tsdf_depth_trunc", "auto")
+                        if str(raw_trunc).lower() == "auto":
+                            valid_depths = depth[depth > 0]
+                            if len(valid_depths) > 0:
+                                depth_trunc_val = float(np.percentile(valid_depths, 95))
+                            else:
+                                depth_trunc_val = 10.0 # Fallback
+                        else:
+                            depth_trunc_val = float(raw_trunc)
+                        # --------------------------------
+
                         # Note: depth_scale MUST be 1.0 because ViPE outputs metric depth
-                        depth_trunc_val = self.out_cfg.get("tsdf_depth_trunc", 10.0)
                         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
                             rgb_o3d, depth_o3d, depth_scale=1.0, depth_trunc=depth_trunc_val, convert_rgb_to_intensity=False
                         )

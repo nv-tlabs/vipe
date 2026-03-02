@@ -54,8 +54,8 @@ output:
   tsdf_sdf_trunc: 0.04
   
   # Maximum depth (in meters) to integrate. 
-  # Pixels further than this are ignored. 10.0 is great for indoors. Try 20.0 or 50.0 for outdoors.
-  tsdf_depth_trunc: 10.0
+  # Set to a float (e.g. 10.0, 50.0) for a hard cutoff, or "auto" to dynamically truncate the furthest 5% of noisy depth pixels per frame.
+  tsdf_depth_trunc: "auto"
   # Set this to true to rotate the point cloud 180 degrees around the X-axis before saving.
   tsdf_flip_x_axis: false
 
