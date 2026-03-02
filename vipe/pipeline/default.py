@@ -229,14 +229,14 @@ class DefaultAnnotationPipeline(Pipeline):
                         depth_o3d = o3d.geometry.Image(depth)
                         
                         # --- Dynamic Depth Truncation ---
-                        # If "auto", use Median + 3*MAD to robustly bound the scene and drop distant outliers (like sky/windows)
+                        # If "auto", use robust IQR (Interquartile Range) to drop distant sky/noise while preserving continuous horizons.
                         raw_trunc = self.out_cfg.get("tsdf_depth_trunc", "auto")
                         if str(raw_trunc).lower() == "auto":
                             valid_depths = depth[depth > 0]
                             if len(valid_depths) > 0:
-                                median_depth = float(np.median(valid_depths))
-                                mad = float(np.median(np.abs(valid_depths - median_depth)))
-                                depth_trunc_val = median_depth + (3.0 * mad)
+                                q75, q25 = np.percentile(valid_depths, [75, 25])
+                                iqr = q75 - q25
+                                depth_trunc_val = float(q75 + (1.5 * iqr))
                             else:
                                 depth_trunc_val = 10.0 # Fallback
                         else:
