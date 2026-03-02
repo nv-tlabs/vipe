@@ -1,6 +1,13 @@
 # ViPE: Video Pose Engine for Geometric 3D Perception (with Voxel-Aligned TSDF Integration)
 
-> **Fork Update:** This repository is a customized fork of NVIDIA's ViPE. It introduces **Voxel-Aligned TSDF Integration** utilizing Open3D to bypass the "Pixel-Aligned Trap" of standard dense depth unprojection. This ensures that overlapping fragmentation and view-bias are mathematically averaged out into a sparse, uniform point cloud (`.ply`). It can be enabled by setting `save_tsdf_ply: true` in the pipeline config (`configs/pipeline/default.yaml`).
+> **Fork Update:** This repository is a customized fork of NVIDIA's ViPE. It introduces **Voxel-Aligned TSDF Integration** utilizing Open3D to bypass the "Pixel-Aligned Trap" of standard dense depth unprojection. This ensures that overlapping fragmentation and view-bias are mathematically averaged out into a sparse, uniform point cloud (`.ply`). 
+>
+> In addition to the base TSDF fusion, this fork includes:
+> - **Dynamic Object Masking:** Leverages ViPE's dynamic masks to ignore moving objects, preventing "ghost" floaters in the static environment.
+> - **Depth Edge Pruning:** Calculates spatial gradients using Sobel operators and drops high-gradient pixels (to eliminate DA3's "comet tail" smearing over hard boundaries).
+> - **Statistical Outlier Removal (SOR):** Applies a final cleanup pass over the extracted point cloud to strip out any rogue voxels that survived the integration.
+> 
+> It can be enabled by setting `save_tsdf_ply: true` in the pipeline config (`configs/pipeline/default.yaml`).
 > 
 > *Changes made by nbardy.*
 

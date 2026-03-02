@@ -208,6 +208,15 @@ class DefaultAnnotationPipeline(Pipeline):
                             depth[~valid_mask] = 0.0
                         # ------------------------------
 
+                        # --- Depth Edge Pruning ---
+                        import cv2
+                        grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=3)
+                        grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=3)
+                        grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+                        edge_mask = grad_mag > 0.5  
+                        depth[edge_mask] = 0.0
+                        # --------------------------
+
                         rgb_o3d = o3d.geometry.Image(rgb)
                         depth_o3d = o3d.geometry.Image(depth)
                         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
@@ -225,7 +234,13 @@ class DefaultAnnotationPipeline(Pipeline):
 
                     tsdf_mesh_path = artifact_path.meta_info_path.parent / f"{artifact_path.artifact_name}_tsdf.ply"
                     pcd = volume.extract_point_cloud()
-                    o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd)
+
+                    # --- Statistical Outlier Removal (SOR) ---
+                    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
+                    pcd_clean = pcd.select_by_index(ind)
+                    # -----------------------------------------
+
+                    o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd_clean)
                     logger.info(f"Saved TSDF point cloud to {tsdf_mesh_path}")
                 except ImportError:
                     logger.error("Open3D is not installed. Please install open3d to generate TSDF ply.")
