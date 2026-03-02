@@ -60,8 +60,8 @@ output:
   tsdf_apply_dynamic_mask: true
   
   # Depth Edge Pruning (drops depth discontinuity pixels to avoid flying pixels/comet tails)
-  tsdf_apply_edge_pruning: false
-  tsdf_edge_pruning_threshold: 0.5
+  tsdf_apply_edge_pruning: true
+  tsdf_edge_pruning_threshold: 1.0
   
   # Statistical Outlier Removal (cleans up floating noise in the final point cloud)
   tsdf_apply_sor: true
