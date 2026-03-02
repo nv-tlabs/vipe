@@ -229,8 +229,9 @@ class DefaultAnnotationPipeline(Pipeline):
                         depth_o3d = o3d.geometry.Image(depth)
                         
                         # Note: depth_scale MUST be 1.0 because ViPE outputs metric depth
+                        depth_trunc_val = self.out_cfg.get("tsdf_depth_trunc", 10.0)
                         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-                            rgb_o3d, depth_o3d, depth_scale=1.0, depth_trunc=10.0, convert_rgb_to_intensity=False
+                            rgb_o3d, depth_o3d, depth_scale=1.0, depth_trunc=depth_trunc_val, convert_rgb_to_intensity=False
                         )
 
                         fx, fy, cx, cy = frame_data.intrinsics.cpu().numpy()

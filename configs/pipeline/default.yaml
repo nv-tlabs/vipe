@@ -53,7 +53,9 @@ output:
   tsdf_voxel_length: 0.01
   tsdf_sdf_trunc: 0.04
   
-  # Coordinate System: ViPE/Open3D use OpenCV (Y-down, Z-forward). Many Gaussian Splatting backends use OpenGL (Y-up).
+  # Maximum depth (in meters) to integrate. 
+  # Pixels further than this are ignored. 10.0 is great for indoors. Try 20.0 or 50.0 for outdoors.
+  tsdf_depth_trunc: 10.0
   # Set this to true to rotate the point cloud 180 degrees around the X-axis before saving.
   tsdf_flip_x_axis: false
 
