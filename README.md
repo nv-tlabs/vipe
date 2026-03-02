@@ -5,6 +5,7 @@
 > In addition to the base TSDF fusion, this fork includes several advanced filtering steps, all of which are configurable in `configs/pipeline/default.yaml`:
 > 
 > - **Dynamic Object Masking (`tsdf_apply_dynamic_mask: true`):** Leverages ViPE's dynamic masks to ignore moving objects (people, cars), preventing "ghost" floaters in the static environment.
+> - **Dynamic Depth Truncation (`tsdf_depth_trunc: "auto"`):** Distant monocular depth predictions carry exponentially more noise. Rather than using a hardcoded cutoff (like 10 meters), setting this to `"auto"` dynamically calculates the Interquartile Range (IQR) fence (`Q3 + 1.5 * IQR`) of the depth map per frame. This mathematically bounds the scene, safely preserving continuous deep horizons while amputating noisy sky-box errors.
 > - **Relative Depth Pruning (`tsdf_apply_edge_pruning: true`):** DA3 is monocular and smears depth across occlusion boundaries. Naive absolute pruning deletes thin structures (like wires). We calculate the relative spatial gradient to drop pixels where depth jumps significantly, severing "comet tails" without erasing structural details. You can ablate this via `tsdf_pruning_threshold` (e.g., `0.05` for Aggressive, `0.10` for Balanced, `0.20` for Relaxed).
 > - **Statistical Outlier Removal (SOR) (`tsdf_apply_sor: true`):** Applies a final cleanup pass over the extracted point cloud to strip out any rogue voxels that survived the integration. You can tune this via `tsdf_sor_nb_neighbors` (default `50`) and `tsdf_sor_std_ratio` (default `2.0`).
 > 
