@@ -199,6 +199,15 @@ class DefaultAnnotationPipeline(Pipeline):
                         rgb = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
                         depth = frame_data.metric_depth.cpu().numpy()
 
+                        # --- Dynamic Object Masking ---
+                        # Check if ViPE generated a mask for moving objects
+                        if hasattr(frame_data, 'mask') and frame_data.mask is not None:
+                            # Convert mask to numpy (usually 1 for static, 0 for dynamic/ignored)
+                            valid_mask = frame_data.mask.cpu().numpy().astype(bool)
+                            # Force dynamic pixels to 0.0 so Open3D's TSDF completely ignores them
+                            depth[~valid_mask] = 0.0
+                        # ------------------------------
+
                         rgb_o3d = o3d.geometry.Image(rgb)
                         depth_o3d = o3d.geometry.Image(depth)
                         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
