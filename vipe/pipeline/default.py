@@ -187,8 +187,8 @@ class DefaultAnnotationPipeline(Pipeline):
 
                     logger.info(f"Generating TSDF volume for {artifact_path.artifact_name}")
                     volume = o3d.pipelines.integration.ScalableTSDFVolume(
-                        voxel_length=self.out_cfg.get("tsdf_voxel_length", 0.01),
-                        sdf_trunc=self.out_cfg.get("tsdf_sdf_trunc", 0.04),
+                        voxel_length=self.out_cfg.get("tsdf_voxel_length", 0.005),
+                        sdf_trunc=self.out_cfg.get("tsdf_sdf_trunc", 0.02),
                         color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8
                     )
 
@@ -210,7 +210,7 @@ class DefaultAnnotationPipeline(Pipeline):
                         # ------------------------------
 
                         # --- Depth Edge Pruning ---
-                        if self.out_cfg.get("tsdf_apply_edge_pruning", True):
+                        if self.out_cfg.get("tsdf_apply_edge_pruning", False):
                             import cv2
                             grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=3)
                             grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=3)
@@ -222,6 +222,8 @@ class DefaultAnnotationPipeline(Pipeline):
 
                         rgb_o3d = o3d.geometry.Image(rgb)
                         depth_o3d = o3d.geometry.Image(depth)
+                        
+                        # Note: depth_scale MUST be 1.0 because ViPE outputs metric depth
                         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
                             rgb_o3d, depth_o3d, depth_scale=1.0, depth_trunc=10.0, convert_rgb_to_intensity=False
                         )
@@ -235,6 +237,11 @@ class DefaultAnnotationPipeline(Pipeline):
 
                         volume.integrate(rgbd, intrinsic, w2c)
 
+                        # --- Explicit Memory Management ---
+                        # Force Python to release these arrays immediately to prevent OOM on long videos
+                        del rgb, depth, rgb_o3d, depth_o3d, rgbd, intrinsic, c2w, w2c
+                        # ----------------------------------
+
                     tsdf_mesh_path = artifact_path.meta_info_path.parent / f"{artifact_path.artifact_name}_tsdf.ply"
                     pcd = volume.extract_point_cloud()
 
@@ -245,6 +252,15 @@ class DefaultAnnotationPipeline(Pipeline):
                         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
                         pcd = pcd.select_by_index(ind)
                     # -----------------------------------------
+
+                    # --- Coordinate System Flip ---
+                    # ViPE/Open3D use OpenCV format (Y-down). If the backend expects OpenGL (Y-up), we flip X by 180 degrees.
+                    if self.out_cfg.get("tsdf_flip_x_axis", False):
+                        logger.info("Flipping TSDF point cloud 180 degrees around X-axis for OpenGL compatibility")
+                        # 180 degree rotation around X-axis: [1, 0, 0], [0, -1, 0], [0, 0, -1]
+                        R_x_180 = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+                        pcd.rotate(R_x_180, center=(0, 0, 0))
+                    # ------------------------------
 
                     o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd)
                     logger.info(f"Saved TSDF point cloud to {tsdf_mesh_path}")

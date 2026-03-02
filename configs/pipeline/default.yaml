@@ -49,14 +49,18 @@ output:
   save_tsdf_ply: false
   
   # TSDF specific configurations (only used if save_tsdf_ply is true)
-  tsdf_voxel_length: 0.01
-  tsdf_sdf_trunc: 0.04
+  tsdf_voxel_length: 0.005
+  tsdf_sdf_trunc: 0.02
   
+  # Coordinate System: ViPE/Open3D use OpenCV (Y-down, Z-forward). Many Gaussian Splatting backends use OpenGL (Y-up).
+  # Set this to true to rotate the point cloud 180 degrees around the X-axis before saving.
+  tsdf_flip_x_axis: false
+
   # Dynamic Object Masking (zeroes out depth on moving objects like people, cars)
   tsdf_apply_dynamic_mask: true
   
   # Depth Edge Pruning (drops depth discontinuity pixels to avoid flying pixels/comet tails)
-  tsdf_apply_edge_pruning: true
+  tsdf_apply_edge_pruning: false
   tsdf_edge_pruning_threshold: 0.5
   
   # Statistical Outlier Removal (cleans up floating noise in the final point cloud)
