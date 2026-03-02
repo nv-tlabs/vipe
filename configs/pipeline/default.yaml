@@ -45,6 +45,9 @@ output:
   # Save reconstruction from SLAM
   save_slam_map: false
 
+  # Save point cloud using open3d scalable TSDF volume integration
+  save_tsdf_ply: false
+
   # Visualization videos to BASE_PATH/vipe/xxx.mp4
   save_viz: true
   viz_downsample: 2

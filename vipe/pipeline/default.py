@@ -180,6 +180,47 @@ class DefaultAnnotationPipeline(Pipeline):
                 logger.info(f"Saving SLAM map to {artifact_path.slam_map_path}")
                 slam_output.slam_map.save(artifact_path.slam_map_path)
 
+            if self.out_cfg.get("save_tsdf_ply", False):
+                try:
+                    import open3d as o3d
+                    import numpy as np
+
+                    logger.info(f"Generating TSDF volume for {artifact_path.artifact_name}")
+                    volume = o3d.pipelines.integration.ScalableTSDFVolume(
+                        voxel_length=0.01,
+                        sdf_trunc=0.04,
+                        color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8
+                    )
+
+                    for frame_idx, frame_data in enumerate(output_stream):
+                        if frame_data.pose is None or frame_data.metric_depth is None or frame_data.intrinsics is None:
+                            continue
+
+                        rgb = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
+                        depth = frame_data.metric_depth.cpu().numpy()
+
+                        rgb_o3d = o3d.geometry.Image(rgb)
+                        depth_o3d = o3d.geometry.Image(depth)
+                        rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                            rgb_o3d, depth_o3d, depth_scale=1.0, depth_trunc=10.0, convert_rgb_to_intensity=False
+                        )
+
+                        fx, fy, cx, cy = frame_data.intrinsics.cpu().numpy()
+                        h, w = rgb.shape[:2]
+                        intrinsic = o3d.camera.PinholeCameraIntrinsic(w, h, fx, fy, cx, cy)
+
+                        c2w = frame_data.pose.matrix().cpu().numpy()
+                        w2c = np.linalg.inv(c2w)
+
+                        volume.integrate(rgbd, intrinsic, w2c)
+
+                    tsdf_mesh_path = artifact_path.meta_info_path.parent / f"{artifact_path.artifact_name}_tsdf.ply"
+                    pcd = volume.extract_point_cloud()
+                    o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd)
+                    logger.info(f"Saved TSDF point cloud to {tsdf_mesh_path}")
+                except ImportError:
+                    logger.error("Open3D is not installed. Please install open3d to generate TSDF ply.")
+
         if self.return_output_streams:
             annotate_output.output_streams = output_streams
 
