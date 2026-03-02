@@ -47,6 +47,22 @@ output:
 
   # Save point cloud using open3d scalable TSDF volume integration
   save_tsdf_ply: false
+  
+  # TSDF specific configurations (only used if save_tsdf_ply is true)
+  tsdf_voxel_length: 0.01
+  tsdf_sdf_trunc: 0.04
+  
+  # Dynamic Object Masking (zeroes out depth on moving objects like people, cars)
+  tsdf_apply_dynamic_mask: true
+  
+  # Depth Edge Pruning (drops depth discontinuity pixels to avoid flying pixels/comet tails)
+  tsdf_apply_edge_pruning: true
+  tsdf_edge_pruning_threshold: 0.5
+  
+  # Statistical Outlier Removal (cleans up floating noise in the final point cloud)
+  tsdf_apply_sor: true
+  tsdf_sor_nb_neighbors: 50
+  tsdf_sor_std_ratio: 2.0
 
   # Visualization videos to BASE_PATH/vipe/xxx.mp4
   save_viz: true

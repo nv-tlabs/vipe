@@ -2,12 +2,14 @@
 
 > **Fork Update:** This repository is a customized fork of NVIDIA's ViPE. It introduces **Voxel-Aligned TSDF Integration** utilizing Open3D to bypass the "Pixel-Aligned Trap" of standard dense depth unprojection. This ensures that overlapping fragmentation and view-bias are mathematically averaged out into a sparse, uniform point cloud (`.ply`). 
 >
-> In addition to the base TSDF fusion, this fork includes:
-> - **Dynamic Object Masking:** Leverages ViPE's dynamic masks to ignore moving objects, preventing "ghost" floaters in the static environment.
-> - **Depth Edge Pruning:** Calculates spatial gradients using Sobel operators and drops high-gradient pixels (to eliminate DA3's "comet tail" smearing over hard boundaries).
-> - **Statistical Outlier Removal (SOR):** Applies a final cleanup pass over the extracted point cloud to strip out any rogue voxels that survived the integration.
+> In addition to the base TSDF fusion, this fork includes several advanced filtering steps, all of which are configurable in `configs/pipeline/default.yaml`:
 > 
-> It can be enabled by setting `save_tsdf_ply: true` in the pipeline config (`configs/pipeline/default.yaml`).
+> - **Dynamic Object Masking (`tsdf_apply_dynamic_mask: true`):** Leverages ViPE's dynamic masks to ignore moving objects (people, cars), preventing "ghost" floaters in the static environment.
+> - **Depth Edge Pruning (`tsdf_apply_edge_pruning: true`):** Calculates spatial gradients using Sobel operators and drops high-gradient pixels. This eliminates DA3's "comet tail" smearing over hard boundaries (the "flying pixel" problem, where blended boundary depths create fake geometry bridging foreground objects to the background). You can tune this via `tsdf_edge_pruning_threshold` (default `0.5`).
+> - **Statistical Outlier Removal (SOR) (`tsdf_apply_sor: true`):** Applies a final cleanup pass over the extracted point cloud to strip out any rogue voxels that survived the integration. You can tune this via `tsdf_sor_nb_neighbors` (default `50`) and `tsdf_sor_std_ratio` (default `2.0`).
+> 
+> **How to Use:**
+> Enable this feature by setting `save_tsdf_ply: true` in your active pipeline config (e.g., `configs/pipeline/default.yaml`).
 > 
 > *Changes made by nbardy.*
 

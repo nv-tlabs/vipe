@@ -187,8 +187,8 @@ class DefaultAnnotationPipeline(Pipeline):
 
                     logger.info(f"Generating TSDF volume for {artifact_path.artifact_name}")
                     volume = o3d.pipelines.integration.ScalableTSDFVolume(
-                        voxel_length=0.01,
-                        sdf_trunc=0.04,
+                        voxel_length=self.out_cfg.get("tsdf_voxel_length", 0.01),
+                        sdf_trunc=self.out_cfg.get("tsdf_sdf_trunc", 0.04),
                         color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8
                     )
 
@@ -200,21 +200,24 @@ class DefaultAnnotationPipeline(Pipeline):
                         depth = frame_data.metric_depth.cpu().numpy()
 
                         # --- Dynamic Object Masking ---
-                        # Check if ViPE generated a mask for moving objects
-                        if hasattr(frame_data, 'mask') and frame_data.mask is not None:
-                            # Convert mask to numpy (usually 1 for static, 0 for dynamic/ignored)
-                            valid_mask = frame_data.mask.cpu().numpy().astype(bool)
-                            # Force dynamic pixels to 0.0 so Open3D's TSDF completely ignores them
-                            depth[~valid_mask] = 0.0
+                        if self.out_cfg.get("tsdf_apply_dynamic_mask", True):
+                            # Check if ViPE generated a mask for moving objects
+                            if hasattr(frame_data, 'mask') and frame_data.mask is not None:
+                                # Convert mask to numpy (usually 1 for static, 0 for dynamic/ignored)
+                                valid_mask = frame_data.mask.cpu().numpy().astype(bool)
+                                # Force dynamic pixels to 0.0 so Open3D's TSDF completely ignores them
+                                depth[~valid_mask] = 0.0
                         # ------------------------------
 
                         # --- Depth Edge Pruning ---
-                        import cv2
-                        grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=3)
-                        grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=3)
-                        grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-                        edge_mask = grad_mag > 0.5  
-                        depth[edge_mask] = 0.0
+                        if self.out_cfg.get("tsdf_apply_edge_pruning", True):
+                            import cv2
+                            grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=3)
+                            grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=3)
+                            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+                            threshold = self.out_cfg.get("tsdf_edge_pruning_threshold", 0.5)
+                            edge_mask = grad_mag > threshold  
+                            depth[edge_mask] = 0.0
                         # --------------------------
 
                         rgb_o3d = o3d.geometry.Image(rgb)
@@ -236,11 +239,14 @@ class DefaultAnnotationPipeline(Pipeline):
                     pcd = volume.extract_point_cloud()
 
                     # --- Statistical Outlier Removal (SOR) ---
-                    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
-                    pcd_clean = pcd.select_by_index(ind)
+                    if self.out_cfg.get("tsdf_apply_sor", True):
+                        nb_neighbors = self.out_cfg.get("tsdf_sor_nb_neighbors", 50)
+                        std_ratio = self.out_cfg.get("tsdf_sor_std_ratio", 2.0)
+                        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+                        pcd = pcd.select_by_index(ind)
                     # -----------------------------------------
 
-                    o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd_clean)
+                    o3d.io.write_point_cloud(str(tsdf_mesh_path), pcd)
                     logger.info(f"Saved TSDF point cloud to {tsdf_mesh_path}")
                 except ImportError:
                     logger.error("Open3D is not installed. Please install open3d to generate TSDF ply.")
