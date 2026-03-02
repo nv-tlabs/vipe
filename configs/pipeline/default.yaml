@@ -59,9 +59,11 @@ output:
   # Dynamic Object Masking (zeroes out depth on moving objects like people, cars)
   tsdf_apply_dynamic_mask: true
   
-  # Depth Edge Pruning (drops depth discontinuity pixels to avoid flying pixels/comet tails)
+  # Relative Depth Pruning: Drops depth discontinuity pixels to avoid flying pixels/comet tails.
+  # Uses a relative percentage jump (e.g., 0.10 = 10% depth change) to preserve distant thin structures.
+  # Ablation options: 0.05 (Aggressive), 0.10 (Balanced), 0.20 (Relaxed - keeps thin wires)
   tsdf_apply_edge_pruning: true
-  tsdf_edge_pruning_threshold: 1.0
+  tsdf_pruning_threshold: 0.10
   
   # Statistical Outlier Removal (cleans up floating noise in the final point cloud)
   tsdf_apply_sor: true

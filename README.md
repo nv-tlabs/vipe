@@ -5,7 +5,7 @@
 > In addition to the base TSDF fusion, this fork includes several advanced filtering steps, all of which are configurable in `configs/pipeline/default.yaml`:
 > 
 > - **Dynamic Object Masking (`tsdf_apply_dynamic_mask: true`):** Leverages ViPE's dynamic masks to ignore moving objects (people, cars), preventing "ghost" floaters in the static environment.
-> - **Depth Edge Pruning (`tsdf_apply_edge_pruning: true`):** Calculates spatial gradients using Sobel operators and drops high-gradient pixels. This eliminates DA3's "comet tail" smearing over hard boundaries (the "flying pixel" problem, where blended boundary depths create fake geometry bridging foreground objects to the background). You can tune this via `tsdf_edge_pruning_threshold` (default `0.5`).
+> - **Relative Depth Pruning (`tsdf_apply_edge_pruning: true`):** DA3 is monocular and smears depth across occlusion boundaries. Naive absolute pruning deletes thin structures (like wires). We calculate the relative spatial gradient to drop pixels where depth jumps significantly, severing "comet tails" without erasing structural details. You can ablate this via `tsdf_pruning_threshold` (e.g., `0.05` for Aggressive, `0.10` for Balanced, `0.20` for Relaxed).
 > - **Statistical Outlier Removal (SOR) (`tsdf_apply_sor: true`):** Applies a final cleanup pass over the extracted point cloud to strip out any rogue voxels that survived the integration. You can tune this via `tsdf_sor_nb_neighbors` (default `50`) and `tsdf_sor_std_ratio` (default `2.0`).
 > 
 > **How to Use:**

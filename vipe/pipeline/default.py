@@ -209,16 +209,21 @@ class DefaultAnnotationPipeline(Pipeline):
                                 depth[~valid_mask] = 0.0
                         # ------------------------------
 
-                        # --- Depth Edge Pruning ---
+                        # --- Relative Depth Edge Pruning ---
                         if self.out_cfg.get("tsdf_apply_edge_pruning", False):
                             import cv2
                             grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=3)
                             grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=3)
                             grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-                            threshold = self.out_cfg.get("tsdf_edge_pruning_threshold", 0.5)
-                            edge_mask = grad_mag > threshold  
+                            
+                            # Calculate RELATIVE gradient (gradient divided by absolute depth)
+                            # Adding 1e-6 prevents division by zero
+                            relative_grad = grad_mag / (depth + 1e-6)
+                            
+                            prune_thresh = self.out_cfg.get("tsdf_pruning_threshold", 0.10)
+                            edge_mask = relative_grad > prune_thresh  
                             depth[edge_mask] = 0.0
-                        # --------------------------
+                        # -----------------------------------
 
                         rgb_o3d = o3d.geometry.Image(rgb)
                         depth_o3d = o3d.geometry.Image(depth)
