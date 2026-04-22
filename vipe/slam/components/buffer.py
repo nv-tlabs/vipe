@@ -36,6 +36,7 @@ from vipe.utils.logging import pbar
 from vipe.utils.visualization import POINTS_STENCIL, draw_lines_batch, draw_points_batch
 
 from ..ba.solver import Solver, SparseBlockVector
+from ..ba.kernel import build_robust_kernel
 from ..ba.terms import DenseDepthFlowTerm, DispSensRegularizationTerm
 from ..interface import SLAMMap
 from ..maths import geom
@@ -402,6 +403,14 @@ class GraphBuffer:
         pi_unique = torch.unique(ii)  # Should be equivalent to unique(pi)
 
         solver = Solver(compute_energy=verbose)
+        # Optional robust M-estimator on dense-flow residuals.  When
+        # ``ba.robust_kernel`` is null (the default) ``build_robust_kernel``
+        # returns None and ``Solver.run_inplace`` skips the kernel branch,
+        # reproducing the pre-PR L2 behaviour bit-for-bit.
+        robust_kernel = build_robust_kernel(
+            name=self.ba_config.get("robust_kernel", None),
+            threshold=float(self.ba_config.get("robust_kernel_threshold", 1.0)),
+        )
         solver.add_term(
             DenseDepthFlowTerm(
                 pose_i_inds=pi,
@@ -416,7 +425,8 @@ class GraphBuffer:
                 rig=None,
                 image_size=(self.height // 8, self.width // 8),
                 camera_type=self.camera_type,
-            )
+            ),
+            kernel=robust_kernel,
         )
 
         if self.sparse_tracks.enabled:
@@ -445,7 +455,8 @@ class GraphBuffer:
                     rig=None,
                     image_size=(self.height // 8, self.width // 8),
                     camera_type=self.camera_type,
-                )
+                ),
+                kernel=robust_kernel,
             )
 
         # self.debug_visualize_target_weight(

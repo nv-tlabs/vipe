@@ -48,6 +48,13 @@ keyframe_depth: metric3d-small
 ba:
   dense_disp_alpha: 0.001
   intrinsics_damping_scale: 1.0
+  # Optional robust M-estimator on the dense-flow residual in bundle
+  # adjustment.  ``null`` (default) reproduces the pre-PR L2 behaviour.
+  # Currently implemented: "huber".  See ``vipe/slam/ba/kernel.py``.
+  robust_kernel: null
+  # Kernel threshold in the /8 feature-map pixel units used by
+  # DenseDepthFlowTerm.  Only consumed when ``robust_kernel`` is set.
+  robust_kernel_threshold: 3.0
 
 sparse_tracks:
   name: dummy
