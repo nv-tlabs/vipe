@@ -403,13 +403,12 @@ class GraphBuffer:
         pi_unique = torch.unique(ii)  # Should be equivalent to unique(pi)
 
         solver = Solver(compute_energy=verbose)
-        # Optional robust M-estimator on dense-flow residuals.  When
-        # ``ba.robust_kernel`` is null (the default) ``build_robust_kernel``
-        # returns None and ``Solver.run_inplace`` skips the kernel branch,
-        # reproducing the pre-PR L2 behaviour bit-for-bit.
         robust_kernel = build_robust_kernel(
             name=self.ba_config.get("robust_kernel", None),
             threshold=float(self.ba_config.get("robust_kernel_threshold", 1.0)),
+            gnc_mu_init=float(self.ba_config.get("gnc_mu_init", 1.0)),
+            gnc_mu_step=float(self.ba_config.get("gnc_mu_step", 1.4)),
+            gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
         solver.add_term(
             DenseDepthFlowTerm(
@@ -519,17 +518,27 @@ class GraphBuffer:
 
         disps_flattened = rearrange(self.flattened_disps, "nv h w -> nv (h w)")
 
-        ba_energy = []
-        for _ in range(n_iters):
-            cur_energy = solver.run_inplace(
-                {
-                    "pose": SE3(self.poses),
-                    "dense_disp": disps_flattened,
-                    "intrinsics": self.intrinsics,
-                    "rig": SE3(self.rig),
-                }
-            )
-            ba_energy.append(cur_energy)
+        variables = {
+            "pose": SE3(self.poses),
+            "dense_disp": disps_flattened,
+            "intrinsics": self.intrinsics,
+            "rig": SE3(self.rig),
+        }
+
+        ba_energy: list[float] = []
+        if robust_kernel is not None and robust_kernel.is_gnc():
+            # GNC: outer mu schedule, inner GN iters at frozen mu.
+            n_mu_steps = max(1, int(self.ba_config.get("gnc_n_mu_steps", 4)))
+            gn_iters_per_mu = max(1, int(self.ba_config.get("gnc_gn_iters_per_mu", 6)))
+            current_mu = robust_kernel.mu_init if hasattr(robust_kernel, "mu_init") else 1.0
+            for _ in range(n_mu_steps):
+                robust_kernel.set_mu(current_mu)
+                for _ in range(gn_iters_per_mu):
+                    ba_energy.append(solver.run_inplace(variables))
+                current_mu = robust_kernel.update_mu(current_mu)
+        else:
+            for _ in range(n_iters):
+                ba_energy.append(solver.run_inplace(variables))
 
         if verbose:
             logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0]} -> {ba_energy[-1]}")

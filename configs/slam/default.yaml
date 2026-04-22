@@ -48,13 +48,16 @@ keyframe_depth: metric3d-small
 ba:
   dense_disp_alpha: 0.001
   intrinsics_damping_scale: 1.0
-  # Optional robust M-estimator on the dense-flow residual in bundle
-  # adjustment.  ``null`` (default) reproduces the pre-PR L2 behaviour.
-  # Currently implemented: "huber".  See ``vipe/slam/ba/kernel.py``.
+  # robust kernel for dense-flow residual: null (L2) | huber | tukey | gnc_tls
   robust_kernel: null
-  # Kernel threshold in the /8 feature-map pixel units used by
-  # DenseDepthFlowTerm.  Only consumed when ``robust_kernel`` is set.
+  # kernel threshold in /8 feature-map pixels (Huber k / Tukey c / GNC-TLS c_bar)
   robust_kernel_threshold: 3.0
+  # GNC-TLS mu schedule (ignored unless robust_kernel == gnc_tls)
+  gnc_mu_init: 1.0
+  gnc_mu_step: 3.0
+  gnc_mu_max: 1.0e6
+  gnc_n_mu_steps: 4
+  gnc_gn_iters_per_mu: 6
 
 sparse_tracks:
   name: dummy

@@ -19,31 +19,26 @@ import torch
 
 
 class RobustKernel(ABC):
-    """
-    Per-residual M-estimator applied inside the BA solver.
-
-    Given a residual tensor ``x`` (typically shape ``(n_terms, res_dim)``),
-    ``apply(x)`` returns a multiplicative reweighting of the same shape.
-    ``Solver.run_inplace`` folds that reweighting into the information
-    weight via ``ConcreteTermEvalReturn.apply_robust_kernel``, producing
-    one IRLS step per BA iteration.
-    """
-
     @abstractmethod
     def apply(self, x: torch.Tensor) -> torch.Tensor:
         """Return a per-residual weight of the same shape as ``x``."""
 
+    def is_gnc(self) -> bool:
+        return False
+
+    def set_mu(self, mu: float) -> None:
+        pass
+
+    def update_mu(self, mu: float) -> float:
+        return mu
+
+    @property
+    def mu_max(self) -> float:
+        return float("inf")
+
 
 class HuberRobustKernel(RobustKernel):
-    """
-    Huber M-estimator weight: ``w(r) = 1`` if ``|r| <= k`` else ``k / |r|``.
-
-    ``threshold`` (``k``) is the residual magnitude at which the loss
-    transitions from quadratic (inliers) to linear (outliers).  For the
-    dense-flow residuals used by ``DenseDepthFlowTerm``, which operate
-    on the /8 feature grid, a value around ``3.0`` is a reasonable
-    default (roughly 24 full-resolution pixels of flow mismatch).
-    """
+    """``w(r) = 1`` if ``|r| <= k`` else ``k / |r|``."""
 
     def __init__(self, threshold: float = 1.0) -> None:
         self.threshold = float(threshold)
@@ -54,29 +49,116 @@ class HuberRobustKernel(RobustKernel):
         return torch.where(abs_x <= k, torch.ones_like(x), k / abs_x.clamp_min(1e-8))
 
 
-def build_robust_kernel(name: str | None, threshold: float) -> RobustKernel | None:
-    """
-    Instantiate a :class:`RobustKernel` by short name.
+class TukeyRobustKernel(RobustKernel):
+    """``w(r) = (1 - (r/c)^2)^2`` if ``|r| <= c`` else ``0``."""
 
-    Returns ``None`` to indicate vanilla L2 (no reweighting) so that the
-    caller can use ``solver.add_term(term, kernel=build_robust_kernel(...))``
-    uniformly and rely on ``Solver.run_inplace`` to skip the kernel when
-    it is ``None``.
+    def __init__(self, c: float = 2.0) -> None:
+        self.c = float(c)
 
-    Parameters
-    ----------
-    name : str | None
-        Kernel short name.  ``None`` / ``"none"`` / ``"null"`` / ``"off"``
-        / ``""`` all map to the L2 (no-kernel) case.  Currently supported:
-        ``"huber"``.
-    threshold : float
-        Kernel threshold parameter (Huber ``k``).
+    def apply(self, x: torch.Tensor) -> torch.Tensor:
+        c = self.c
+        u = (x / c) ** 2
+        return (1.0 - u).clamp(min=0.0) ** 2
+
+
+class TLSGncRobustKernel(RobustKernel):
     """
+    Graduated Non-Convexity with Truncated Least Squares.
+
+    Yang, Antonante, Tzoumas, Carlone.  "Graduated Non-Convexity for Robust
+    Spatial Perception: From Non-Minimal Solvers to Global Outlier Rejection."
+    RA-L / ICRA, 2020.  Weight formulation and mu schedule follow GTSAM's
+    ``GncOptimizer``:
+    https://github.com/borglab/gtsam/blob/develop/gtsam/nonlinear/GncOptimizer.h
+
+    At scalar ``mu`` with inlier threshold ``c_bar``:
+
+        lo  = mu / (mu + 1)  * c_bar^2
+        hi  = (mu + 1) / mu  * c_bar^2
+        r^2 < lo   ->  w = 1
+        r^2 > hi   ->  w = 0
+        otherwise  ->  w = sqrt(c_bar^2 * mu * (mu + 1) / r^2) - mu
+
+    Schedule: ``mu <- min(mu * mu_step, mu_max)``.
+    ``mu -> inf`` recovers the hard-TLS indicator ``w = 1{r^2 < c_bar^2}``.
+    """
+
+    def __init__(
+        self,
+        threshold: float = 3.0,
+        mu_step: float = 3.0,
+        mu_init: float = 1.0,
+        mu_max: float = 1.0e6,
+    ) -> None:
+        self.c_bar = float(threshold)
+        self.c_bar_sq = self.c_bar * self.c_bar
+        self.mu_step = float(mu_step)
+        self.mu_init = float(mu_init)
+        self._mu_max = float(mu_max)
+        self._mu: float | None = None
+
+    def is_gnc(self) -> bool:
+        return True
+
+    @property
+    def mu_max(self) -> float:
+        return self._mu_max
+
+    def set_mu(self, mu: float) -> None:
+        self._mu = float(mu)
+
+    def update_mu(self, mu: float) -> float:
+        return min(mu * self.mu_step, self._mu_max)
+
+    def apply(self, x: torch.Tensor) -> torch.Tensor:
+        mu = self._mu
+        c_sq = self.c_bar_sq
+        r2 = x * x
+
+        if mu is None or mu >= self._mu_max:
+            return (r2 < c_sq).to(dtype=x.dtype)
+
+        lo = (mu / (mu + 1.0)) * c_sq
+        hi = ((mu + 1.0) / mu) * c_sq
+
+        weights = torch.zeros_like(x)
+        inlier_mask = r2 < lo
+        weights = torch.where(inlier_mask, torch.ones_like(x), weights)
+
+        transition_mask = (~inlier_mask) & (r2 <= hi)
+        if transition_mask.any():
+            r2_t = r2.clamp_min(1e-12)
+            transition_w = torch.sqrt(c_sq * mu * (mu + 1.0) / r2_t) - mu
+            weights = torch.where(transition_mask, transition_w.clamp_min(0.0), weights)
+
+        return weights
+
+
+def build_robust_kernel(
+    name: str | None,
+    threshold: float,
+    *,
+    gnc_mu_init: float = 1.0,
+    gnc_mu_step: float = 3.0,
+    gnc_mu_max: float = 1.0e6,
+) -> RobustKernel | None:
+    """Factory.  ``None`` / ``"none"`` / ``"null"`` / ``"off"`` / ``""`` -> L2."""
     if name is None:
         return None
-    if isinstance(name, str) and name.lower() in ("none", "null", "off", ""):
-        return None
     n = str(name).lower()
+    if n in ("none", "null", "off", ""):
+        return None
     if n == "huber":
         return HuberRobustKernel(threshold=threshold)
-    raise ValueError(f"Unknown robust_kernel: {name!r}; expected 'huber' or None")
+    if n == "tukey":
+        return TukeyRobustKernel(c=threshold)
+    if n in ("gnc_tls", "gnc-tls"):
+        return TLSGncRobustKernel(
+            threshold=threshold,
+            mu_init=gnc_mu_init,
+            mu_step=gnc_mu_step,
+            mu_max=gnc_mu_max,
+        )
+    raise ValueError(
+        f"Unknown robust_kernel: {name!r}; expected 'huber' | 'tukey' | 'gnc_tls' | None"
+    )
