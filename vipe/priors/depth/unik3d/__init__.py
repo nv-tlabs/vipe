@@ -40,7 +40,7 @@ class Unik3DModel(DepthEstimationModel):
     def estimate(self, src: DepthEstimationInput) -> DepthEstimationResult:
         rgb: torch.Tensor = unpack_optional(src.rgb)
         assert rgb.dtype == torch.float32, "Input image should be float32"
-        assert src.focal_length is None, "This is only intended for 360 panoramas"
+        assert src.intrinsics is None, "This is only intended for 360 panoramas"
 
         if rgb.dim() == 3:
             rgb, batch_dim = rgb[None], False
