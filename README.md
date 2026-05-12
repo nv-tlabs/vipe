@@ -49,10 +49,10 @@ vipe infer YOUR_VIDEO.mp4
 Currently, we support the following pipeline configurations:
 - `default`: The default pipeline for pinhole cameras.
 - `lyra`: Configuration for results in the [Lyra](https://github.com/nv-tlabs/lyra) paper.
-- 🔥🔥 `dav3`: Using the newest Depth-Anything-V3 model as depth estimation model.
+- `dav3`: Using the newest Depth-Anything-V3 model as depth estimation model.
 - `no_vda`: If running video-depth-anything is too memory-consuming for you, this configuration can produce less temporally-stable depth (but empirically more 3D consistent) maps.
 - `wide_angle`: If your video contains some wide-angle or fisheye distortion.
-- `panorama`: For 360° videos, this is only available in the `panorama` branch for now.
+- `panorama`: For 360° videos, add `pipeline.post.depth_align_model=dap` (MIT) or `unik3d` (CC-BY-NC 4.0) to enable depth estimation for panoramas.
 
 One can visualize the results that ViPE produces by running (supported by `viser`):
 ```bash
