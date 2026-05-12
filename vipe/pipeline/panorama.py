@@ -26,6 +26,7 @@ from omegaconf import DictConfig
 
 from vipe.ext import lietorch as lt
 from vipe.priors.depth.base import DepthEstimationInput
+from vipe.priors.depth.dap import DAPModel
 from vipe.priors.depth.unik3d import Unik3DModel
 from vipe.slam.interface import SLAMOutput
 from vipe.slam.system import SLAMSystem
@@ -69,9 +70,12 @@ class MergedPanoramaVideoStream(VideoStream):
 
         if self.pano_depth_method == "unik3d":
             self.pano_depth_model = Unik3DModel()
-
-        else:
+        elif self.pano_depth_method == "dap":
+            self.pano_depth_model = DAPModel()
+        elif self.pano_depth_method is None:
             self.pano_depth_model = None  # type: ignore
+        else:
+            raise ValueError(f"Unknown pano_depth_method: {self.pano_depth_method}")
 
     def frame_size(self) -> tuple[int, int]:
         return self.pano_stream.frame_size()
@@ -99,12 +103,23 @@ class MergedPanoramaVideoStream(VideoStream):
 
             if self.pano_depth_model is not None:
                 height_crop = int(pano_frame_data.size()[0] * (1 - self.DEPTH_KEEP_RATIO) / 2)
+                depth_slice = slice(height_crop, -height_crop if height_crop > 0 else None)
                 full_distance = torch.zeros(pano_frame_data.size()).cuda()
-                croped_distance = self.pano_depth_model.estimate(
-                    DepthEstimationInput(
-                        rgb=pano_frame_data.rgb[height_crop:-height_crop],
-                    )
-                ).metric_depth
+                if self.pano_depth_method == "dap":
+                    distance = self.pano_depth_model.estimate(
+                        DepthEstimationInput(
+                            rgb=pano_frame_data.rgb,
+                            camera_type=CameraType.PANORAMA,
+                        )
+                    ).metric_depth
+                    cropped_distance = distance[depth_slice]
+                else:
+                    cropped_distance = self.pano_depth_model.estimate(
+                        DepthEstimationInput(
+                            rgb=pano_frame_data.rgb[depth_slice],
+                            camera_type=CameraType.PANORAMA,
+                        )
+                    ).metric_depth
 
                 # Align distance map
                 assert xyz_global is not None
@@ -126,7 +141,7 @@ class MergedPanoramaVideoStream(VideoStream):
                     # Only assign values for valid indices
                     target_depth[v_indices[valid_mask], u_indices[valid_mask]] = uvd[valid_mask, 2]
 
-                target_depth = target_depth[height_crop:-height_crop]
+                target_depth = target_depth[depth_slice]
                 target_mask = target_depth > 0
 
                 # Additional safety check to ensure target_mask is valid
@@ -154,7 +169,7 @@ class MergedPanoramaVideoStream(VideoStream):
                         if valid_depth_mask.any():
                             try:
                                 inv_scale = torch.median(
-                                    croped_distance[valid_depth_mask] / target_depth[valid_depth_mask]
+                                    cropped_distance[valid_depth_mask] / target_depth[valid_depth_mask]
                                 ).item()
                                 last_inv_scale = inv_scale
                             except (RuntimeError, ValueError):
@@ -168,7 +183,10 @@ class MergedPanoramaVideoStream(VideoStream):
                             )
                             inv_scale = last_inv_scale
 
-                full_distance[height_crop:-height_crop] = croped_distance / inv_scale
+                if self.pano_depth_method == "dap":
+                    full_distance = distance / inv_scale
+                else:
+                    full_distance[depth_slice] = cropped_distance / inv_scale
                 pano_frame_data.metric_depth = full_distance
 
             yield pano_frame_data
