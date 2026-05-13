@@ -79,9 +79,7 @@ def get_resize_factor(original_shape, pixels_range, shape_multiplier=14):
 def _postprocess(tensor, shapes, paddings, interpolation_mode="bilinear"):
 
     # interpolate to original size
-    tensor = F.interpolate(
-        tensor, size=shapes, mode=interpolation_mode, align_corners=False
-    )
+    tensor = F.interpolate(tensor, size=shapes, mode=interpolation_mode, align_corners=False)
 
     # remove paddings
     pad1_l, pad1_r, pad1_t, pad1_b = paddings
@@ -139,9 +137,7 @@ class UniK3D(
         pts_gt = inputs["camera"].reconstruct(inputs["depth"]) * validity_mask.float()
         pts_gt = torch.where(pts_gt.isnan().any(dim=1, keepdim=True), 0.0, pts_gt)
         mask_pts_gt_nan = ~pts_gt.isnan().any(dim=1, keepdim=True)
-        mask = (
-            inputs["depth_mask"].bool() & validity_mask.bool() & mask_pts_gt_nan.bool()
-        )
+        mask = inputs["depth_mask"].bool() & validity_mask.bool() & mask_pts_gt_nan.bool()
 
         # compute loss!
         inputs["distance"] = torch.norm(pts_gt, dim=1, keepdim=True)
@@ -166,17 +162,11 @@ class UniK3D(
         depth_gt = inputs["depth"]
 
         outs = {}
-        outs["points"] = match_gt(
-            outputs["points"], depth_gt, padding1=inputs["paddings"], padding2=None
-        )
-        outs["confidence"] = match_gt(
-            outputs["confidence"], depth_gt, padding1=inputs["paddings"], padding2=None
-        )
+        outs["points"] = match_gt(outputs["points"], depth_gt, padding1=inputs["paddings"], padding2=None)
+        outs["confidence"] = match_gt(outputs["confidence"], depth_gt, padding1=inputs["paddings"], padding2=None)
         outs["distance"] = outs["points"].norm(dim=1, keepdim=True)
         outs["depth"] = outs["points"][:, -1:]
-        outs["rays"] = outs["points"] / torch.norm(
-            outs["points"], dim=1, keepdim=True
-        ).clip(min=1e-5)
+        outs["rays"] = outs["points"] / torch.norm(outs["points"], dim=1, keepdim=True).clip(min=1e-5)
 
         outs = self.unpack_sequence(outs, B, T)
         return outs
@@ -212,14 +202,8 @@ class UniK3D(
             inputs["rays"] = inputs["camera"].get_rays(shapes=(B, H, W))
 
         features, tokens = self.pixel_encoder(inputs["image"])
-        inputs["features"] = [
-            self.stacking_fn(features[i:j]).contiguous()
-            for i, j in self.slices_encoder_range
-        ]
-        inputs["tokens"] = [
-            self.stacking_fn(tokens[i:j]).contiguous()
-            for i, j in self.slices_encoder_range
-        ]
+        inputs["features"] = [self.stacking_fn(features[i:j]).contiguous() for i, j in self.slices_encoder_range]
+        inputs["tokens"] = [self.stacking_fn(tokens[i:j]).contiguous() for i, j in self.slices_encoder_range]
 
         outputs = self.pixel_decoder(inputs, image_metas)
         outputs["rays"] = rearrange(outputs["rays"], "b (h w) c -> b c h w", h=H, w=W)
@@ -234,9 +218,7 @@ class UniK3D(
         losses_to_be_computed = list(self.losses.keys())
 
         # depth loss
-        si = torch.tensor(
-            [x.get("si", False) for x in image_metas], device=self.device
-        ).reshape(B)
+        si = torch.tensor([x.get("si", False) for x in image_metas], device=self.device).reshape(B)
         loss = self.losses["depth"]
         depth_losses = loss(
             outputs["distance"],
@@ -248,9 +230,7 @@ class UniK3D(
         losses_to_be_computed.remove("depth")
 
         loss = self.losses["camera"]
-        camera_losses = loss(
-            outputs["rays"], target=inputs["rays"], mask=inputs["validity_mask"].bool()
-        )
+        camera_losses = loss(outputs["rays"], target=inputs["rays"], mask=inputs["validity_mask"].bool())
         losses["opt"][loss.name] = loss.weight * camera_losses.mean()
         losses_to_be_computed.remove("camera")
 
@@ -266,9 +246,7 @@ class UniK3D(
         losses["opt"][loss.name + "_conf"] = loss.weight * conf_losses.mean()
         losses_to_be_computed.remove("confidence")
 
-        assert (
-            not losses_to_be_computed
-        ), f"Losses {losses_to_be_computed} not computed, revise `compute_loss` method"
+        assert not losses_to_be_computed, f"Losses {losses_to_be_computed} not computed, revise `compute_loss` method"
 
         return losses
 
@@ -286,9 +264,7 @@ class UniK3D(
             self.shape_constraints["pixels_max"],
         ]
         if hasattr(self, "resolution_level"):
-            assert (
-                self.resolution_level >= 0 and self.resolution_level < 10
-            ), "resolution_level should be in [0, 10)"
+            assert self.resolution_level >= 0 and self.resolution_level < 10, "resolution_level should be in [0, 10)"
             pixels_range = pixels_bounds[1] - pixels_bounds[0]
             interval = pixels_range / 10
             new_lowbound = self.resolution_level * interval + pixels_bounds[0]
@@ -310,9 +286,7 @@ class UniK3D(
         # preprocess
         paddings, (padded_H, padded_W) = get_paddings((H, W), ratio_bounds)
         (pad_left, pad_right, pad_top, pad_bottom) = paddings
-        resize_factor, (new_H, new_W) = get_resize_factor(
-            (padded_H, padded_W), pixels_bounds
-        )
+        resize_factor, (new_H, new_W) = get_resize_factor((padded_H, padded_W), pixels_bounds)
         # -> rgb preprocess (input std-ized and resized)
         if normalize:
             rgb = TF.normalize(
@@ -321,23 +295,17 @@ class UniK3D(
                 std=IMAGENET_DATASET_STD,
             )
         rgb = F.pad(rgb, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
-        rgb = F.interpolate(
-            rgb, size=(new_H, new_W), mode="bilinear", align_corners=False
-        )
+        rgb = F.interpolate(rgb, size=(new_H, new_W), mode="bilinear", align_corners=False)
         # -> camera preprocess
         if camera is not None:
-            camera = camera.crop(
-                left=-pad_left, top=-pad_top, right=-pad_right, bottom=-pad_bottom
-            )
+            camera = camera.crop(left=-pad_left, top=-pad_top, right=-pad_right, bottom=-pad_bottom)
             camera = camera.resize(resize_factor)
 
         # prepare inputs
         inputs = {"image": rgb}
         if camera is not None:
             inputs["camera"] = camera
-            rays = camera.get_rays(shapes=(B, new_H, new_W), noisy=False).reshape(
-                B, 3, new_H, new_W
-            )
+            rays = camera.get_rays(shapes=(B, new_H, new_W), noisy=False).reshape(B, 3, new_H, new_W)
             inputs["rays"] = rays
 
         if rays is not None:
@@ -354,9 +322,7 @@ class UniK3D(
                 ),
                 value=0.0,
             )
-            rays = F.interpolate(
-                rays, size=(new_H, new_W), mode="bilinear", align_corners=False
-            )
+            rays = F.interpolate(rays, size=(new_H, new_W), mode="bilinear", align_corners=False)
             inputs["rays"] = rays
 
         # run model
@@ -414,9 +380,7 @@ class UniK3D(
             if hasattr(pixel_encoder, "embed_dims")
             else [getattr(pixel_encoder, "embed_dim") * 2**i for i in range(4)]
         )
-        config["model"]["pixel_encoder"]["embed_dim"] = getattr(
-            pixel_encoder, "embed_dim"
-        )
+        config["model"]["pixel_encoder"]["embed_dim"] = getattr(pixel_encoder, "embed_dim")
         config["model"]["pixel_encoder"]["embed_dims"] = pixel_encoder_embed_dims
         config["model"]["pixel_encoder"]["depths"] = pixel_encoder.depths
         config["model"]["pixel_encoder"]["cls_token_embed_dims"] = getattr(
@@ -429,9 +393,7 @@ class UniK3D(
         self.pixel_decoder = pixel_decoder
         # print("pixel_decoder", pixel_decoder)
 
-        self.slices_encoder_range = list(
-            zip([0, *self.pixel_encoder.depths[:-1]], self.pixel_encoder.depths)
-        )
+        self.slices_encoder_range = list(zip([0, *self.pixel_encoder.depths[:-1]], self.pixel_encoder.depths))
         self.stacking_fn = last_stack
         self.shape_constraints = config["data"]["shape_constraints"]
         self.interpolation_mode = "bilinear"
@@ -456,9 +418,7 @@ class UniK3D(
                 config["model"]["pixel_encoder"]["lr"],
                 config["training"]["wd"],
             )
-        decoder_p = self.pixel_decoder.get_params(
-            config["training"]["lr"], config["training"]["wd"]
-        )
+        decoder_p = self.pixel_decoder.get_params(config["training"]["lr"], config["training"]["wd"])
         return [*encoder_p, *decoder_p]
 
     def step(self):

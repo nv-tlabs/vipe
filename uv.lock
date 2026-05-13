@@ -4225,6 +4225,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+dap = [
+    { name = "huggingface-hub" },
+]
 dav3 = [
     { name = "depth-anything-3" },
 ]
@@ -4243,6 +4246,7 @@ requires-dist = [
     { name = "depth-anything-3", marker = "extra == 'dav3'", git = "https://github.com/heiwang1997/Depth-Anything-3.git?rev=main" },
     { name = "einops" },
     { name = "gdown" },
+    { name = "huggingface-hub", marker = "extra == 'dap'" },
     { name = "hydra-core" },
     { name = "imageio", extras = ["ffmpeg"] },
     { name = "kornia" },
@@ -4264,7 +4268,7 @@ requires-dist = [
     { name = "transformers", specifier = ">=4,<5" },
     { name = "viser" },
 ]
-provides-extras = ["dav3"]
+provides-extras = ["dav3", "dap"]
 
 [package.metadata.requires-dev]
 dev = [

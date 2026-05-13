@@ -139,9 +139,7 @@ class DAPModel(DepthEstimationModel):
         confidence: torch.Tensor | None = None
         if "pred_mask" in outputs:
             # DAP's pred_mask is the *invalid* probability; flip to confidence.
-            mask = F.interpolate(
-                outputs["pred_mask"].float(), size=(H, W), mode="bilinear", align_corners=True
-            )
+            mask = F.interpolate(outputs["pred_mask"].float(), size=(H, W), mode="bilinear", align_corners=True)
             confidence = (1.0 - mask)[:, 0].clamp(0.0, 1.0)
 
         if not batch_dim:
