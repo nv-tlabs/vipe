@@ -1,0 +1,45 @@
+__object__:
+  path: vipe.priors.depth.dav3.model.da3
+  name: DepthAnything3Net
+  args: as_params
+
+net:
+  __object__:
+    path: vipe.priors.depth.dav3.model.dinov2.dinov2
+    name: DinoV2
+    args: as_params
+
+  name: vitg
+  out_layers: [19, 27, 33, 39]
+  alt_start: 13
+  qknorm_start: 13
+  rope_start: 13
+  cat_token: True
+
+head:
+  __object__:
+    path: vipe.priors.depth.dav3.model.heads
+    name: DualDPT
+    args: as_params
+
+  dim_in: &head_dim_in 3072
+  output_dim: 2
+  features: &head_features 256
+  out_channels: &head_out_channels [256, 512, 1024, 1024]
+
+
+cam_enc:
+  __object__:
+    path: vipe.priors.depth.dav3.model.heads
+    name: CameraEnc
+    args: as_params
+
+  dim_out: 1536
+
+cam_dec:
+  __object__:
+    path: vipe.priors.depth.dav3.model.heads
+    name: CameraDec
+    args: as_params
+
+  dim_in: 3072

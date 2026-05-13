@@ -346,16 +346,11 @@ class MultiviewDepthProcessor(StreamProcessor):
         self.n_passes_required = 2
 
         if self.model == "mvd_dav3":
-            try:
-                from depth_anything_3.api import DepthAnything3
-                from depth_anything_3.api import logger as dav3_logger
-            except ModuleNotFoundError:
-                raise ModuleNotFoundError(
-                    "depth-anything-3 not found. Please reinstall vipe with `pip install --no-build-isolation -e .[dav3]`"
-                )
+            from vipe.priors.depth.dav3 import DepthAnything3
+            from vipe.priors.depth.dav3.utils import logger as dav3_logger
 
             dav3_logger.level = 0  # Disable logging timing information
-            self.dav3_api = DepthAnything3.from_pretrained("depth-anything/DA3-GIANT")
+            self.dav3_api = DepthAnything3.from_pretrained("depth-anything/DA3-GIANT", model_name="da3-giant")
             self.dav3_api = self.dav3_api.cuda().eval()
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:

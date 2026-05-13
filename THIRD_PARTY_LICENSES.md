@@ -1865,6 +1865,28 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+# Depth Anything 3
+
+Source: https://github.com/ByteDance-Seed/Depth-Anything-3
+
+License: Apache License 2.0. The vendored files retain their original
+copyright headers:
+
+```
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates
+```
+
+The full Apache License 2.0 text is included above in this file.
+
+# DINOv2
+
+Source: https://github.com/facebookresearch/dinov2
+
+License: Apache License 2.0. The vendored DINOv2 files retain their original
+Meta copyright headers.
+
+The full Apache License 2.0 text is included above in this file.
+
 # DINOv3
 
 Source: https://github.com/facebookresearch/dinov3

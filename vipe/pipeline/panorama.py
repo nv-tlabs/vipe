@@ -282,7 +282,7 @@ class PanoramaAnnotationPipeline(Pipeline):
         # For visualization, we append the visualization of the full panorama.
         if self.slam_cfg.visualize:
             for frame_idx, frame_data in enumerate(cached_video_stream):
-                rr.set_time_sequence("frame", frame_idx)
+                rr.set_time("frame", sequence=frame_idx)
                 image = frame_data.rgb.cpu().numpy()
                 rr.log(
                     "world/camera_360",

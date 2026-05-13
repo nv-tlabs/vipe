@@ -126,6 +126,7 @@ uv run vipe visualize YOUR_OUTPUT_DIR
 ViPE is built on top of many great open-source research projects and codebases. Some of these include (not exhaustive):
 - [DROID-SLAM](https://github.com/princeton-vl/DROID-SLAM)
 - [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2)
+- [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3)
 - [Metric3Dv2](https://github.com/YvanYin/Metric3D)
 - [PriorDA](https://github.com/SpatialVision/Prior-Depth-Anything)
 - [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)

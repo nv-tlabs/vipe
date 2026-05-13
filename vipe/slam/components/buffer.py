@@ -673,7 +673,7 @@ class GraphBuffer:
         frame_indices = self.tstamp[: self.n_frames].cpu().numpy()
 
         for kf_idx in range(self.n_frames):
-            rr.set_time_sequence("frame", int(frame_indices[kf_idx]))
+            rr.set_time("frame", sequence=int(frame_indices[kf_idx]))
 
             for v in range(self.n_views):
                 canvas = self.images[kf_idx, v].moveaxis(0, -1).cpu().numpy().astype(np.float32)
@@ -734,7 +734,7 @@ class GraphBuffer:
         current_map = self.extract_slam_map(filter_thresh=vis_thresh, t_range=dirty_index, is_local=False)
 
         for di, didx in enumerate(dirty_index.cpu().numpy().tolist()):
-            rr.set_time_sequence("frame", int(self.tstamp[int(didx)].item()))
+            rr.set_time("frame", sequence=int(self.tstamp[int(didx)].item()))
 
             pose_mat = SE3(self.poses[int(didx)]).inv().matrix().cpu().numpy()
             rr.log(

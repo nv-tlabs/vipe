@@ -170,7 +170,7 @@ class SLAMSystem:
         trajectory = filled_return.poses.inv()
         for frame_idx, frame_data_list in enumerate(zip(*video_streams)):
             pose_mat = trajectory[frame_idx].matrix().cpu().numpy()
-            rr.set_time_sequence("frame", frame_idx)
+            rr.set_time("frame", sequence=frame_idx)
             for view_idx in range(len(frame_data_list)):
                 rig_mat = pose_mat @ SE3(self.buffer.rig[view_idx]).matrix().cpu().numpy()
                 image = frame_data_list[view_idx].rgb.cpu().numpy()

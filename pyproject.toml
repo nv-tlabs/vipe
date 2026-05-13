@@ -11,6 +11,7 @@ extend-exclude = [
     "vipe_results",
     "vipe/ext/lietorch",
     "vipe/priors/depth/dav2",
+    "vipe/priors/depth/dav3",
     "vipe/priors/depth/metric3d",
     "vipe/priors/depth/priorda",
     "vipe/priors/depth/unidepth",
@@ -67,13 +68,14 @@ authors = [
     {name = "The ViPE Authors", email = "jiahuih@nvidia.com"},
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 dependencies = [
     "torch",
     "torchvision",
     "click",
     "einops",
     "gdown",
+    "huggingface_hub",
     "hydra-core",
     "imageio[ffmpeg]",
     "kornia",
@@ -86,6 +88,7 @@ dependencies = [
     "python-pycg",
     "ray",
     "rerun-sdk",
+    "safetensors",
     "timm",
     "tqdm",
     "transformers>=4,<5",
@@ -98,14 +101,6 @@ dev = [
     "pre-commit>=4,<5",
     "pytest>=8,<9",
     "ruff>=0.12,<1",
-]
-
-[project.optional-dependencies]
-dav3 = [
-    "depth-anything-3 @ git+https://github.com/heiwang1997/Depth-Anything-3.git@main"
-]
-dap = [
-    "huggingface_hub",
 ]
 
 [project.scripts]
