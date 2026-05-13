@@ -23,7 +23,6 @@ import logging
 import numpy as np
 import rerun as rr
 import torch
-
 from einops import rearrange
 from omegaconf.dictconfig import DictConfig
 
@@ -33,16 +32,16 @@ from vipe.priors.depth import DepthEstimationInput, DepthEstimationModel
 from vipe.priors.depth.base import DepthType
 from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
+from vipe.utils.misc import unpack_optional
 from vipe.utils.visualization import POINTS_STENCIL, draw_lines_batch, draw_points_batch
 
-from ..ba.solver import Solver, SparseBlockVector
 from ..ba.kernel import build_robust_kernel
+from ..ba.solver import Solver, SparseBlockVector
 from ..ba.terms import DenseDepthFlowTerm, DispSensRegularizationTerm
 from ..interface import SLAMMap
 from ..maths import geom
 from ..maths.retractor import DenseDispRetractor, IntrinsicsRetractor, PoseRetractor, RigRotationOnlyRetractor
 from .sparse_tracks import SparseTracks
-
 
 logger = logging.getLogger(__name__)
 
@@ -254,19 +253,20 @@ class GraphBuffer:
             frames_to_update = pbar(range(self.n_frames), desc="Update depth")
 
         assert self.n_views == 1
+        intrinsics = unpack_optional(self.intrinsics)
 
         for frame_idx in frames_to_update:
             depth_input = DepthEstimationInput(
                 rgb=self.images[frame_idx].moveaxis(1, -1).float(),
-                intrinsics=self.intrinsics[0],
+                intrinsics=intrinsics[0],
                 camera_type=self.camera_type,
             )
-            disp_sens = depth_model.estimate(depth_input).metric_depth
+            disp_sens = unpack_optional(depth_model.estimate(depth_input).metric_depth)
             disp_sens = disp_sens[:, 3::8, 3::8]
             disp_sens = torch.where(disp_sens > 0, disp_sens.reciprocal(), disp_sens)
             self.disps_sens[frame_idx] = disp_sens
 
-        self.last_depth_intrinsics = self.intrinsics.clone()
+        self.last_depth_intrinsics = intrinsics.clone()
 
     def build_adaptive_cross_view_idx(self, valid_thresh: float = 400.0):
         """

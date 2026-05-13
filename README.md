@@ -15,18 +15,27 @@ We use ViPE to annotate a large-scale collection of videos. This collection incl
 
 ## Installation
 
-To ensure the reproducibility, we recommend creating the runtime environment using [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html).
+To keep native and Python dependencies separate, we use [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html) for the CUDA/native toolchain and [uv](https://docs.astral.sh/uv/) for the local Python environment in `.venv`.
 
 ```bash
-# Create a new conda environment and install 3rd-party dependencies
-conda env create -f envs/base.yml
-conda activate vipe
-# You can switch to your own PyPI index if you want.
-pip install -r envs/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+# Create a conda environment for uv, CUDA, and native build dependencies.
+conda env create -f envs/cu128.yml
+conda activate cu128
 
-# Build the project and install it into the current environment
-# Omit the -e flag to install the project as a regular package
-pip install --no-build-isolation -e .
+# Create .venv, install Python runtime dependencies, and build the package.
+uv sync
+```
+
+For development, include the `dev` dependency group:
+
+```bash
+conda activate cu128
+uv sync --dev
+
+uv run --dev pre-commit install
+uv run --dev ruff format --check .
+uv run --dev ruff check .
+uv run --dev mypy
 ```
 
 ## Usage
@@ -37,7 +46,7 @@ Once the python package is installed, you can use the `vipe` CLI to process raw 
 
 ```bash
 # Replace YOUR_VIDEO.mp4 with the path to your video. We provide sample videos in assets/examples.
-vipe infer YOUR_VIDEO.mp4
+uv run vipe infer YOUR_VIDEO.mp4
 # Additional options:
 #   --output: Output directory (default: vipe_results)
 #   --visualize: Enable visualization of intermediate and final results (default: false)
@@ -56,7 +65,7 @@ Currently, we support the following pipeline configurations:
 
 One can visualize the results that ViPE produces by running (supported by `viser`):
 ```bash
-vipe visualize vipe_results/
+uv run vipe visualize vipe_results/
 # Please modify the above vipe_results/ path to the output directory of your choice.
 ```
 
@@ -70,17 +79,17 @@ Example usages:
 
 ```bash
 # Running the full pipeline.
-python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH
+uv run python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH
 
 # Running the pose-only pipeline without depth estimation.
-python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH pipeline.post.depth_align_model=null
+uv run python run.py pipeline=default streams=raw_mp4_stream streams.base_path=YOUR_VIDEO_OR_DIR_PATH pipeline.post.depth_align_model=null
 ```
 
 ### Converting to COLMAP format
 
 You can use the following script to convert the ViPE results to COLMAP format. For example:
 ```bash
-python scripts/vipe_to_colmap.py vipe_results/ --sequence dog_example
+uv run python scripts/vipe_to_colmap.py vipe_results/ --sequence dog_example
 ```
 This will unproject the dense depth maps to create the 3D point cloud. 
 Alternatively for a more lightweight and 3D consistent point cloud, you can add the `--use_slam_map` flag to the above command. This requires you to run the full pipeline with `pipeline.output.save_slam_map=true` to save the additional information.
@@ -102,14 +111,14 @@ You can download the datasets using the following utility script:
 ```bash
 # Replace YOUR_PREFIX with the prefix of the dataset to be downloaded (see prefix column in the table above)
 # You can also use more specific prefixes, e.g. wsdg-003e2c86 to download a specific shard of the dataset.
-python scripts/download_dataset.py --prefix YOUR_PREFIX --output_base YOUR_OUTPUT_DIR --rgb --depth
+uv run python scripts/download_dataset.py --prefix YOUR_PREFIX --output_base YOUR_OUTPUT_DIR --rgb --depth
 ```
 
 > Note that the depth component is very large and you might expect a long downloading time. For `rgb` component of the Dynpose-100K++ dataset, we directly retrieve the RGB frames from YouTube. You have to `pip install yt_dlp ffmpeg-python` to use this feature. Please refer to the original [Dynpose-100K dataset](https://huggingface.co/datasets/nvidia/dynpose-100k) for alternative approaches to retrieve the videos.
 
 The dataset itself can be visualized using the same visualization script:
 ```bash
-vipe visualize YOUR_OUTPUT_DIR
+uv run vipe visualize YOUR_OUTPUT_DIR
 ```
 
 ## Acknowledgments

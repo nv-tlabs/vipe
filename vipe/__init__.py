@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -20,8 +21,16 @@ from omegaconf import OmegaConf
 from vipe.pipeline import make_pipeline
 
 
-__version__ = "0.1.1"
-__version_info__ = (0, 1, 1)
+def _version_info(version_string: str) -> tuple[int, ...]:
+    release = version_string.split("+", 1)[0].split("-", 1)[0]
+    return tuple(int(part) for part in release.split(".") if part.isdigit())
+
+
+try:
+    __version__ = version("vipe")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
+__version_info__ = _version_info(__version__)
 
 if not OmegaConf.has_resolver("eq"):
     OmegaConf.register_new_resolver("eq", lambda a, b: a == b)

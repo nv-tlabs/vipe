@@ -16,9 +16,7 @@ def run(args: DictConfig) -> None:
     logger = configure_logging()
     for stream_idx in range(len(stream_list)):
         video_stream = stream_list[stream_idx]
-        logger.info(
-            f"Processing {video_stream.name()} ({stream_idx + 1} / {len(stream_list)})"
-        )
+        logger.info(f"Processing {video_stream.name()} ({stream_idx + 1} / {len(stream_list)})")
         pipeline = make_pipeline(args.pipeline)
         pipeline.run(video_stream)
         logger.info(f"Finished processing {video_stream.name()}")

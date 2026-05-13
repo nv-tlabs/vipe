@@ -20,10 +20,9 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.optim as optim
-
 from pycg.isometry import Isometry, Quaternion
 
-from vipe.ext.lietorch import SE3, SO3, LieGroupParameter, Sim3
+from vipe.ext.lietorch import SE3, LieGroupParameter, Sim3
 
 
 def uniformly_sample_aabb(mins: torch.Tensor, maxes: torch.Tensor, spacing: float) -> torch.Tensor:
@@ -432,10 +431,10 @@ class ScaledTransform:
     def apply_se3(self, se3: SE3) -> SE3:
         """Applies the similarity transform to an SE3 transformation."""
         se3_vec = se3.vec()
-        target_t, target_quat = se3_vec[:, :3], SE3.InitFromVec(se3_vec[:, 3:])
+        target_t, target_pose = se3_vec[:, :3], SE3.InitFromVec(se3_vec[:, 3:])
         target_t = self.scale * self.rotation[None].act(target_t) + self.translation[None]
-        target_quat: SE3 = self.rotation[None] * target_quat
-        return SE3.InitFromVec(torch.cat((target_t, target_quat.vec()), dim=-1))
+        transformed_pose = self.rotation[None] * target_pose
+        return SE3.InitFromVec(torch.cat((target_t, transformed_pose.vec()), dim=-1))
 
     def apply_points(self, points: torch.Tensor) -> torch.Tensor:
         """Applies the similarity transform to a set of 3D poinqts."""

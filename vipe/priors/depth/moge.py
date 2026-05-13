@@ -15,14 +15,13 @@
 
 import torch
 
-
 try:
     from moge.model.v1 import MoGeModel
 except ModuleNotFoundError:
     MoGeModel = None
 
-from vipe.utils.misc import unpack_optional
 from vipe.utils.cameras import CameraType
+from vipe.utils.misc import unpack_optional
 
 from .base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 

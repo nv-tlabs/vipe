@@ -19,7 +19,6 @@
 # -------------------------------------------------------------------------------------------------
 
 import torch
-
 from omegaconf import DictConfig
 
 from vipe.ext.lietorch import SE3

@@ -23,14 +23,12 @@ import warnings
 import numpy as np
 import rerun as rr
 import torch
-
 from einops import rearrange
 
 from vipe.ext.lietorch import SE3
 
 from ..networks.droid_net import AltCorrBlock, CorrBlock, DroidNet
 from .buffer import GraphBuffer
-
 
 # Disable all future warnings (mainly torch.cuda.amp related)
 warnings.simplefilter(action="ignore", category=FutureWarning)

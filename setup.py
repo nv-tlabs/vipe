@@ -1,34 +1,24 @@
 import os
-import re
 import shutil
 import tarfile
 import tempfile
+from urllib.request import urlretrieve
 
 from setuptools import find_packages, setup
-from urllib.request import urlretrieve
 
 try:
     import torch
     import torch.version
-
     from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
-    torch_version = torch.version.__version__.split(".")[:2]
     cuda_version = torch.version.cuda
 
-    # This will be e.g. "+pt23cu121"
     assert cuda_version is not None, "Pytorch CUDA is required for this installation."
-    version_suffix = f"+pt{torch_version[0]}{torch_version[1]}cu{cuda_version.replace('.', '')}"
 
 except ImportError:
     raise ValueError("Pytorch not found, please install it first.")
 
 PACKAGE_NAME = "vipe"
-
-# Avoid directly importing the package
-with open(f"{PACKAGE_NAME}/__init__.py", "r") as fh:
-    __version__ = re.findall(r"__version__ = \"(.*?)\"", fh.read())[0]
-__version__ += version_suffix
 
 coder_finder_path = f"{PACKAGE_NAME}/ext/specs.py"
 code_finder_namespace = {"__file__": coder_finder_path}
@@ -71,7 +61,6 @@ if os.environ.get("USE_SYSTEM_EIGEN", "0") == "0":
 packages = find_packages()
 setup(
     packages=packages,
-    version=__version__,
     ext_modules=[
         CUDAExtension(
             f"{PACKAGE_NAME}_ext",

@@ -1,11 +1,10 @@
-name: vipe
+name: cu128
 channels:
   - nvidia/label/cuda-12.8.0
   - conda-forge
   - nodefaults
 dependencies:
-  - python=3.10
-  - pip
+  - uv
   - cuda-nvcc
   - eigen
   - zlib

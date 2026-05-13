@@ -18,7 +18,6 @@ import asyncio
 import logging
 import socket
 import time
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +26,6 @@ import numpy as np
 import torch
 import viser
 import viser.transforms as tf
-
 from matplotlib import cm
 from PIL import Image
 from rich.logging import RichHandler
@@ -41,7 +39,6 @@ from vipe.utils.io import (
     read_pose_artifacts,
     read_rgb_artifacts,
 )
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -354,6 +351,7 @@ class ClientClosures:
             self.gui_timestep = self.client.gui.add_slider(
                 "Timeline", min=0, max=len(self.scene_frame_handles) - 1, step=1, initial_value=0
             )
+            gui_timestep = self.gui_timestep
             gui_frame_control = self.client.gui.add_button_group("Control", options=["Prev", "Next"])
             self.gui_framerate = self.client.gui.add_slider("FPS", min=0, max=30, step=1.0, initial_value=15)
 
@@ -364,11 +362,11 @@ class ClientClosures:
                 else:
                     self._incr_timestep()
 
-            self.current_displayed_timestep = self.gui_timestep.value
+            self.current_displayed_timestep = gui_timestep.value
 
-            @self.gui_timestep.on_update
+            @gui_timestep.on_update
             async def _(_) -> None:
-                current_timestep = self.gui_timestep.value
+                current_timestep = gui_timestep.value
                 prev_timestep = self.current_displayed_timestep
                 with self.client.atomic():
                     self.scene_frame_handles[current_timestep].visible = True

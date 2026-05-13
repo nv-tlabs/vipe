@@ -15,8 +15,8 @@
 
 import torch
 
+from vipe.utils.cameras import BaseCameraModel, CameraType
 from vipe.utils.misc import unpack_optional
-from vipe.utils.cameras import CameraType, BaseCameraModel
 
 from .base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 
@@ -48,7 +48,9 @@ class PinholeDepthAdapter(DepthEstimationModel):
     def _compute_rectification_map(self, h: int, w: int, src_model: BaseCameraModel, dst_model: BaseCameraModel):
         # Compute rectification map that should be performed on the src img to obtain the dst model img
         device = src_model.intrinsics.device
-        y, x = torch.meshgrid(torch.arange(h, device=device).float(), torch.arange(w, device=device).float(), indexing="ij")
+        y, x = torch.meshgrid(
+            torch.arange(h, device=device).float(), torch.arange(w, device=device).float(), indexing="ij"
+        )
         pts, _, _ = dst_model.iproj_disp(torch.ones_like(x), x, y)
         coords, _, _ = src_model.proj_points(pts)
         coords_norm = 2.0 * coords / torch.tensor([w, h], device=coords.device) - 1.0

@@ -17,7 +17,6 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
-
 from omegaconf.dictconfig import DictConfig
 
 from vipe.streams.base import VideoFrame

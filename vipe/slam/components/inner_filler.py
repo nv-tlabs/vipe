@@ -21,7 +21,6 @@
 from dataclasses import dataclass
 
 import torch
-
 from omegaconf import DictConfig
 
 from vipe.ext import lietorch as lt
@@ -53,8 +52,8 @@ class InnerFiller:
         self.start_idx = -1
         self.args = args
 
-        self.filled_poses = []
-        self.filled_dense_disps = []
+        self.filled_poses: list[SE3] = []
+        self.filled_dense_disps: list[torch.Tensor] = []
 
     def set_start_idx(self, start_idx: int):
         self.start_idx = start_idx

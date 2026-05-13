@@ -19,7 +19,6 @@ from torch.utils.cpp_extension import load
 
 from vipe.ext.specs import get_cpp_flags, get_cuda_flags, get_sources
 
-
 try:
     import vipe_ext as _C
 

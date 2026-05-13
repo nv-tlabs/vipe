@@ -20,7 +20,6 @@ import cv2
 import imageio
 import numpy as np
 import torch
-
 from PIL import Image, ImageDraw, ImageFont
 from pycg import image
 
@@ -31,8 +30,7 @@ from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
 
-from .geometry import project_points_to_panorama, project_points_to_pinhole
-
+from .geometry import project_points_to_panorama
 
 rng = np.random.RandomState(200)
 _palette = ((rng.random((3 * 255)) * 0.7 + 0.3) * 255).astype(np.uint8).tolist()
@@ -159,7 +157,7 @@ def draw_lines_batch(
     lines = np.stack([lines_start, lines_end], axis=1).astype(int)
     return cv2.polylines(
         canvas.copy(),
-        [l for l in lines],
+        [line for line in lines],
         isClosed=False,
         color=color or (0, 255, 0),
         thickness=1,
@@ -174,14 +172,14 @@ def draw_tracks(canvas: np.ndarray, tracks: np.ndarray, valid: np.ndarray):
             To draw tracks of different lengths, please call this function multiple times.
         valid: The validity of the tracks. (length, n_tracks)
     """
-    for l in range(tracks.shape[0]):
-        uv, uv_valid = tracks[l], valid[l]
-        canvas = draw_points_batch(canvas, uv[uv_valid], (0, 255 - 20 * l, 0), stencil=POINTS_STENCIL)
-    for l in range(tracks.shape[0] - 1):
-        uv_start, start_valid = tracks[l], valid[l]
-        uv_end, end_valid = tracks[l + 1], valid[l + 1]
+    for track_idx in range(tracks.shape[0]):
+        uv, uv_valid = tracks[track_idx], valid[track_idx]
+        canvas = draw_points_batch(canvas, uv[uv_valid], (0, 255 - 20 * track_idx, 0), stencil=POINTS_STENCIL)
+    for segment_idx in range(tracks.shape[0] - 1):
+        uv_start, start_valid = tracks[segment_idx], valid[segment_idx]
+        uv_end, end_valid = tracks[segment_idx + 1], valid[segment_idx + 1]
         all_valid = start_valid & end_valid
-        canvas = draw_lines_batch(canvas, uv_start[all_valid], uv_end[all_valid], (0, 255 - 20 * l, 0))
+        canvas = draw_lines_batch(canvas, uv_start[all_valid], uv_end[all_valid], (0, 255 - 20 * segment_idx, 0))
     return canvas
 
 
@@ -463,7 +461,7 @@ def save_projection_video(
     ]
     with VideoWriter(video_path, video_stream.fps()) as vw:
         trajectory_length = 0.0
-        last_pose = video_stream[0].pose
+        last_pose = unpack_optional(video_stream[0].pose)
         for frame_idx, frame_data in pbar(enumerate(video_stream), total=len(video_stream), desc="Writing viz video"):
             img_rows = []
             for img_iterator in img_iterators:
@@ -480,7 +478,7 @@ def save_projection_video(
                     fov_y = 2 * np.arctan(frame_data.size()[0] / (2 * focal))
                     fov_y = np.rad2deg(fov_y)
                     text_desc += f" | fovY {fov_y:.2f}"
-            current_pose = frame_data.pose
+            current_pose = unpack_optional(frame_data.pose)
             trajectory_length += np.linalg.norm((last_pose.inv() * current_pose).translation()[:3].cpu().numpy())
             last_pose = current_pose
             text_desc += f" | Traj {trajectory_length:.4f}"

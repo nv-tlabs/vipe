@@ -36,14 +36,14 @@ class FrameDirStream(VideoStream):
         self._name = name if name is not None else path.name
 
         # Find all image files in the directory
-        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+        image_extensions = [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]
         self.frame_files = []
         for ext in image_extensions:
-            self.frame_files.extend(sorted(path.glob(f'*{ext}')))
-            self.frame_files.extend(sorted(path.glob(f'*{ext.upper()}')))
-        
+            self.frame_files.extend(sorted(path.glob(f"*{ext}")))
+            self.frame_files.extend(sorted(path.glob(f"*{ext.upper()}")))
+
         self.frame_files = sorted(list(set(self.frame_files)))
-        
+
         if not self.frame_files:
             raise ValueError(f"No image files found in directory: {path}")
 
@@ -51,9 +51,9 @@ class FrameDirStream(VideoStream):
         first_frame = cv2.imread(str(self.frame_files[0]))
         if first_frame is None:
             raise ValueError(f"Could not read first frame: {self.frame_files[0]}")
-        
+
         self._height, self._width = first_frame.shape[:2]
-        
+
         # Assume 30 fps for frame directories (this is just for compatibility)
         self._fps = 30.0
         _n_frames = len(self.frame_files)
@@ -82,7 +82,7 @@ class FrameDirStream(VideoStream):
 
     def __next__(self) -> VideoFrame:
         self.current_frame_idx += 1
-        
+
         if self.current_frame_idx >= self.end:
             raise StopIteration
 
@@ -95,7 +95,7 @@ class FrameDirStream(VideoStream):
         # Load the frame
         frame_path = self.frame_files[self.current_frame_idx]
         frame = cv2.imread(str(frame_path))
-        
+
         if frame is None:
             raise ValueError(f"Could not read frame: {frame_path}")
 
@@ -110,20 +110,22 @@ class FrameDirStreamList(StreamList):
     def __init__(self, base_path: str, frame_start: int, frame_end: int, frame_skip: int, cached: bool = False) -> None:
         super().__init__()
         base_path_obj = Path(base_path)
-        
+
         if base_path_obj.is_dir():
             # Single directory of frames
             self.frame_directories = [base_path_obj]
         else:
             # Look for subdirectories that might contain frames
             if base_path_obj.parent.exists():
-                self.frame_directories = [d for d in base_path_obj.parent.iterdir() if d.is_dir() and d.name == base_path_obj.name]
+                self.frame_directories = [
+                    d for d in base_path_obj.parent.iterdir() if d.is_dir() and d.name == base_path_obj.name
+                ]
             else:
                 raise ValueError(f"Directory not found: {base_path}")
-                
+
         if not self.frame_directories:
             raise ValueError(f"No frame directories found at: {base_path}")
-            
+
         self.frame_range = range(frame_start, frame_end, frame_skip)
         self.cached = cached
 
@@ -138,4 +140,3 @@ class FrameDirStreamList(StreamList):
 
     def stream_name(self, index: int) -> str:
         return self.frame_directories[index].name
-

@@ -20,8 +20,8 @@ import hydra
 
 from vipe import get_config_path, make_pipeline
 from vipe.streams.base import ProcessedVideoStream
-from vipe.streams.raw_mp4_stream import RawMp4Stream
 from vipe.streams.frame_dir_stream import FrameDirStream
+from vipe.streams.raw_mp4_stream import RawMp4Stream
 from vipe.utils.logging import configure_logging
 from vipe.utils.viser import run_viser
 
@@ -51,7 +51,7 @@ def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: 
     if not video and not image_dir:
         click.echo("Error: Must provide either a video file or --image-dir", err=True)
         raise click.Abort()
-    
+
     if video and image_dir:
         click.echo("Error: Cannot provide both video file and --image-dir", err=True)
         raise click.Abort()
@@ -65,14 +65,9 @@ def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: 
 
     # Set up stream configuration based on input type
     if image_dir:
-        overrides.extend([
-            "streams=frame_dir_stream",
-            f"streams.base_path={image_dir}"
-        ])
-        input_path = image_dir
+        overrides.extend(["streams=frame_dir_stream", f"streams.base_path={image_dir}"])
         input_desc = f"image directory {image_dir}"
     else:
-        input_path = video
         input_desc = f"video {video}"
 
     with hydra.initialize_config_dir(config_dir=str(get_config_path()), version_base=None):

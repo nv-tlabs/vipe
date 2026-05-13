@@ -3,38 +3,100 @@ requires = ["setuptools>=40.8.0", "wheel", "torch"]
 build-backend = "setuptools.build_meta"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py310"
 line-length = 120
+extend-exclude = [
+    "build",
+    "vipe.egg-info",
+    "vipe_results",
+    "vipe/ext/lietorch",
+    "vipe/priors/depth/dav2",
+    "vipe/priors/depth/metric3d",
+    "vipe/priors/depth/priorda",
+    "vipe/priors/depth/unidepth",
+    "vipe/priors/depth/videodepthanything",
+    "vipe/priors/geocalib",
+    "vipe/priors/track_anything/aot",
+    "vipe/priors/track_anything/groundingdino",
+    "vipe/priors/track_anything/sam",
+]
 
-[tool.ruff.lint.isort]
-lines-between-types = 1
-lines-after-imports = 2
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "F401",
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = [
+    "run.py",
+    "scripts",
+    "vipe",
+]
+exclude = [
+    "^build/",
+    "^vipe\\.egg-info/",
+    "^vipe_results/",
+    "^vipe/ext/lietorch/",
+    "^vipe/priors/",
+]
+check_untyped_defs = false
+follow_imports = "silent"
+ignore_missing_imports = true
+no_site_packages = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = false
 
 [project]
 name = "vipe"
+version = "0.1.1"
 description = "NVIDIA Video Pose Engine"
 authors = [
     {name = "The ViPE Authors", email = "jiahuih@nvidia.com"},
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-dynamic = ["version"]
 dependencies = [
-    "numpy",
-    "einops",
-    "omegaconf",
-    "tqdm",
-    "rerun-sdk",
-    "imageio[ffmpeg]",
-    "opencv-python",
-    "python-pycg",
-    "timm",
-    "transformers",
-    "gdown",
-    "OpenEXR",
-    "kornia",
-    "viser",
+    "torch",
+    "torchvision",
     "click",
+    "einops",
+    "gdown",
+    "hydra-core",
+    "imageio[ffmpeg]",
+    "kornia",
+    "matplotlib",
+    "ninja",
+    "numpy",
+    "omegaconf",
+    "opencv-python",
+    "OpenEXR<3.3.0",
+    "python-pycg",
+    "ray",
+    "rerun-sdk",
+    "timm",
+    "tqdm",
+    "transformers>=4,<5",
+    "viser",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15,<2",
+    "pre-commit>=4,<5",
+    "pytest>=8,<9",
+    "ruff>=0.12,<1",
 ]
 
 [project.optional-dependencies]
@@ -44,3 +106,24 @@ dav3 = [
 
 [project.scripts]
 vipe = "vipe.cli.main:main"
+
+[tool.uv]
+default-groups = []
+
+[tool.uv.extra-build-dependencies]
+vipe = [
+    {requirement = "torch", match-runtime = true},
+]
+
+[tool.uv.sources]
+torch = [
+    {index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'"},
+]
+torchvision = [
+    {index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'"},
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

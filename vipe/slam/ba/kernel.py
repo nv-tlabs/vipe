@@ -159,6 +159,4 @@ def build_robust_kernel(
             mu_step=gnc_mu_step,
             mu_max=gnc_mu_max,
         )
-    raise ValueError(
-        f"Unknown robust_kernel: {name!r}; expected 'huber' | 'tukey' | 'gnc_tls' | None"
-    )
+    raise ValueError(f"Unknown robust_kernel: {name!r}; expected 'huber' | 'tukey' | 'gnc_tls' | None")

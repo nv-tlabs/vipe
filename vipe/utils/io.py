@@ -16,7 +16,6 @@
 import logging
 import tempfile
 import zipfile
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -33,7 +32,6 @@ from vipe.streams.base import FrameAttribute, VideoFrame, VideoStream
 from vipe.utils.cameras import CameraType
 from vipe.utils.geometry import se3_matrix_to_se3
 from vipe.utils.visualization import VideoWriter
-
 
 logger = logging.getLogger(__name__)
 

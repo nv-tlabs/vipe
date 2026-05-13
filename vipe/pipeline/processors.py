@@ -15,7 +15,7 @@
 
 
 import logging
-from typing import Iterator
+from typing import Iterable, Iterator
 
 import numpy as np
 import torch
@@ -27,8 +27,7 @@ from vipe.priors.depth.videodepthanything import VideoDepthAnythingDepthModel
 from vipe.priors.geocalib import GeoCalib
 from vipe.priors.track_anything import TrackAnythingPipeline
 from vipe.slam.interface import SLAMOutput
-from vipe.streams.base import (CachedVideoStream, FrameAttribute,
-                               StreamProcessor, VideoFrame, VideoStream)
+from vipe.streams.base import CachedVideoStream, FrameAttribute, StreamProcessor, VideoFrame, VideoStream
 from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
@@ -166,7 +165,9 @@ class AdaptiveDepthProcessor(StreamProcessor):
         try:
             prefix, metric_model, video_model = model.split("_")
             assert video_model in ["svda", "vda"]
-            self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
+            self.video_depth_model: VideoDepthAnythingDepthModel | None = VideoDepthAnythingDepthModel(
+                model="vits" if video_model == "svda" else "vitl"
+            )
 
         except ValueError:
             prefix, metric_model = model.split("_")
@@ -200,16 +201,19 @@ class AdaptiveDepthProcessor(StreamProcessor):
             frame_data_list.append(frame.cpu())
             frame_list.append(frame.rgb.cpu().numpy())
 
+        video_depth_model = unpack_optional(self.video_depth_model)
         video_depth_result: torch.Tensor = unpack_optional(
-            self.video_depth_model.estimate(DepthEstimationInput(video_frame_list=frame_list)).relative_inv_depth
+            video_depth_model.estimate(DepthEstimationInput(video_frame_list=frame_list)).relative_inv_depth
         )
         return video_depth_result, frame_data_list
 
     def update_iterator(self, previous_iterator: Iterator[VideoFrame], pass_idx: int) -> Iterator[VideoFrame]:
         # Determine the percentage score of the SLAM map.
 
-        self.cache_scale_bias = None
+        self.cache_scale_bias: tuple[torch.Tensor, torch.Tensor] | None = None
         min_uv_score: float = 1.0
+        slam_map = unpack_optional(self.slam_output.slam_map)
+        data_iterator: Iterable[VideoFrame]
 
         if self.video_depth_model is not None:
             video_depth_result, data_iterator = self._compute_video_da(previous_iterator)
@@ -226,7 +230,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 for test_frame_idx in range(self.slam_output.trajectory.shape[0]):
                     if test_frame_idx % 10 != 0:
                         continue
-                    depth_infilled = self.slam_output.slam_map.project_map(
+                    depth_infilled = slam_map.project_map(
                         test_frame_idx,
                         0,
                         frame.size(),
@@ -249,7 +253,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 ).metric_depth
                 frame.information = f"uv={min_uv_score:.2f}(Metric)"
             else:
-                depth_map = self.slam_output.slam_map.project_map(
+                depth_map = slam_map.project_map(
                     frame_idx,
                     0,
                     frame.size(),
@@ -282,6 +286,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
                         align_mask,
                     )
                 except RuntimeError:
+                    if self.cache_scale_bias is None:
+                        raise
                     scale, bias = self.cache_scale_bias
 
                 # momentum update
@@ -317,9 +323,9 @@ class MultiviewDepthProcessor(StreamProcessor):
         self,
         slam_output: SLAMOutput,
         model: str = "mvd_dav3",
-        window_size: int = 10,                  # Practically this should be as large as possible if memory permits.
+        window_size: int = 10,  # Practically this should be as large as possible if memory permits.
         overlap_size: int = 3,
-        secondary_keyframe: bool = False,       # This is found to cause jittering for some scenes due to abrupt context changes.
+        secondary_keyframe: bool = False,  # This is found to cause jittering for some scenes due to abrupt context changes.
     ):
         super().__init__()
         self.slam_output = slam_output
@@ -398,7 +404,9 @@ class MultiviewDepthProcessor(StreamProcessor):
                 sw_images, sw_exts, sw_ints = zip(*[frame.dav3_conditions() for frame in current_sliding_window])
 
                 if len(sw_keyframe_inds) > 0:
-                    kf_images, kf_exts, kf_ints = zip(*[self.keyframes_data[t].dav3_conditions() for t in sw_keyframe_inds])
+                    kf_images, kf_exts, kf_ints = zip(
+                        *[self.keyframes_data[t].dav3_conditions() for t in sw_keyframe_inds]
+                    )
                 else:
                     kf_images, kf_exts, kf_ints = tuple(), tuple(), tuple()
 

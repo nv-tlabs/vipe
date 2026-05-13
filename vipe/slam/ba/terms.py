@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-
 from einops import rearrange
 
 from vipe.ext.lietorch import SE3

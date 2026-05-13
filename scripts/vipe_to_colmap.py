@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-
 from pathlib import Path
 from typing import Tuple
 
@@ -10,7 +9,6 @@ import cv2
 import imageio
 import numpy as np
 import torch
-
 from scipy.spatial.transform import Rotation
 
 from vipe.slam.interface import SLAMMap
@@ -23,7 +21,6 @@ from vipe.utils.io import (
     read_pose_artifacts,
     read_rgb_artifacts,
 )
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

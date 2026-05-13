@@ -5,7 +5,6 @@
 import numpy as np
 import PIL
 import torch
-
 from torchvision.ops import box_convert
 
 from .groundingdino.config import config

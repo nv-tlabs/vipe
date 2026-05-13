@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import logging
-
 from collections import defaultdict
 from typing import Any
 
@@ -25,7 +24,6 @@ from ..maths.retractor import BaseRetractor
 from ..maths.vector import SparseBlockVector, SparseNullVector, SparseVectorDict, SparseVectorSubview
 from .kernel import RobustKernel
 from .terms import SolverTerm
-
 
 logger = logging.getLogger(__name__)
 

@@ -16,11 +16,9 @@
 
 import logging
 import pickle
-
 from pathlib import Path
 
 import torch
-
 from omegaconf import DictConfig
 
 from vipe.slam.system import SLAMOutput, SLAMSystem
@@ -43,7 +41,6 @@ from .processors import (
     MultiviewDepthProcessor,
     TrackAnythingProcessor,
 )
-
 
 logger = logging.getLogger(__name__)
 

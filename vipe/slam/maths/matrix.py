@@ -17,7 +17,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import torch
-
 from einops import rearrange
 
 from vipe.ext.scatter import scatter_add

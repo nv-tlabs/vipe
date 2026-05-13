@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import os
-
 from pathlib import Path
 
 
@@ -25,9 +24,17 @@ def get_sources() -> list[str]:
 
 def _additional_include_flags() -> list[str]:
     if "CONDA_PREFIX" in os.environ:
-        conda_include_path = os.path.join(os.environ["CONDA_PREFIX"], "include")
-        if os.path.exists(conda_include_path):
-            return ["-isystem", conda_include_path]
+        conda_prefix = Path(os.environ["CONDA_PREFIX"])
+        include_paths = [
+            conda_prefix / "include",
+            conda_prefix / "nvvm" / "include",
+            *sorted((conda_prefix / "targets").glob("*/include")),
+        ]
+        flags: list[str] = []
+        for include_path in include_paths:
+            if include_path.exists():
+                flags += ["-isystem", str(include_path)]
+        return flags
     return []
 
 

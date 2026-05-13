@@ -128,7 +128,8 @@ class VideoFrame:
             raise ValueError(f"Attribute {attribute} is not available in the frame.")
 
     def cpu(self) -> "VideoFrame":
-        map_cpu = lambda x: x.cpu() if x is not None else None
+        def map_cpu(x):
+            return x.cpu() if x is not None else None
 
         return VideoFrame(
             raw_frame_idx=self.raw_frame_idx,
@@ -144,7 +145,8 @@ class VideoFrame:
         )
 
     def cuda(self) -> "VideoFrame":
-        map_cuda = lambda x: x.cuda() if x is not None else None
+        def map_cuda(x):
+            return x.cuda() if x is not None else None
 
         return VideoFrame(
             raw_frame_idx=self.raw_frame_idx,

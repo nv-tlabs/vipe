@@ -17,7 +17,6 @@ import logging
 
 import tqdm
 
-
 disable_progress_bar: bool = False
 
 
