@@ -14,6 +14,7 @@ extend-exclude = [
     "vipe/priors/depth/metric3d",
     "vipe/priors/depth/priorda",
     "vipe/priors/depth/unidepth",
+    "vipe/priors/depth/unik3d",
     "vipe/priors/depth/videodepthanything",
     "vipe/priors/geocalib",
     "vipe/priors/track_anything/aot",

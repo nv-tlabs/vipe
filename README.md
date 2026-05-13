@@ -33,7 +33,7 @@ conda activate cu128
 uv sync --dev
 
 uv run --dev pre-commit install
-uv run --dev ruff format --check .
+uv run --dev ruff format .
 uv run --dev ruff check .
 uv run --dev mypy
 ```

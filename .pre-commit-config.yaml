@@ -1,25 +1,9 @@
-exclude: >
-  (?x)^(
-    build/|
-    vipe\.egg-info/|
-    vipe_results/|
-    vipe/ext/lietorch/|
-    vipe/priors/depth/dav2/|
-    vipe/priors/depth/metric3d/|
-    vipe/priors/depth/priorda/|
-    vipe/priors/depth/unidepth/|
-    vipe/priors/depth/videodepthanything/|
-    vipe/priors/geocalib/|
-    vipe/priors/track_anything/aot/|
-    vipe/priors/track_anything/groundingdino/|
-    vipe/priors/track_anything/sam/
-  )
 repos:
   - repo: local
     hooks:
       - id: ruff-format
         name: ruff format
-        entry: uv run --group dev ruff format
+        entry: uv run --no-sync --group dev ruff format --force-exclude
         language: system
         types_or:
           - python
@@ -27,7 +11,7 @@ repos:
 
       - id: ruff-check
         name: ruff check
-        entry: uv run --group dev ruff check --fix
+        entry: uv run --no-sync --group dev ruff check --fix --force-exclude
         language: system
         types_or:
           - python
@@ -35,9 +19,7 @@ repos:
 
       - id: mypy
         name: mypy
-        entry: uv run --group dev mypy
+        entry: uv run --no-sync --group dev mypy
         language: system
+        always_run: true
         pass_filenames: false
-        types_or:
-          - python
-          - pyi

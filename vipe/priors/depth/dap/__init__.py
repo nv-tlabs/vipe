@@ -22,7 +22,6 @@ on first use (cached by `huggingface_hub`).
 """
 
 import logging
-
 from typing import Literal
 
 import torch
@@ -33,7 +32,6 @@ from vipe.utils.misc import unpack_optional
 
 from ..base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 from .model import make_dap_model
-
 
 _IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 _IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)

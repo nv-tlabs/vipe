@@ -15,17 +15,15 @@
 
 import logging
 import pickle
-
 from pathlib import Path
 
 import numpy as np
 import rerun as rr
 import torch
-
 from omegaconf import DictConfig
 
 from vipe.ext import lietorch as lt
-from vipe.priors.depth.base import DepthEstimationInput
+from vipe.priors.depth.base import DepthEstimationInput, DepthEstimationModel
 from vipe.priors.depth.dap import DAPModel
 from vipe.priors.depth.unik3d import Unik3DModel
 from vipe.slam.interface import SLAMOutput
@@ -45,7 +43,6 @@ from vipe.utils.visualization import save_projection_video
 
 from . import AnnotationPipelineOutput, Pipeline
 from .processors import EquirectProjectionProcessor, TrackAnythingProcessor
-
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +64,14 @@ class MergedPanoramaVideoStream(VideoStream):
         self.projected_streams = projected_streams
         self.slam_output = slam_output
         self.pano_depth_method = pano_depth_method
+        self.pano_depth_model: DepthEstimationModel | None
 
         if self.pano_depth_method == "unik3d":
             self.pano_depth_model = Unik3DModel()
         elif self.pano_depth_method == "dap":
             self.pano_depth_model = DAPModel()
         elif self.pano_depth_method is None:
-            self.pano_depth_model = None  # type: ignore
+            self.pano_depth_model = None
         else:
             raise ValueError(f"Unknown pano_depth_method: {self.pano_depth_method}")
 

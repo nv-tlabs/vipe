@@ -22,7 +22,7 @@ import torch
 import torch.optim as optim
 from pycg.isometry import Isometry, Quaternion
 
-from vipe.ext.lietorch import SE3, LieGroupParameter, Sim3
+from vipe.ext.lietorch import SE3, SO3, LieGroupParameter, Sim3
 
 
 def uniformly_sample_aabb(mins: torch.Tensor, maxes: torch.Tensor, spacing: float) -> torch.Tensor:
@@ -395,7 +395,7 @@ def se3_to_so3(se3: SE3) -> SO3:
     return SO3.InitFromVec(se3.vec()[..., 3:])
 
 
-def so3_average(so3: SE3, dim: int) -> SE3:
+def so3_average(so3: SO3, dim: int) -> SO3:
     """Computes the Chordal L2 average of the SO3 matrices, where the Isometry distance
     is defined as squared of chordal distance (Frobenius form).
     For other distance like geodesic distance or other norms like L1-norm, no closed-form is provided.
@@ -405,7 +405,7 @@ def so3_average(so3: SE3, dim: int) -> SE3:
     q: torch.Tensor = so3.vec()
     q_mean_mat = (q.unsqueeze(-1) * q.unsqueeze(-2)).mean(dim=dim)
     q_mean = torch.linalg.eigh(q_mean_mat).eigenvectors[..., -1]
-    return SE3.InitFromVec(q_mean)
+    return SO3.InitFromVec(q_mean)
 
 
 def se3_average(se3: SE3, dim: int) -> SE3:

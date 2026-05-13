@@ -19,7 +19,6 @@ from typing import Iterable, Iterator
 
 import numpy as np
 import torch
-
 from scipy.spatial.transform import Rotation as R
 
 from vipe.ext.lietorch import SE3, SO3

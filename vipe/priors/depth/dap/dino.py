@@ -4,14 +4,12 @@
 # the DINOv3 License Agreement. See THIRD_PARTY_LICENSES.md for details.
 
 import math
-
 from functools import partial
 from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-
 from torch import Tensor, nn
 
 
