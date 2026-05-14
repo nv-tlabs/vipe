@@ -4,7 +4,10 @@ from omegaconf import DictConfig
 
 @hydra.main(version_base=None, config_path="configs", config_name="default")
 def run(args: DictConfig) -> None:
+    from vipe.config import validate_typed_config
     from vipe.streams.base import StreamList
+
+    args = validate_typed_config(args)
 
     # Gather all video streams
     stream_list = StreamList.make(args.streams)

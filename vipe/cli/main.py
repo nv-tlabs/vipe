@@ -16,9 +16,9 @@
 from pathlib import Path
 
 import click
-import hydra
 
-from vipe import get_config_path, make_pipeline
+from vipe import make_pipeline
+from vipe.config import parse_typed_config
 from vipe.streams.base import ProcessedVideoStream
 from vipe.streams.frame_dir_stream import FrameDirStream
 from vipe.streams.raw_mp4_stream import RawMp4Stream
@@ -70,8 +70,7 @@ def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: 
     else:
         input_desc = f"video {video}"
 
-    with hydra.initialize_config_dir(config_dir=str(get_config_path()), version_base=None):
-        args = hydra.compose("default", overrides=overrides)
+    args = parse_typed_config("default", hydra_args=overrides)
 
     logger.info(f"Processing {input_desc}...")
     vipe_pipeline = make_pipeline(args.pipeline)

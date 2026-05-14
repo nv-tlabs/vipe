@@ -85,6 +85,7 @@ dependencies = [
     "omegaconf",
     "opencv-python",
     "OpenEXR<3.3.0",
+    "pydantic>=2,<3",
     "python-pycg",
     "ray",
     "rerun-sdk",

@@ -22,6 +22,7 @@ from typing import Any, Sequence
 
 from omegaconf import DictConfig
 
+from vipe.config import BaseConfigSchema
 from vipe.streams.base import MultiviewVideoList, VideoStream
 
 
@@ -66,14 +67,21 @@ class Pipeline(ABC):
     def run(self, video_data: VideoStream | MultiviewVideoList) -> AnnotationPipelineOutput: ...
 
 
-def make_pipeline_cls(config: DictConfig) -> type[Pipeline]:
+def _as_dictconfig(config: DictConfig | BaseConfigSchema) -> DictConfig:
+    if isinstance(config, BaseConfigSchema):
+        return config.to_dictconfig()
+    return config
+
+
+def make_pipeline_cls(config: DictConfig | BaseConfigSchema) -> type[Pipeline]:
+    config = _as_dictconfig(config)
     module_path, class_name = config.instance.rsplit(".", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
 
-def make_pipeline(config: DictConfig) -> Pipeline:
-    config = copy.deepcopy(config)
+def make_pipeline(config: DictConfig | BaseConfigSchema) -> Pipeline:
+    config = copy.deepcopy(_as_dictconfig(config))
     pipeline_cls = make_pipeline_cls(config)
     del config.instance
     return pipeline_cls(**config)

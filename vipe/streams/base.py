@@ -25,6 +25,7 @@ import torch
 from omegaconf import DictConfig
 from torch.utils.data import IterableDataset
 
+from vipe.config import BaseConfigSchema
 from vipe.ext.lietorch import SE3
 from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
@@ -515,7 +516,9 @@ class ProcessedVideoStream(VideoStream):
 
 class StreamList:
     @staticmethod
-    def make(config: DictConfig) -> "StreamList":
+    def make(config: DictConfig | BaseConfigSchema) -> "StreamList":
+        if isinstance(config, BaseConfigSchema):
+            config = config.to_dictconfig()
         module_path, class_name = config.instance.rsplit(".", 1)
         module = importlib.import_module(module_path)
         config = copy.deepcopy(config)
