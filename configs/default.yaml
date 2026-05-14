@@ -5,9 +5,6 @@ defaults:
   - override hydra/hydra_logging: none
   - override hydra/job_logging: disabled
 
-ray: false
-prefilter: false
-
 hydra:
   output_subdir: null
   job:

@@ -35,13 +35,19 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
 
       - name: Install dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --dev --group docs
 
       - name: Lint
         run: uv run --dev ruff check .
 
       - name: Type check
         run: uv run --dev mypy
+
+      - name: Check generated docs
+        run: uv run --dev --group docs python scripts/generate_config_docs.py --check
+
+      - name: Build docs
+        run: uv run --dev --group docs mkdocs build --strict
 
       - name: Test
         run: uv run --dev pytest -q

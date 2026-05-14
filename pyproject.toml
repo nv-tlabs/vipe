@@ -101,6 +101,12 @@ dev = [
     "pytest>=8,<9",
     "ruff>=0.12,<1",
 ]
+docs = [
+    "hydra-core",
+    "mkdocs>=1.6,<2",
+    "omegaconf",
+    "pydantic>=2,<3",
+]
 
 [project.scripts]
 vipe = "vipe.cli.main:main"
