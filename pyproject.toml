@@ -37,11 +37,26 @@ exclude = [
 ]
 check_untyped_defs = false
 follow_imports = "silent"
-ignore_missing_imports = true
-no_site_packages = true
 warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = [
+    "ffmpeg",
+    "Imath",
+    "OpenEXR",
+    "pandas",
+    "pandas.*",
+    "scipy",
+    "scipy.*",
+    "tqdm",
+    "tqdm.*",
+    "vipe_ext",
+    "vslam",
+    "yt_dlp",
+]
+ignore_missing_imports = true
 
 [project]
 name = "vipe"

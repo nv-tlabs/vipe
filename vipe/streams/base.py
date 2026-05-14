@@ -18,7 +18,7 @@ import importlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterable, Iterator, Protocol
+from typing import Any, Iterable, Iterator, Protocol, cast
 
 import numpy as np
 import torch
@@ -308,6 +308,9 @@ class VideoStream(IterableDataset[VideoFrame]):
             stream_attribute.append(frame.get_attribute(attribute))
         return stream_attribute
 
+    def get_gt_stream_attribute(self, attribute: FrameAttribute) -> list[Any]:
+        raise NotImplementedError(f"{type(self).__name__} does not provide ground-truth {attribute.value} data.")
+
 
 class MultiviewVideoList(Iterable[VideoStream]):
     """
@@ -359,7 +362,7 @@ class CachedVideoStream(VideoStream):
         self._name = video_stream.name()
         self._attributes = video_stream.attributes()
         self._len = len(video_stream)
-        self.iterator = iter(video_stream)
+        self.iterator: Iterator[VideoFrame] | None = iter(video_stream)
         self.data: list[VideoFrame] = []
         self.desc = desc
 
@@ -523,7 +526,7 @@ class StreamList:
         module = importlib.import_module(module_path)
         config = copy.deepcopy(config)
         del config.instance
-        return getattr(module, class_name)(**config)
+        return getattr(module, class_name)(**cast(dict[str, Any], config))
 
     def __len__(self) -> int:
         raise NotImplementedError

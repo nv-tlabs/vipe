@@ -15,7 +15,7 @@
 
 
 import logging
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator, cast
 
 import numpy as np
 import torch
@@ -98,12 +98,13 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
                 camera_model=camera_model,
             )
 
-        self.fov_y = res["camera"].vfov[0].item()
+        camera_result = cast(Any, res["camera"])
+        self.fov_y = camera_result.vfov[0].item()
         self.camera_type = camera_type
 
         if not is_pinhole:
             # Assign distortion parameter
-            self.distortion = [res["camera"].dist[0, 0].item()]
+            self.distortion = [camera_result.dist[0, 0].item()]
 
 
 class TrackAnythingProcessor(StreamProcessor):
@@ -284,7 +285,7 @@ class AdaptiveDepthProcessor(StreamProcessor):
                     align_mask = align_mask & frame.mask & (~frame.sky_mask)
 
                 try:
-                    _, scale, bias = align_inv_depth_to_depth(
+                    _, scale_tensor, bias_tensor = align_inv_depth_to_depth(
                         unpack_optional(video_depth_inv_depth),
                         prompt_result,
                         align_mask,
@@ -292,16 +293,18 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 except RuntimeError:
                     if self.cache_scale_bias is None:
                         raise
-                    scale, bias = self.cache_scale_bias
+                    scale_tensor, bias_tensor = self.cache_scale_bias
 
                 # momentum update
                 if self.cache_scale_bias is None:
-                    self.cache_scale_bias = (scale, bias)
-                scale = self.cache_scale_bias[0] * self.update_momentum + scale * (1 - self.update_momentum)
-                bias = self.cache_scale_bias[1] * self.update_momentum + bias * (1 - self.update_momentum)
-                self.cache_scale_bias = (scale, bias)
+                    self.cache_scale_bias = (scale_tensor, bias_tensor)
+                scale_tensor = self.cache_scale_bias[0] * self.update_momentum + scale_tensor * (
+                    1 - self.update_momentum
+                )
+                bias_tensor = self.cache_scale_bias[1] * self.update_momentum + bias_tensor * (1 - self.update_momentum)
+                self.cache_scale_bias = (scale_tensor, bias_tensor)
 
-                video_inv_depth = video_depth_inv_depth * scale + bias
+                video_inv_depth = video_depth_inv_depth * scale_tensor + bias_tensor
                 video_inv_depth[video_inv_depth < 1e-3] = 1e-3
                 frame.metric_depth = video_inv_depth.reciprocal()
 

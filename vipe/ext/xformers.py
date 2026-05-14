@@ -42,7 +42,9 @@ def scaled_index_add(
     scaling: Optional[torch.Tensor] = None,  # [D]
     alpha: float = 1.0,
 ) -> torch.Tensor:
-    return torch.index_add(input, dim=0, source=scaling * source, index=index, alpha=alpha)
+    if scaling is not None:
+        source = scaling * source
+    return torch.index_add(input, dim=0, source=source, index=index, alpha=alpha)
 
 
 def index_select_cat(sources: Sequence[torch.Tensor], indices: Sequence[torch.Tensor]) -> torch.Tensor:

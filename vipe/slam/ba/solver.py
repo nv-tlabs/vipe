@@ -32,12 +32,13 @@ def solve_scipy(pi: torch.Tensor, pj: torch.Tensor, lhs: torch.Tensor, rhs: torc
     from scipy.sparse import coo_matrix
     from scipy.sparse.linalg import spsolve
 
-    lhs = coo_matrix((lhs.cpu().numpy(), (pi.cpu().numpy(), pj.cpu().numpy())))
+    lhs_np = lhs.cpu().numpy()
+    rhs_np = rhs.cpu().numpy()
+    lhs_sparse = coo_matrix((lhs_np, (pi.cpu().numpy(), pj.cpu().numpy())))
     # Convert to CSR format for efficient spsolve
-    lhs = lhs.tocsr()
-    rhs = rhs.cpu().numpy()
+    lhs_sparse = lhs_sparse.tocsr()
 
-    x = spsolve(lhs, rhs)
+    x = spsolve(lhs_sparse, rhs_np)
 
     return torch.tensor(x, device=pi.device).float()
 
