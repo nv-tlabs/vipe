@@ -18,7 +18,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, cast
 
 import cv2
 import imageio
@@ -243,10 +243,10 @@ def read_rgb_artifacts(rgb_file_path: Path) -> Iterator[tuple[int, torch.Tensor]
     """
     Read RGB from H264-encoded video.
     """
-    reader = imageio.get_reader(rgb_file_path, "ffmpeg")
+    reader = cast(Iterator[np.ndarray], imageio.get_reader(str(rgb_file_path), "ffmpeg"))  # type: ignore[arg-type]
     for frame_idx, rgb in enumerate(reader):
-        rgb = torch.from_numpy(rgb) / 255.0
-        yield frame_idx, rgb
+        rgb_tensor = torch.from_numpy(rgb) / 255.0
+        yield frame_idx, rgb_tensor
 
 
 def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream, gt: bool = False) -> None:
@@ -322,6 +322,7 @@ def read_instance_artifacts(
             with z.open(file_name) as f:
                 mask_buffer = np.frombuffer(f.read(), dtype=np.uint8)
                 mask = cv2.imdecode(mask_buffer, cv2.IMREAD_UNCHANGED)
+                assert mask is not None, f"Failed to decode instance mask {file_name}"
                 yield frame_idx, torch.from_numpy(mask.copy()).byte()
 
 

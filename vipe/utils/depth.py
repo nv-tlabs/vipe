@@ -64,7 +64,7 @@ def normal_weight_from_xyz(xyz: torch.Tensor, robust: bool = True) -> torch.Tens
     if not batch_dim:
         xyz = xyz.unsqueeze(0)
 
-    from .ext import _C
+    from vipe.ext import _C
 
     assert xyz.size(0) == 1, "Batch size must be 1."
     if robust:

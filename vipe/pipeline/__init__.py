@@ -18,7 +18,7 @@ import copy
 import importlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 from omegaconf import DictConfig
 
@@ -84,4 +84,4 @@ def make_pipeline(config: DictConfig | BaseConfigSchema) -> Pipeline:
     config = copy.deepcopy(_as_dictconfig(config))
     pipeline_cls = make_pipeline_cls(config)
     del config.instance
-    return pipeline_cls(**config)
+    return pipeline_cls(**cast(dict[str, Any], config))

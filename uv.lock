@@ -2597,7 +2597,7 @@ wheels = [
 
 [[package]]
 name = "python-pycg"
-version = "1.0.2"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "calmsize" },
@@ -2619,9 +2619,9 @@ dependencies = [
     { name = "trimesh" },
     { name = "usd-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/4d/2d1382a175b5a35a2eca181f055d61f0b4f2d6911c6d49895158fe4d668a/python_pycg-1.0.2.tar.gz", hash = "sha256:409bfe29b4e47d02344e11d92e8a276558fc399ec559ab45e040d3aca9c9cbf7", size = 31382901, upload-time = "2026-05-13T23:17:20.092Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/46/a8297b0791e1180d4c47079f4a0a204454a3125a80982d612cb54201a04c/python_pycg-1.0.3.tar.gz", hash = "sha256:85440820a46123c9b069f29406f38b1384e4f343b16c276e318e796fa54426e3", size = 31382962, upload-time = "2026-05-14T18:41:31.109Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/33/edddaa13b97a8f420a341105b7587d731234f957f9964976a6c2b0823621/python_pycg-1.0.2-py3-none-any.whl", hash = "sha256:6ca1df039c503178721f33e9ab23f6e421337b6ff7afa971dc050696aba60506", size = 31388346, upload-time = "2026-05-13T23:17:16.22Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/c2/5e0adadfda4b26c0281512ee0067e6164e8d17cf33e2ef5c5cc29b7ea409/python_pycg-1.0.3-py3-none-any.whl", hash = "sha256:0263157d2d11bea4fb850dc1bc0e4ae5a58bccc85c424354f434e8191d08c0bc", size = 31388494, upload-time = "2026-05-14T18:41:28.141Z" },
 ]
 
 [[package]]

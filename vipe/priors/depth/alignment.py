@@ -21,7 +21,7 @@ def align_inv_depth_to_depth(
     target_depth: torch.Tensor,
     target_mask: torch.Tensor | None = None,
     quantile_masking: bool = True,
-) -> tuple[torch.Tensor, float, float]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Apply affine transformation to align source inverse depth to target depth.
 

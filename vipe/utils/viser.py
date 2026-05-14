@@ -203,7 +203,7 @@ class ClientClosures:
             else:
                 # Use a rainbow color based on the frame index
                 denom = len(self.scene_frame_handles) - 1
-                rainbow_value = cm.jet(1.0 - frame_idx / denom)[:3]
+                rainbow_value = cm.jet(1.0 - frame_idx / denom)[:3]  # type: ignore[attr-defined]
                 rainbow_value = tuple((int(c * 255) for c in rainbow_value))
                 frame_node.frustum_handle.color = rainbow_value
 

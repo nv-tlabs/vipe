@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any
+
 import torch
 
 from vipe.ext.lietorch import SE3
@@ -20,30 +22,30 @@ from vipe.utils.cameras import CameraType
 
 
 class BaseRetractor:
-    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: Any, inds: torch.Tensor, dx: torch.Tensor) -> None:
         x[inds] += dx
 
 
 class PoseRetractor(BaseRetractor):
-    def oplus(self, x: SE3, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: SE3, inds: torch.Tensor, dx: torch.Tensor) -> None:
         x.data[inds] = SE3(x.data[inds]).retr(dx).data
 
 
 class RigRotationOnlyRetractor(BaseRetractor):
-    def oplus(self, x: SE3, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: SE3, inds: torch.Tensor, dx: torch.Tensor) -> None:
         dx = dx.clone()
         dx[:, :3] = 0  # zero out translation part
         x.data[inds] = SE3(x.data[inds]).retr(dx).data
 
 
 class DenseDispRetractor(BaseRetractor):
-    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor) -> None:
         dx = torch.where(dx > 10, torch.zeros_like(dx), dx)
-        return super().oplus(x, inds, dx)
+        super().oplus(x, inds, dx)
 
 
 class TracksDispRetractor(BaseRetractor):
-    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor) -> None:
         super().oplus(x, inds, dx)
         x.clamp_(min=1e-3, max=10)
 
@@ -52,7 +54,7 @@ class IntrinsicsRetractor(BaseRetractor):
     def __init__(self, camera_type: CameraType):
         self.camera_type = camera_type
 
-    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor):
+    def oplus(self, x: torch.Tensor, inds: torch.Tensor, dx: torch.Tensor) -> None:
         if len(dx) == 1:
             # Broadcast dx to all intrinsics
             inds = torch.where(x[:, 0] > 0)[0]
