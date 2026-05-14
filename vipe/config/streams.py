@@ -11,11 +11,22 @@ from vipe.config.base_schema import BaseConfigSchema, Field
 
 
 class BaseStreamListConfig(BaseConfigSchema):
-    base_path: str
-    frame_start: int = Field(ge=0)
-    frame_end: int = Field(ge=-1)
-    frame_skip: int = Field(ge=1)
-    cached: bool
+    """Shared options for stream lists backed by videos or image-frame folders."""
+
+    base_path: str = Field(
+        description="Input path. For MP4 streams this can be one video or a directory of videos; for frame-dir streams "
+        "this can be one frame directory or a directory containing multiple frame directories."
+    )
+    frame_start: int = Field(ge=0, description="First frame index to include.")
+    frame_end: int = Field(
+        ge=-1,
+        description="Exclusive end frame index. Use -1 to process through the end of each stream.",
+    )
+    frame_skip: int = Field(ge=1, description="Frame stride. A value of 1 processes every frame.")
+    cached: bool = Field(
+        description="Cache each stream before processing. This helps with malformed videos whose frame counts are "
+        "unreliable when decoded lazily."
+    )
 
     @field_validator("frame_end")
     @classmethod
@@ -26,11 +37,19 @@ class BaseStreamListConfig(BaseConfigSchema):
 
 
 class RawMP4StreamListConfig(BaseStreamListConfig):
-    instance: Literal["vipe.streams.raw_mp4_stream.RawMP4StreamList"]
+    """Stream list that reads raw MP4 files."""
+
+    instance: Literal["vipe.streams.raw_mp4_stream.RawMP4StreamList"] = Field(
+        description="Implementation class for MP4 video input streams."
+    )
 
 
 class FrameDirStreamListConfig(BaseStreamListConfig):
-    instance: Literal["vipe.streams.frame_dir_stream.FrameDirStreamList"]
+    """Stream list that reads directories of image frames."""
+
+    instance: Literal["vipe.streams.frame_dir_stream.FrameDirStreamList"] = Field(
+        description="Implementation class for image-frame directory input streams."
+    )
 
 
 StreamsConfig = Annotated[RawMP4StreamListConfig | FrameDirStreamListConfig, Field(discriminator="instance")]

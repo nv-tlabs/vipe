@@ -15,10 +15,14 @@
 
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from omegaconf import OmegaConf
 
-from vipe.pipeline import make_pipeline
+if TYPE_CHECKING:
+    from vipe.pipeline import make_pipeline as make_pipeline
+
+__all__ = ["__version__", "__version_info__", "get_config_path", "make_pipeline"]
 
 
 def _version_info(version_string: str) -> tuple[int, ...]:
@@ -40,3 +44,11 @@ if not OmegaConf.has_resolver("neq"):
 
 def get_config_path() -> Path:
     return Path(__file__).parent.parent / "configs"
+
+
+def __getattr__(name: str) -> Any:
+    if name == "make_pipeline":
+        from vipe.pipeline import make_pipeline
+
+        return make_pipeline
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

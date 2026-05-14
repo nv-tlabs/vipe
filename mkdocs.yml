@@ -1,0 +1,23 @@
+site_name: ViPE Documentation
+site_description: Video Pose Engine for Geometric 3D Perception
+site_url: https://nv-tlabs.github.io/vipe/
+repo_url: https://github.com/nv-tlabs/vipe
+repo_name: nv-tlabs/vipe
+
+theme:
+  name: readthedocs
+
+nav:
+  - Overview: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Dataset: dataset.md
+  - Reference:
+      - Configuration: reference/configuration.md
+  - About: about.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
