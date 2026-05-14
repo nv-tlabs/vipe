@@ -207,7 +207,7 @@ class ClientClosures:
                 rainbow_value = tuple((int(c * 255) for c in rainbow_value))
                 frame_node.frustum_handle.color = rainbow_value
 
-    def _rebuild_scene(self):
+    def _rebuild_scene(self) -> None:
         current_artifact = self.global_context().artifacts[self.gui_id.value]
         spatial_subsample: int = self.gui_s_sub.value
         temporal_subsample: int = self.gui_t_sub.value

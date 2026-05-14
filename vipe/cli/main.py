@@ -42,7 +42,7 @@ from vipe.utils.viser import run_viser
 )
 @click.option("--pipeline", "-p", default="default", help="Pipeline configuration to use (default: 'default')")
 @click.option("--visualize", "-v", is_flag=True, help="Enable visualization of intermediate results")
-def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: bool):
+def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: str, visualize: bool):
     """Run inference on a video file or directory of images."""
 
     logger = configure_logging()
@@ -79,6 +79,7 @@ def infer(video: Path, image_dir: Path, output: Path, pipeline: str, visualize: 
         # Use frame directory stream
         video_stream = ProcessedVideoStream(FrameDirStream(image_dir), []).cache(desc="Reading image frames")
     else:
+        assert video is not None
         # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
         video_stream = ProcessedVideoStream(RawMp4Stream(video), []).cache(desc="Reading video stream")
 
