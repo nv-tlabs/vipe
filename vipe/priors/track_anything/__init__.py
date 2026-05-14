@@ -33,9 +33,8 @@ class TrackAnythingPipeline:
         if not aot_ckpt_path.exists():
             aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             gdown.download(
-                "https://drive.google.com/file/d/1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ/view",
+                id="1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ",
                 output=str(aot_ckpt_path),
-                fuzzy=True,
             )
 
         self.threshold_args = {
