@@ -4,16 +4,12 @@ Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-
 """
 
 import importlib
-import warnings
-
-from copy import deepcopy
 from math import ceil
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.v2.functional as TF
-
 from einops import rearrange
 from huggingface_hub import PyTorchModelHubMixin
 
@@ -31,7 +27,6 @@ from ...utils.misc import (
 )
 from .. import encoder
 from .decoder import Decoder
-
 
 STACKING_FNS = {
     "max": max_stack,

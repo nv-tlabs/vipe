@@ -10,7 +10,6 @@
 
 import logging
 import math
-
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -19,12 +18,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init
 import torch.utils.checkpoint
-
 from torch import Tensor
 from torch.nn.init import trunc_normal_
 
 from vipe.ext.xformers import index_select_cat, memory_efficient_attention, scaled_index_add
-
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +230,7 @@ class PatchEmbed(nn.Module):
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_HW, stride=patch_HW)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(embed_dim)
@@ -287,7 +284,7 @@ class Mlp(nn.Module):
         self.fc2 = nn.Linear(hidden_features, out_features, bias=bias)
         self.drop = nn.Dropout(drop)
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(hidden_features)
@@ -330,7 +327,7 @@ class SwiGLUFFN(nn.Module):
         self.w12 = nn.Linear(in_features, 2 * hidden_features, bias=bias)
         self.w3 = nn.Linear(hidden_features, out_features, bias=bias)
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(2 * hidden_features)
@@ -356,17 +353,11 @@ class SwiGLUFFN(nn.Module):
         return out
 
 
-try:
-    from xformers.ops import SwiGLU
-
-    # import numpy.bool
-    XFORMERS_AVAILABLE = True
-except ImportError:
-    SwiGLU = SwiGLUFFN
-    XFORMERS_AVAILABLE = False
+fmha = None
+XFORMERS_AVAILABLE = False
 
 
-class SwiGLUFFNFused(SwiGLU):
+class SwiGLUFFNFused(SwiGLUFFN):
     def __init__(
         self,
         in_features: int,
@@ -419,7 +410,7 @@ class Attention(nn.Module):
             self.proj = nn.Linear(dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(dim * 3)
@@ -527,7 +518,7 @@ class Block(nn.Module):
             tuning_mode=tuning_mode,
         )
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(dim)
@@ -651,6 +642,9 @@ def get_attn_bias_and_cat(x_list, branges=None):
     """
     this will perform the index select, cat the tensors, and provide the attn_bias from cache
     """
+    if fmha is None:
+        raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
+
     batch_sizes = [b.shape[0] for b in branges] if branges is not None else [x.shape[0] for x in x_list]
     all_shapes = tuple((b, x.shape[1]) for b, x in zip(batch_sizes, x_list))
     if all_shapes not in attn_bias_cache.keys():
@@ -739,8 +733,7 @@ class NestedTensorBlock(Block):
         if isinstance(x_or_x_list, Tensor):
             return super().forward(x_or_x_list, attn_bias)
         elif isinstance(x_or_x_list, list):
-            assert XFORMERS_AVAILABLE, "Please install xFormers for nested tensors usage"
-            return self.forward_nested(x_or_x_list)
+            raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
         else:
             raise AssertionError
 
@@ -765,7 +758,7 @@ def named_apply(fn: Callable, module: nn.Module, name="", depth_first=True, incl
 class BlockChunk(nn.ModuleList):
     def forward(self, x, others=None):
         for b in self:
-            if others == None:
+            if others is None:
                 x = b(x)
             else:
                 x = b(x, others)
@@ -837,7 +830,7 @@ class DinoVisionTransformer(nn.Module):
         self.interpolate_antialias = interpolate_antialias
         self.interpolate_offset = interpolate_offset
 
-        if tuning_mode != None:
+        if tuning_mode is not None:
             self.tuning_mode = tuning_mode
             if tuning_mode == "ssf":
                 self.ssf_scale_1, self.ssf_shift_1 = init_ssf_scale_shift(embed_dim)
@@ -1038,7 +1031,7 @@ class DinoVisionTransformer(nn.Module):
         # features.append(x_norm)
         # return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W, self.num_register_tokens)]
 
-        if self.multi_output == False:
+        if not self.multi_output:
             for blk in self.blocks:
                 x = blk(x)
             x_norm = self.norm(x)

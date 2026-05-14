@@ -9,6 +9,7 @@
 
 import math
 from typing import Callable, List, Sequence, Tuple, Union
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,10 +18,10 @@ from einops import rearrange
 
 from vipe.priors.depth.dav3.utils import logger
 
-from .layers import LayerScale  # noqa: F401
-from .layers import Mlp  # noqa: F401
 from .layers import (  # noqa: F401
     Block,
+    LayerScale,  # noqa: F401
+    Mlp,  # noqa: F401
     PatchEmbed,
     PositionGetter,
     RotaryPositionEmbedding2D,
@@ -51,16 +52,12 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
     return emb
 
 
-def named_apply(
-    fn: Callable, module: nn.Module, name="", depth_first=True, include_root=False
-) -> nn.Module:
+def named_apply(fn: Callable, module: nn.Module, name="", depth_first=True, include_root=False) -> nn.Module:
     if not depth_first and include_root:
         fn(module=module, name=name)
     for child_name, child_module in module.named_children():
         child_name = ".".join((name, child_name)) if name else child_name
-        named_apply(
-            fn=fn, module=child_module, name=child_name, depth_first=depth_first, include_root=True
-        )
+        named_apply(fn=fn, module=child_module, name=child_name, depth_first=depth_first, include_root=True)
     if depth_first and include_root:
         fn(module=module, name=name)
     return module
@@ -133,9 +130,7 @@ class DinoVisionTransformer(nn.Module):
         super().__init__()
         self.patch_start_idx = 1
         norm_layer = nn.LayerNorm
-        self.num_features = self.embed_dim = (
-            embed_dim  # num_features for consistency with other models
-        )
+        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.alt_start = alt_start
         self.qknorm_start = qknorm_start
         self.rope_start = rope_start
@@ -148,9 +143,7 @@ class DinoVisionTransformer(nn.Module):
         self.interpolate_antialias = interpolate_antialias
         self.interpolate_offset = interpolate_offset
 
-        self.patch_embed = embed_layer(
-            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
-        )
+        self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         if self.alt_start != -1:
@@ -158,17 +151,13 @@ class DinoVisionTransformer(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
         assert num_register_tokens >= 0
         self.register_tokens = (
-            nn.Parameter(torch.zeros(1, num_register_tokens, embed_dim))
-            if num_register_tokens
-            else None
+            nn.Parameter(torch.zeros(1, num_register_tokens, embed_dim)) if num_register_tokens else None
         )
 
         if drop_path_uniform is True:
             dpr = [drop_path_rate] * depth
         else:
-            dpr = [
-                x.item() for x in torch.linspace(0, drop_path_rate, depth)
-            ]  # stochastic depth decay rule
+            dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         if ffn_layer == "mlp":
             logger.info("using MLP layer as FFN")
             ffn_layer = Mlp
@@ -277,9 +266,7 @@ class DinoVisionTransformer(nn.Module):
         pos = None
         pos_nodiff = None
         if self.rope is not None:
-            pos = self.position_getter(
-                B * S, H // self.patch_size, W // self.patch_size, device=device
-            )
+            pos = self.position_getter(B * S, H // self.patch_size, W // self.patch_size, device=device)
             pos = rearrange(pos, "(b s) n c -> b s n c", b=B)
             pos_nodiff = torch.zeros_like(pos).to(pos.dtype)
             if self.patch_start_idx > 0:
@@ -315,9 +302,7 @@ class DinoVisionTransformer(nn.Module):
                 x[:, :, 0] = cam_token
 
             if self.alt_start != -1 and i >= self.alt_start and i % 2 == 1:
-                x = self.process_attention(
-                    x, blk, "global", pos=g_pos, attn_mask=kwargs.get("attn_mask", None)
-                )
+                x = self.process_attention(x, blk, "global", pos=g_pos, attn_mask=kwargs.get("attn_mask", None))
             else:
                 x = self.process_attention(x, blk, "local", pos=l_pos)
                 local_x = x

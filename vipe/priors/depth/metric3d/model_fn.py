@@ -13,7 +13,6 @@ from .model.dense_pipeline import BaseDepthModel
 class DepthModel(BaseDepthModel):
     def __init__(self, cfg, **kwards):
         super(DepthModel, self).__init__(cfg)
-        model_type = cfg.model.type
 
     def inference(self, data):
         with torch.no_grad():

@@ -18,18 +18,20 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 
+from vipe.priors.depth.dav3.cfg import AttrDict as Dict
 from vipe.priors.depth.dav3.cfg import create_object
 from vipe.priors.depth.dav3.model.utils import pose_encoding_to_extri_intri
-from vipe.priors.depth.dav3.cfg import AttrDict as Dict
 from vipe.priors.depth.dav3.utils import (
+    affine_inverse,
     apply_metric_scaling,
+    as_homogeneous,
     compute_alignment_mask,
     compute_sky_mask,
     least_squares_scale_scalar,
+    map_pdf_to_opacity,
     sample_tensor_for_quantile,
     set_sky_regions_to_max_depth,
 )
-from vipe.priors.depth.dav3.utils import affine_inverse, as_homogeneous, map_pdf_to_opacity
 
 
 def _wrap_cfg(cfg_obj):
@@ -71,29 +73,19 @@ class DepthAnything3Net(nn.Module):
         self.head = head if isinstance(head, nn.Module) else create_object(_wrap_cfg(head))
         self.cam_dec, self.cam_enc = None, None
         if cam_dec is not None:
-            self.cam_dec = (
-                cam_dec if isinstance(cam_dec, nn.Module) else create_object(_wrap_cfg(cam_dec))
-            )
-            self.cam_enc = (
-                cam_dec if isinstance(cam_enc, nn.Module) else create_object(_wrap_cfg(cam_enc))
-            )
+            self.cam_dec = cam_dec if isinstance(cam_dec, nn.Module) else create_object(_wrap_cfg(cam_dec))
+            self.cam_enc = cam_dec if isinstance(cam_enc, nn.Module) else create_object(_wrap_cfg(cam_enc))
         self.gs_adapter, self.gs_head = None, None
         if gs_head is not None and gs_adapter is not None:
-            self.gs_adapter = (
-                gs_adapter
-                if isinstance(gs_adapter, nn.Module)
-                else create_object(_wrap_cfg(gs_adapter))
-            )
+            self.gs_adapter = gs_adapter if isinstance(gs_adapter, nn.Module) else create_object(_wrap_cfg(gs_adapter))
             gs_out_dim = self.gs_adapter.d_in + 1
             if isinstance(gs_head, nn.Module):
-                assert (
-                    gs_head.out_dim == gs_out_dim
-                ), f"gs_head.out_dim should be {gs_out_dim}, got {gs_head.out_dim}"
+                assert gs_head.out_dim == gs_out_dim, f"gs_head.out_dim should be {gs_out_dim}, got {gs_head.out_dim}"
                 self.gs_head = gs_head
             else:
-                assert (
-                    gs_head["output_dim"] == gs_out_dim
-                ), f"gs_head output_dim should set to {gs_out_dim}, got {gs_head['output_dim']}"
+                assert gs_head["output_dim"] == gs_out_dim, (
+                    f"gs_head output_dim should set to {gs_out_dim}, got {gs_head['output_dim']}"
+                )
                 self.gs_head = create_object(_wrap_cfg(gs_head))
 
     def forward(
@@ -123,9 +115,7 @@ class DepthAnything3Net(nn.Module):
         else:
             cam_token = None
 
-        feats, aux_feats = self.backbone(
-            x, cam_token=cam_token, export_feat_layers=export_feat_layers
-        )
+        feats, aux_feats = self.backbone(x, cam_token=cam_token, export_feat_layers=export_feat_layers)
         # feats = [[item for item in feat] for feat in feats]
         H, W = x.shape[-2], x.shape[-1]
 
@@ -141,9 +131,7 @@ class DepthAnything3Net(nn.Module):
 
         return output
 
-    def _process_depth_head(
-        self, feats: list[torch.Tensor], H: int, W: int
-    ) -> Dict[str, torch.Tensor]:
+    def _process_depth_head(self, feats: list[torch.Tensor], H: int, W: int) -> Dict[str, torch.Tensor]:
         """Process features through the depth prediction head."""
         return self.head(feats, H, W, patch_start_idx=0)
 
@@ -186,9 +174,7 @@ class DepthAnything3Net(nn.Module):
         # we instead use the predicted camera poses for better alignment.
         ctx_extr = output.get("extrinsics", None)
         ctx_intr = output.get("intrinsics", None)
-        assert (
-            ctx_extr is not None and ctx_intr is not None
-        ), "must process camera info first if GT is not available"
+        assert ctx_extr is not None and ctx_intr is not None, "must process camera info first if GT is not available"
 
         gt_extr = extrinsics
         # homo the extr if needed
@@ -294,9 +280,7 @@ class NestedDepthAnything3Net(nn.Module):
             Dictionary containing aligned depth predictions and camera parameters
         """
         # Get predictions from both branches
-        output = self.da3(
-            x, extrinsics, intrinsics, export_feat_layers=export_feat_layers, infer_gs=infer_gs
-        )
+        output = self.da3(x, extrinsics, intrinsics, export_feat_layers=export_feat_layers, infer_gs=infer_gs)
         metric_output = self.da3_metric(x, infer_gs=infer_gs)
 
         # Apply metric scaling and alignment

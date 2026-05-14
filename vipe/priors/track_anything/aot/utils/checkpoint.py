@@ -154,5 +154,5 @@ def cp_ckpt(remote_dir="data_wd/youtube_vos_jobs/result", curr_dir="backup"):
                     try:
                         shutil.copy(curr_ckpt_path, remote_ckpt_path)
                         print("Copy {} to {}.".format(curr_ckpt_path, remote_ckpt_path))
-                    except OSError as Inst:
+                    except OSError:
                         return

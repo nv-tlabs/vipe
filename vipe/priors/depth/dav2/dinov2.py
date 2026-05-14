@@ -9,19 +9,16 @@
 
 import logging
 import math
-
 from functools import partial
 from typing import Callable, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
-
 from torch.nn.init import trunc_normal_
 
-from .dinov2_layers import MemEffAttention, Mlp, PatchEmbed
+from .dinov2_layers import MemEffAttention, Mlp, PatchEmbed, SwiGLUFFN
 from .dinov2_layers import NestedTensorBlock as Block
-
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +134,7 @@ class DinoVisionTransformer(nn.Module):
             ffn_layer = Mlp
         elif ffn_layer == "swiglufused" or ffn_layer == "swiglu":
             # logger.info("using SwiGLU layer as FFN")
-            ffn_layer = SwiGLUFFNFused
+            ffn_layer = SwiGLUFFN
         elif ffn_layer == "identity":
             # logger.info("using Identity layer as FFN")
 

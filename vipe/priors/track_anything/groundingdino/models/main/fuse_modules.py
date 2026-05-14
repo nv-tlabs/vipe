@@ -52,7 +52,7 @@ def func_attention(query, context, smooth=1, raw_feature_norm="softmax", eps=1e-
     query: (n_context, queryL, d)
     context: (n_context, sourceL, d)
     """
-    batch_size_q, queryL = query.size(0), query.size(1)
+    _batch_size_q, queryL = query.size(0), query.size(1)
     batch_size, sourceL = context.size(0), context.size(1)
 
     # Get attention
@@ -106,9 +106,9 @@ class BiMultiHeadAttention(nn.Module):
         self.v_dim = v_dim
         self.l_dim = l_dim
 
-        assert (
-            self.head_dim * self.num_heads == self.embed_dim
-        ), f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
+        assert self.head_dim * self.num_heads == self.embed_dim, (
+            f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
+        )
         self.scale = self.head_dim ** (-0.5)
         self.dropout = dropout
 
@@ -127,11 +127,7 @@ class BiMultiHeadAttention(nn.Module):
         self._reset_parameters()
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
-        return (
-            tensor.view(bsz, seq_len, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-            .contiguous()
-        )
+        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def _reset_parameters(self):
         nn.init.xavier_uniform_(self.v_proj.weight)
@@ -147,12 +143,12 @@ class BiMultiHeadAttention(nn.Module):
         nn.init.xavier_uniform_(self.out_l_proj.weight)
         self.out_l_proj.bias.data.fill_(0)
 
-    def forward(self, v, l, attention_mask_v=None, attention_mask_l=None):
+    def forward(self, v, language, attention_mask_v=None, attention_mask_l=None):
         """_summary_
 
         Args:
             v (_type_): bs, n_img, dim
-            l (_type_): bs, n_text, dim
+            language (_type_): bs, n_text, dim
             attention_mask_v (_type_, optional): _description_. bs, n_img
             attention_mask_l (_type_, optional): _description_. bs, n_text
 
@@ -164,9 +160,9 @@ class BiMultiHeadAttention(nn.Module):
         bsz, tgt_len, _ = v.size()
 
         query_states = self.v_proj(v) * self.scale
-        key_states = self._shape(self.l_proj(l), -1, bsz)
+        key_states = self._shape(self.l_proj(language), -1, bsz)
         value_v_states = self._shape(self.values_v_proj(v), -1, bsz)
-        value_l_states = self._shape(self.values_l_proj(l), -1, bsz)
+        value_l_states = self._shape(self.values_l_proj(language), -1, bsz)
 
         proj_shape = (bsz * self.num_heads, -1, self.head_dim)
         query_states = self._shape(query_states, tgt_len, bsz).view(*proj_shape)
@@ -175,9 +171,7 @@ class BiMultiHeadAttention(nn.Module):
         value_l_states = value_l_states.view(*proj_shape)
 
         src_len = key_states.size(1)
-        attn_weights = torch.bmm(
-            query_states, key_states.transpose(1, 2)
-        )  # bs*nhead, nimg, ntxt
+        attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))  # bs*nhead, nimg, ntxt
 
         if attn_weights.size() != (bsz * self.num_heads, tgt_len, src_len):
             raise ValueError(
@@ -197,9 +191,7 @@ class BiMultiHeadAttention(nn.Module):
             )  # Do not increase 50000, data type half has quite limited range
 
         attn_weights_T = attn_weights.transpose(1, 2)
-        attn_weights_l = (
-            attn_weights_T - torch.max(attn_weights_T, dim=-1, keepdim=True)[0]
-        )
+        attn_weights_l = attn_weights_T - torch.max(attn_weights_T, dim=-1, keepdim=True)[0]
         if self.clamp_min_for_underflow:
             attn_weights_l = torch.clamp(
                 attn_weights_l, min=-50000
@@ -211,22 +203,14 @@ class BiMultiHeadAttention(nn.Module):
 
         # mask vison for language
         if attention_mask_v is not None:
-            attention_mask_v = (
-                attention_mask_v[:, None, None, :]
-                .repeat(1, self.num_heads, 1, 1)
-                .flatten(0, 1)
-            )
+            attention_mask_v = attention_mask_v[:, None, None, :].repeat(1, self.num_heads, 1, 1).flatten(0, 1)
             attn_weights_l.masked_fill_(attention_mask_v, float("-inf"))
 
         attn_weights_l = attn_weights_l.softmax(dim=-1)
 
         # mask language for vision
         if attention_mask_l is not None:
-            attention_mask_l = (
-                attention_mask_l[:, None, None, :]
-                .repeat(1, self.num_heads, 1, 1)
-                .flatten(0, 1)
-            )
+            attention_mask_l = attention_mask_l[:, None, None, :].repeat(1, self.num_heads, 1, 1).flatten(0, 1)
             attn_weights.masked_fill_(attention_mask_l, float("-inf"))
         attn_weights_v = attn_weights.softmax(dim=-1)
 
@@ -296,22 +280,21 @@ class BiAttentionBlock(nn.Module):
 
         # add layer scale for training stability
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-        self.gamma_v = nn.Parameter(
-            init_values * torch.ones((v_dim)), requires_grad=True
-        )
-        self.gamma_l = nn.Parameter(
-            init_values * torch.ones((l_dim)), requires_grad=True
-        )
+        self.gamma_v = nn.Parameter(init_values * torch.ones((v_dim)), requires_grad=True)
+        self.gamma_l = nn.Parameter(init_values * torch.ones((l_dim)), requires_grad=True)
 
-    def forward(self, v, l, attention_mask_v=None, attention_mask_l=None):
+    def forward(self, v, language, attention_mask_v=None, attention_mask_l=None):
         v = self.layer_norm_v(v)
-        l = self.layer_norm_l(l)
+        language = self.layer_norm_l(language)
         delta_v, delta_l = self.attn(
-            v, l, attention_mask_v=attention_mask_v, attention_mask_l=attention_mask_l
+            v,
+            language,
+            attention_mask_v=attention_mask_v,
+            attention_mask_l=attention_mask_l,
         )
         # v, l = v + delta_v, l + delta_l
         v = v + self.drop_path(self.gamma_v * delta_v)
-        l = l + self.drop_path(self.gamma_l * delta_l)
-        return v, l
+        language = language + self.drop_path(self.gamma_l * delta_l)
+        return v, language
 
     # def forward(self, v:List[torch.Tensor], l, attention_mask_v=None, attention_mask_l=None)

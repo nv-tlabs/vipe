@@ -4,7 +4,6 @@
 
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -807,7 +806,7 @@ class Readout(nn.Module):
     def __init__(self, in_features, use_cls_token=True, num_register_tokens=0, tuning_mode=None):
         super(Readout, self).__init__()
         self.use_cls_token = use_cls_token
-        if self.use_cls_token == True:
+        if self.use_cls_token:
             self.project_patch = LoRALinear(in_features, in_features, r=8 if tuning_mode == "lora" else 0)
             self.project_learn = LoRALinear(
                 (1 + num_register_tokens) * in_features,
@@ -820,7 +819,7 @@ class Readout(nn.Module):
             self.project = nn.Identity()
 
     def forward(self, x):
-        if self.use_cls_token == True:
+        if self.use_cls_token:
             x_patch = self.project_patch(x[0])
             x_learn = self.project_learn(x[1])
             x_learn = x_learn.expand_as(x_patch).contiguous()
@@ -1187,7 +1186,7 @@ class RAFTDepthNormalDPT5(nn.Module):
         if torch.isinf(vit_features[0]).any():
             print("vit_feature_inf!!!")
 
-        if self.use_cls_token == True:
+        if self.use_cls_token:
             vit_features = [
                 [
                     ft[:, 1 + num_register_tokens :, :].view(B, H, W, self.in_channels[0]),
@@ -1256,8 +1255,6 @@ class RAFTDepthNormalDPT5(nn.Module):
         else:
             flow_predictions = []
             conf_predictions = []
-            samples_pred_list = []
-            coord_list = []
             normal_outs = []
             low_resolution_init = []
 

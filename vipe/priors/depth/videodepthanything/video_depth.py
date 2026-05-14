@@ -19,7 +19,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torchvision.transforms import Compose
 from tqdm import tqdm
 
@@ -28,7 +27,6 @@ from vipe.priors.depth.dav2.util.transform import NormalizeImage, PrepareForNet,
 
 from .dpt_temporal import DPTHeadTemporal
 from .util import compute_scale_and_shift, get_interpolate_frames
-
 
 # infer settings, do not change
 INFER_LEN = 32

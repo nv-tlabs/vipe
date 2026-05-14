@@ -5,17 +5,14 @@
 """GeoCalib model definition."""
 
 import logging
-
 from typing import Dict
 
 import torch
-
 from torch import nn
 from torch.nn import functional as F
 
 from .lm_optimizer import LMOptimizer
 from .modules import MSCAN, ConvModule, LightHamHead
-
 
 # mypy: ignore-errors
 
@@ -142,7 +139,10 @@ class GeoCalib(nn.Module):
             self.load_state_dict(state_dict, strict=True)
             return
         elif len(dict_params & model_params) == 0:  # perfect mismatch
-            strip_prefix = lambda x: ".".join(x.split(".")[:1] + x.split(".")[2:])
+
+            def strip_prefix(x):
+                return ".".join(x.split(".")[:1] + x.split(".")[2:])
+
             state_dict = {strip_prefix(n): p for n, p in state_dict.items()}
             dict_params = set(state_dict.keys())
             if len(dict_params & model_params) == 0:

@@ -4,7 +4,6 @@
 
 import torch
 import torch.nn.functional as F
-
 from torch import nn
 
 from .attention import (
@@ -15,7 +14,7 @@ from .attention import (
     MultiheadLocalAttentionV3,
     silu,
 )
-from .basic import DropPath, GNActDWConv2d, GroupNorm1D, ScaleOffset, mask_out, seq_to_2d
+from .basic import DropPath, GNActDWConv2d, GroupNorm1D, seq_to_2d
 
 
 def _get_norm(indim, type="ln", groups=8):
@@ -70,7 +69,7 @@ class LongShortTermTransformer(nn.Module):
         elif block_version == "v2":
             block = LongShortTermTransformerBlockV2
         elif block_version == "v3":
-            block = LongShortTermTransformerBlockV3
+            raise NotImplementedError("block_version='v3' is not implemented")
         else:
             raise NotImplementedError
 

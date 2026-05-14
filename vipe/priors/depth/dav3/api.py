@@ -32,10 +32,7 @@ from PIL import Image
 
 from vipe.priors.depth.dav3.cfg import AttrDict, create_object, load_config
 from vipe.priors.depth.dav3.registry import MODEL_REGISTRY
-from vipe.priors.depth.dav3.utils import affine_inverse
-from vipe.priors.depth.dav3.utils import InputProcessor
-from vipe.priors.depth.dav3.utils import logger
-from vipe.priors.depth.dav3.utils import align_poses_umeyama
+from vipe.priors.depth.dav3.utils import InputProcessor, affine_inverse, align_poses_umeyama, logger
 
 torch.backends.cudnn.benchmark = False
 # logger.info("CUDNN Benchmark Disabled")
@@ -193,8 +190,7 @@ class DepthAnything3(nn.Module):
                 from huggingface_hub import hf_hub_download
             except ModuleNotFoundError as exc:
                 raise ModuleNotFoundError(
-                    "huggingface_hub is required to fetch DAv3 weights. "
-                    "Run `uv sync` or pass `weights_path=...`."
+                    "huggingface_hub is required to fetch DAv3 weights. Run `uv sync` or pass `weights_path=...`."
                 ) from exc
             weights_path = hf_hub_download(repo_id=repo_id, filename=SAFETENSORS_NAME)
 
@@ -373,16 +369,8 @@ class DepthAnything3(nn.Module):
         imgs = imgs_cpu.to(device, non_blocking=True)[None].float()
 
         # Convert camera parameters to tensors
-        ex_t = (
-            extrinsics.to(device, non_blocking=True)[None].float()
-            if extrinsics is not None
-            else None
-        )
-        in_t = (
-            intrinsics.to(device, non_blocking=True)[None].float()
-            if intrinsics is not None
-            else None
-        )
+        ex_t = extrinsics.to(device, non_blocking=True)[None].float() if extrinsics is not None else None
+        in_t = intrinsics.to(device, non_blocking=True)[None].float() if intrinsics is not None else None
 
         return imgs, ex_t, in_t
 
@@ -471,9 +459,7 @@ class DepthAnything3(nn.Module):
         prediction.processed_images = processed_imgs
         return prediction
 
-    def _export_results(
-        self, prediction: Prediction, export_format: str, export_dir: str, **kwargs
-    ) -> None:
+    def _export_results(self, prediction: Prediction, export_format: str, export_dir: str, **kwargs) -> None:
         """Export results to specified format and directory."""
         raise NotImplementedError("The vendored DAv3 path only includes inference, not result export.")
 

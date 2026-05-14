@@ -8,7 +8,7 @@ import torch
 from .broadcasting import broadcast_inputs
 
 # group operations implemented in cuda
-from .group_ops import Act3, Act4, Adj, AdjT, Exp, FromVec, Inv, Jinv, Log, Mul, ToMatrix, ToVec
+from .group_ops import Act3, Act4, Adj, AdjT, Exp, FromVec, Inv, Jinv, Log, Mul, ToVec
 
 
 class LieGroupParameter(torch.Tensor):
@@ -138,7 +138,9 @@ class LieGroup:
 
     def quaternion(self):
         """extract quaternion"""
-        return self.apply_op(Quat, self.data)
+        if self.group_id in (1, 2):
+            return self.data[..., :4]
+        return self.data[..., 3:7]
 
     def log(self):
         """logarithm map"""
@@ -181,9 +183,9 @@ class LieGroup:
 
     def matrix(self):
         """convert element to 4x4 matrix"""
-        I = torch.eye(4, dtype=self.dtype, device=self.device)
-        I = I.view([1] * (len(self.data.shape) - 1) + [4, 4])
-        return self.__class__(self.data[..., None, :]).act(I).transpose(-1, -2)
+        eye = torch.eye(4, dtype=self.dtype, device=self.device)
+        eye = eye.view([1] * (len(self.data.shape) - 1) + [4, 4])
+        return self.__class__(self.data[..., None, :]).act(eye).transpose(-1, -2)
 
     def translation(self):
         """extract translation component"""

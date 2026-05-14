@@ -79,12 +79,8 @@ class CameraHead(nn.Module):
             layer_scale=layer_scale,
             use_bias=False,
         )
-        self.latents_pos = nn.Parameter(
-            torch.randn(1, self.num_params, hidden_dim), requires_grad=True
-        )
-        self.project = MLP(
-            hidden_dim, expansion=1, dropout=dropout, output_dim=hidden_dim
-        )
+        self.latents_pos = nn.Parameter(torch.randn(1, self.num_params, hidden_dim), requires_grad=True)
+        self.project = MLP(hidden_dim, expansion=1, dropout=dropout, output_dim=hidden_dim)
         self.out_pinhole = MLP(hidden_dim, expansion=1, dropout=dropout, output_dim=1)
 
     def fill_intrinsics(self, x):
@@ -191,15 +187,11 @@ class DepthHead(nn.Module):
 
             depth_mlp = nn.Identity()
             if i == len(depths) - 1:
-                depth_mlp = nn.Sequential(
-                    nn.LayerNorm(next_dim), nn.Linear(next_dim, output_dim)
-                )
+                depth_mlp = nn.Sequential(nn.LayerNorm(next_dim), nn.Linear(next_dim, output_dim))
 
             self.depth_mlp.append(depth_mlp)
 
-        self.confidence_mlp = nn.Sequential(
-            nn.LayerNorm(next_dim), nn.Linear(next_dim, output_dim)
-        )
+        self.confidence_mlp = nn.Sequential(nn.LayerNorm(next_dim), nn.Linear(next_dim, output_dim))
 
         self.to_depth_lr = nn.Conv2d(
             output_dim,
@@ -216,16 +208,12 @@ class DepthHead(nn.Module):
             padding_mode="reflect",
         )
         self.to_depth_hr = nn.Sequential(
-            nn.Conv2d(
-                output_dim // 2, 32, kernel_size=3, padding=1, padding_mode="reflect"
-            ),
+            nn.Conv2d(output_dim // 2, 32, kernel_size=3, padding=1, padding_mode="reflect"),
             nn.LeakyReLU(),
             nn.Conv2d(32, 1, kernel_size=1),
         )
         self.to_confidence_hr = nn.Sequential(
-            nn.Conv2d(
-                output_dim // 2, 32, kernel_size=3, padding=1, padding_mode="reflect"
-            ),
+            nn.Conv2d(output_dim // 2, 32, kernel_size=3, padding=1, padding_mode="reflect"),
             nn.LeakyReLU(),
             nn.Conv2d(32, 1, kernel_size=1),
         )
@@ -237,12 +225,8 @@ class DepthHead(nn.Module):
         self.shapes = shapes
 
     def embed_rays(self, rays):
-        rays_embedding = flat_interpolate(
-            rays, old=self.original_shapes, new=self.shapes, antialias=True
-        )
-        rays_embedding = rays_embedding / torch.norm(
-            rays_embedding, dim=-1, keepdim=True
-        ).clip(min=1e-4)
+        rays_embedding = flat_interpolate(rays, old=self.original_shapes, new=self.shapes, antialias=True)
+        rays_embedding = rays_embedding / torch.norm(rays_embedding, dim=-1, keepdim=True).clip(min=1e-4)
         x, y, z = rays_embedding[..., 0], rays_embedding[..., 1], rays_embedding[..., 2]
         polar = torch.acos(z)
         x_clipped = x.abs().clip(min=1e-3) * (2 * (x >= 0).int() - 1)
@@ -267,13 +251,9 @@ class DepthHead(nn.Module):
     def process(self, features_list, rays_embeddings):
         conditioned_features = self.condition(features_list, rays_embeddings)
         init_latents = self.to_latents(conditioned_features[0])
-        init_latents = rearrange(
-            init_latents, "b (h w) c -> b c h w", h=self.shapes[0], w=self.shapes[1]
-        ).contiguous()
+        init_latents = rearrange(init_latents, "b (h w) c -> b c h w", h=self.shapes[0], w=self.shapes[1]).contiguous()
         conditioned_features = [
-            rearrange(
-                x, "b (h w) c -> b c h w", h=self.shapes[0], w=self.shapes[1]
-            ).contiguous()
+            rearrange(x, "b (h w) c -> b c h w", h=self.shapes[0], w=self.shapes[1]).contiguous()
             for x in conditioned_features
         ]
         latents = init_latents
@@ -301,9 +281,7 @@ class DepthHead(nn.Module):
                 logdepth = out_depth_features
 
         logdepth = self.to_depth_lr(logdepth)
-        logdepth = F.interpolate(
-            logdepth, size=self.original_shapes, mode="bilinear", align_corners=True
-        )
+        logdepth = F.interpolate(logdepth, size=self.original_shapes, mode="bilinear", align_corners=True)
         logdepth = self.to_depth_hr(logdepth)
         return logdepth
 
@@ -311,9 +289,7 @@ class DepthHead(nn.Module):
         highres_features = out_features[-1].permute(0, 2, 3, 1)
         confidence = self.confidence_mlp(highres_features).permute(0, 3, 1, 2)
         confidence = self.to_confidence_lr(confidence)
-        confidence = F.interpolate(
-            confidence, size=self.original_shapes, mode="bilinear", align_corners=True
-        )
+        confidence = F.interpolate(confidence, size=self.original_shapes, mode="bilinear", align_corners=True)
         confidence = self.to_confidence_hr(confidence)
         return confidence
 
@@ -329,7 +305,7 @@ class DepthHead(nn.Module):
         pos_embed,
         level_embed,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        B = features[0].shape[0]
+        features[0].shape[0]
 
         rays_embeddings = self.embed_rays(rays_hr)
         features, proj_latents_16 = self.process(features, rays_embeddings)
@@ -367,17 +343,13 @@ class Decoder(nn.Module):
         H, W = original_shapes
 
         # camera layer
-        intrinsics = self.camera_layer(
-            features=features, cls_tokens=cls_tokens, pos_embed=pos_embed
-        )
+        intrinsics = self.camera_layer(features=features, cls_tokens=cls_tokens, pos_embed=pos_embed)
         B, N = intrinsics.shape
         device = intrinsics.device
         dtype = intrinsics.dtype
 
         id_coords = coords_grid(B, H, W, device=features.device, homogeneous=True)
-        intrinsics_matrix_inverse = torch.eye(3, device=device, dtype=dtype).repeat(
-            B, 1, 1
-        )
+        intrinsics_matrix_inverse = torch.eye(3, device=device, dtype=dtype).repeat(B, 1, 1)
         intrinsics_matrix_inverse[:, 0, 0] = 1.0 / intrinsics[:, 0]
         intrinsics_matrix_inverse[:, 1, 1] = 1.0 / intrinsics[:, 1]
         intrinsics_matrix_inverse[:, 0, 2] = -intrinsics[:, 2] / intrinsics[:, 0]
@@ -391,9 +363,7 @@ class Decoder(nn.Module):
 
         rays_pred = intrinsics_matrix_inverse @ id_coords.reshape(B, 3, -1)
         rays_pred = rays_pred.reshape(B, 3, H, W)
-        rays_pred = rays_pred / torch.norm(rays_pred, dim=1, keepdim=True).clamp(
-            min=1e-5
-        )
+        rays_pred = rays_pred / torch.norm(rays_pred, dim=1, keepdim=True).clamp(min=1e-5)
 
         ### LEGACY CODE FOR TRAINING
         # if self.training and rays_gt is not None:
@@ -414,7 +384,7 @@ class Decoder(nn.Module):
     ) -> dict[str, torch.Tensor]:
         B, C, H, W = inputs["image"].shape
         device = inputs["image"].device
-        dtype = inputs["features"][0].dtype
+        inputs["features"][0].dtype
 
         # get features in b n d format
         common_shape = inputs["features"][0].shape[1:3]
@@ -423,17 +393,11 @@ class Decoder(nn.Module):
         features = self.input_adapter(inputs["features"])
 
         # positional embeddings, spatial and level
-        level_embed = self.level_embeds.repeat(
-            B, common_shape[0] * common_shape[1], 1, 1
-        )
+        level_embed = self.level_embeds.repeat(B, common_shape[0] * common_shape[1], 1, 1)
         level_embed = rearrange(level_embed, "b n l d -> b (n l) d")
-        dummy_tensor = torch.zeros(
-            B, 1, common_shape[0], common_shape[1], device=device, requires_grad=False
-        )
+        dummy_tensor = torch.zeros(B, 1, common_shape[0], common_shape[1], device=device, requires_grad=False)
         pos_embed = self.pos_embed(dummy_tensor)
-        pos_embed = rearrange(pos_embed, "b c h w -> b (h w) c").repeat(
-            1, self.num_resolutions, 1
-        )
+        pos_embed = rearrange(pos_embed, "b c h w -> b (h w) c").repeat(1, self.num_resolutions, 1)
 
         # get cls tokens projections
         camera_tokens = inputs["tokens"]
@@ -522,8 +486,6 @@ class Decoder(nn.Module):
         )
         self.pos_embed = PositionEmbeddingSine(hidden_dim // 2, normalize=True)
         self.level_embeds = nn.Parameter(
-            orthonormal_init(len(input_dims), hidden_dim).reshape(
-                1, 1, len(input_dims), hidden_dim
-            ),
+            orthonormal_init(len(input_dims), hidden_dim).reshape(1, 1, len(input_dims), hidden_dim),
             requires_grad=False,
         )

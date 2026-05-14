@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from einops import rearrange, reduce, repeat
 from scipy import interpolate
 
@@ -46,24 +45,24 @@ def sum_stack(tensors: list[torch.Tensor]) -> torch.Tensor:
     return torch.stack(tensors, dim=-1).sum(dim=-1)
 
 
-def convert_module_to_f16(l):
+def convert_module_to_f16(module):
     """
     Convert primitive modules to float16.
     """
-    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-        l.weight.data = l.weight.data.half()
-        if l.bias is not None:
-            l.bias.data = l.bias.data.half()
+    if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        module.weight.data = module.weight.data.half()
+        if module.bias is not None:
+            module.bias.data = module.bias.data.half()
 
 
-def convert_module_to_f32(l):
+def convert_module_to_f32(module):
     """
     Convert primitive modules to float32, undoing convert_module_to_f16().
     """
-    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-        l.weight.data = l.weight.data.float()
-        if l.bias is not None:
-            l.bias.data = l.bias.data.float()
+    if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        module.weight.data = module.weight.data.float()
+        if module.bias is not None:
+            module.bias.data = module.bias.data.float()
 
 
 def format_seconds(seconds):
@@ -239,7 +238,7 @@ def load_pretrained(state_dict, checkpoint):
         print("Detect pre-trained model, remove [encoder.] prefix.")
     else:
         print("Detect non-pre-trained model, pass without doing anything.")
-    print(f">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
+    print(">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
     checkpoint = load_checkpoint_swin(state_dict, checkpoint_model)
 
 
@@ -354,7 +353,6 @@ def remove_padding(out, paddings):
 
 def remove_padding_metas(out, image_metas):
     B, C, H, W = out.shape
-    device = out.device
     # left, right, top, bottom
     paddings = [torch.tensor(img_meta.get("paddings", [0] * 4)) for img_meta in image_metas]
     return remove_padding(out, paddings)

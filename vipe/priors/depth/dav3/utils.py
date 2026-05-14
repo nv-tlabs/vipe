@@ -16,7 +16,7 @@ import os
 import sys
 from multiprocessing.pool import ThreadPool
 from types import SimpleNamespace
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -26,6 +26,7 @@ import torchvision.transforms as T
 from einops import einsum
 from PIL import Image
 from tqdm import tqdm
+
 
 class Color:
     RED = "\033[91m"
@@ -91,6 +92,7 @@ if __name__ == "__main__":
     logger.warn("This is a warning message")
     logger.error("This is an error message")
     logger.debug("This is a debug message")
+
 
 def as_homogeneous(ext):
     """
@@ -204,9 +206,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
         raise ValueError(f"Invalid rotation matrix shape {matrix.shape}.")
 
     batch_dim = matrix.shape[:-2]
-    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(
-        matrix.reshape(batch_dim + (9,)), dim=-1
-    )
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(matrix.reshape(batch_dim + (9,)), dim=-1)
 
     q_abs = _sqrt_positive_part(
         torch.stack(
@@ -246,9 +246,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
 
     # if not for numerical problems, quat_candidates[i] should be same (up to a sign),
     # forall i; we pick the best-conditioned one (with the largest denominator)
-    out = quat_candidates[F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(
-        batch_dim + (4,)
-    )
+    out = quat_candidates[F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(batch_dim + (4,))
 
     # Convert from rijk to ijkr
     out = out[..., [1, 2, 3, 0]]
@@ -420,9 +418,8 @@ def map_pdf_to_opacity(
     # Map the probability density to an opacity.
     return 0.5 * (1 - (1 - pdf) ** exponent + pdf ** (1 / exponent))
 
-def least_squares_scale_scalar(
-    a: torch.Tensor, b: torch.Tensor, eps: float = 1e-12
-) -> torch.Tensor:
+
+def least_squares_scale_scalar(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
     """
     Compute least squares scale factor s such that a ≈ s * b.
 
@@ -515,9 +512,7 @@ def sample_tensor_for_quantile(tensor: torch.Tensor, max_samples: int = 100000) 
     return tensor.flatten()[idx]
 
 
-def apply_metric_scaling(
-    depth: torch.Tensor, intrinsics: torch.Tensor, scale_factor: float = 300.0
-) -> torch.Tensor:
+def apply_metric_scaling(depth: torch.Tensor, intrinsics: torch.Tensor, scale_factor: float = 300.0) -> torch.Tensor:
     """
     Apply metric scaling to depth based on camera intrinsics.
 
@@ -560,15 +555,14 @@ def set_sky_regions_to_max_depth(
 
     return depth, depth_conf
 
+
 def batch_apply_alignment_to_enc(
     rots: torch.Tensor, trans: torch.Tensor, scales: torch.Tensor, enc_list: List[torch.Tensor]
 ):
     pass
 
 
-def batch_apply_alignment_to_ext(
-    rots: torch.Tensor, trans: torch.Tensor, scales: torch.Tensor, ext: torch.Tensor
-):
+def batch_apply_alignment_to_ext(rots: torch.Tensor, trans: torch.Tensor, scales: torch.Tensor, ext: torch.Tensor):
     device, _ = ext.device, ext.dtype
     if ext.shape[-2:] == (3, 4):
         pad = torch.zeros((*ext.shape[:-2], 4, 4), dtype=ext.dtype, device=device)
@@ -577,9 +571,7 @@ def batch_apply_alignment_to_ext(
         ext = pad
     pose_est = affine_inverse(ext)
     pose_new_align_rot = rots[:, None] @ pose_est[..., :3, :3]
-    pose_new_align_trans = (
-        scales[:, None, None] * (rots[:, None] @ pose_est[..., :3, 3:])[..., 0] + trans[:, None]
-    )
+    pose_new_align_trans = scales[:, None, None] * (rots[:, None] @ pose_est[..., :3, 3:])[..., 0] + trans[:, None]
     pose_new_align = torch.zeros_like(ext)
     pose_new_align[..., :3, :3] = pose_new_align_rot
     pose_new_align[..., :3, 3] = pose_new_align_trans
@@ -670,9 +662,7 @@ def _median_nn_thresh(pose_ref, pose_est_aligned):
     return float(np.median(dists)) if dists else 0.0
 
 
-def _ransac_align_sim3(
-    pose_ref, pose_est, sub_n=None, inlier_thresh=None, max_iters=10, random_state=None
-):
+def _ransac_align_sim3(pose_ref, pose_est, sub_n=None, inlier_thresh=None, max_iters=10, random_state=None):
     rng = np.random.default_rng(random_state)
     N = pose_ref.shape[0]
     idx_all = np.arange(N)
@@ -878,6 +868,7 @@ if __name__ == "__main__":
     assert err.max() < 1e-5, "Max sim3 transform error too large!"
     print("Sim(3) point cloud transform & alignment test passed!")
 
+
 def parallel_execution(
     *args,
     action: Callable,
@@ -994,14 +985,10 @@ class InputProcessor:
 
         batch_tensor = self._stack_batch(proc_imgs)
         out_exts = (
-            torch.from_numpy(np.asarray(out_exts)).float()
-            if out_exts is not None and out_exts[0] is not None
-            else None
+            torch.from_numpy(np.asarray(out_exts)).float() if out_exts is not None and out_exts[0] is not None else None
         )
         out_ixts = (
-            torch.from_numpy(np.asarray(out_ixts)).float()
-            if out_ixts is not None and out_ixts[0] is not None
-            else None
+            torch.from_numpy(np.asarray(out_ixts)).float() if out_ixts is not None and out_ixts[0] is not None else None
         )
         return (batch_tensor, out_exts, out_ixts)
 
@@ -1051,9 +1038,7 @@ class InputProcessor:
             process_res_method=process_res_method,
         )
         if not results:
-            raise RuntimeError(
-                "No preprocessing results returned. Check inputs and parallel_execution."
-            )
+            raise RuntimeError("No preprocessing results returned. Check inputs and parallel_execution.")
         return results
 
     def _unpack_results(self, results):
@@ -1065,8 +1050,7 @@ class InputProcessor:
             processed_images, out_sizes, out_intrinsics, out_extrinsics = zip(*results)
         except Exception as e:
             raise RuntimeError(
-                "Unexpected results structure from parallel_execution: "
-                f"{type(results)} / sample: {results[0]}"
+                f"Unexpected results structure from parallel_execution: {type(results)} / sample: {results[0]}"
             ) from e
 
         return list(processed_images), list(out_sizes), list(out_intrinsics), list(out_extrinsics)
@@ -1084,8 +1068,7 @@ class InputProcessor:
         min_h = min(h for h, _ in out_sizes)
         min_w = min(w for _, w in out_sizes)
         logger.warn(
-            f"Images in batch have different sizes {out_sizes}; "
-            f"center-cropping all to smallest ({min_h},{min_w})"
+            f"Images in batch have different sizes {out_sizes}; center-cropping all to smallest ({min_h},{min_w})"
         )
 
         center_crop = T.CenterCrop((min_h, min_w))
@@ -1279,4 +1262,3 @@ class InputProcessor:
 
 # Backward compatibility alias
 InputAdapter = InputProcessor
-

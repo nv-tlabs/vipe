@@ -9,7 +9,6 @@ from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
-
 from torch.nn.functional import interpolate
 
 from .camera import BaseCamera

@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 def activate_head_gs(out, activation="norm_exp", conf_activation="expp1", conf_dim=None):
     """
     Process network output to extract GS params and density values.
@@ -89,9 +90,7 @@ class Permute(nn.Module):
         return x.permute(*self.dims)
 
 
-def position_grid_to_embed(
-    pos_grid: torch.Tensor, embed_dim: int, omega_0: float = 100
-) -> torch.Tensor:
+def position_grid_to_embed(pos_grid: torch.Tensor, embed_dim: int, omega_0: float = 100) -> torch.Tensor:
     """
     Convert 2D position grid (HxWx2) to sinusoidal embeddings (HxWxC)
 
@@ -217,13 +216,11 @@ def custom_interpolate(
 
     if total > INT_MAX:
         chunks = torch.chunk(x, chunks=(total // INT_MAX) + 1, dim=0)
-        outs = [
-            nn.functional.interpolate(c, size=size, mode=mode, align_corners=align_corners)
-            for c in chunks
-        ]
+        outs = [nn.functional.interpolate(c, size=size, mode=mode, align_corners=align_corners) for c in chunks]
         return torch.cat(outs, dim=0).contiguous()
 
     return nn.functional.interpolate(x, size=size, mode=mode, align_corners=align_corners)
+
 
 def extri_intri_to_pose_encoding(
     extrinsics,
@@ -321,9 +318,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
         raise ValueError(f"Invalid rotation matrix shape {matrix.shape}.")
 
     batch_dim = matrix.shape[:-2]
-    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(
-        matrix.reshape(batch_dim + (9,)), dim=-1
-    )
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(matrix.reshape(batch_dim + (9,)), dim=-1)
 
     q_abs = _sqrt_positive_part(
         torch.stack(
@@ -350,9 +345,7 @@ def mat_to_quat(matrix: torch.Tensor) -> torch.Tensor:
     flr = torch.tensor(0.1).to(dtype=q_abs.dtype, device=q_abs.device)
     quat_candidates = quat_by_rijk / (2.0 * q_abs[..., None].max(flr))
 
-    out = quat_candidates[F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(
-        batch_dim + (4,)
-    )
+    out = quat_candidates[F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(batch_dim + (4,))
 
     out = out[..., [1, 2, 3, 0]]
 
@@ -415,4 +408,3 @@ def cam_quat_xyzw_to_world_quat_wxyz(cam_quat_xyzw, c2w):
     world_quat_wxyz_flat = mat_to_quat(rotmat_world_flat)
     world_quat_wxyz = world_quat_wxyz_flat.reshape(b, n, 4)
     return world_quat_wxyz
-

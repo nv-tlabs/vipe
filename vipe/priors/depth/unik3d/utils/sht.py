@@ -186,7 +186,7 @@ def rsh_cart_4(xyz: torch.Tensor):
     yz = y * z
     x4 = x2**2
     y4 = y2**2
-    z4 = z2**2
+    z2**2
 
     return torch.stack(
         [
@@ -250,7 +250,7 @@ def rsh_cart_5(xyz: torch.Tensor):
     yz = y * z
     x4 = x2**2
     y4 = y2**2
-    z4 = z2**2
+    z2**2
 
     return torch.stack(
         [
@@ -333,7 +333,7 @@ def rsh_cart_6(xyz: torch.Tensor):
     yz = y * z
     x4 = x2**2
     y4 = y2**2
-    z4 = z2**2
+    z2**2
 
     return torch.stack(
         [
@@ -457,7 +457,7 @@ def rsh_cart_7(xyz: torch.Tensor):
     yz = y * z
     x4 = x2**2
     y4 = y2**2
-    z4 = z2**2
+    z2**2
 
     return torch.stack(
         [
@@ -1022,11 +1022,6 @@ __all__ = [
     "rsh_cart_7",
     "rsh_cart_8",
 ]
-
-
-from typing import Optional
-
-import torch
 
 
 class SphHarm(torch.nn.Module):

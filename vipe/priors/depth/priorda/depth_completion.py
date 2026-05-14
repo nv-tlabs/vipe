@@ -5,13 +5,12 @@
 import re
 import time
 import warnings
-
 from typing import Dict, Tuple
 
 import torch
 
 from .dav2 import build_backbone
-from .utils import depth2disparity, disparity2depth
+from .utils import depth2disparity
 
 
 class DepthCompletion(torch.nn.Module):
@@ -313,7 +312,7 @@ class DepthCompletion(torch.nn.Module):
         batch_sparse = torch.nonzero(sparse_masks, as_tuple=False)[..., [0, 2, 1]].float()  # [N, 3] (b, x, y)
         batch_complete = torch.nonzero(complete_masks, as_tuple=False)[..., [0, 2, 1]].float()  # [M, 3] (b, x, y)
 
-        batch_x, batch_y = (
+        _batch_x, _batch_y = (
             batch_sparse[:, 0].contiguous(),
             batch_complete[:, 0].contiguous(),
         )

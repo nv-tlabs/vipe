@@ -7,12 +7,10 @@
 import functools
 import inspect
 import logging
-
 from typing import Callable, List
 
 import numpy as np
 import torch
-
 
 logger = logging.getLogger(__name__)
 

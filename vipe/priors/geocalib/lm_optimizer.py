@@ -6,7 +6,6 @@
 
 import logging
 import time
-
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, Tuple
 
@@ -18,7 +17,6 @@ from .gravity import Gravity
 from .misc import J_focal2fov
 from .perspective_fields import J_perspective_field, get_perspective_field
 from .utils import focal2fov, rad2deg
-
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,6 @@
 # Licensed under the BSD-3 License. See THIRD_PARTY_LICENSES.md for details.
 
 import torch
-import torch.nn.functional as F
 
 from vipe.ext import lietorch_ext as lietorch_backends
 

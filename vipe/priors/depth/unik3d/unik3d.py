@@ -5,7 +5,6 @@ Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-
 
 import importlib
 import warnings
-from copy import deepcopy
 from math import ceil
 
 import torch
@@ -360,7 +359,7 @@ class UniK3D(
         dict_model = torch.load(model_file, map_location="cpu", weights_only=False)
         if "model" in dict_model:
             dict_model = dict_model["model"]
-        info = self.load_state_dict(dict_model, strict=False)
+        self.load_state_dict(dict_model, strict=False)
         # if is_main_process():
         #     print(
         #         f"Loaded from {model_file} for {self.__class__.__name__} results in:",

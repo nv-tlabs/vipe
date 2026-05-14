@@ -10,13 +10,11 @@ Adapted from https://github.com/jinlinyi/PerspectiveFields/blob/main/perspective
 from typing import Tuple
 
 import torch
-
 from torch.nn import functional as F
 
 from .camera import BaseCamera
 from .gravity import Gravity
 from .misc import J_up_projection, J_vecnorm, SphericalManifold
-
 
 # flake8: noqa: E266
 

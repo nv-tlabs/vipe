@@ -17,8 +17,8 @@ from typing import Literal
 
 import torch
 
-from vipe.utils.misc import unpack_optional
 from vipe.utils.cameras import CameraType
+from vipe.utils.misc import unpack_optional
 
 from ..base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 from .models.unidepthv2.unidepthv2 import Pinhole, UniDepthV2

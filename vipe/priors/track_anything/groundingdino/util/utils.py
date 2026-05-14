@@ -33,14 +33,10 @@ def clean_state_dict(state_dict):
     return new_state_dict
 
 
-def renorm(
-    img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-) -> torch.FloatTensor:
+def renorm(img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) -> torch.FloatTensor:
     # img: tensor(3,H,W) or tensor(B,3,H,W)
     # return: same as img
-    assert img.dim() == 3 or img.dim() == 4, (
-        "img.dim() should be 3 or 4 but %d" % img.dim()
-    )
+    assert img.dim() == 3 or img.dim() == 4, "img.dim() should be 3 or 4 but %d" % img.dim()
     if img.dim() == 3:
         assert img.size(0) == 3, 'img.size(0) shoule be 3 but "%d". (%s)' % (
             img.size(0),
@@ -71,9 +67,7 @@ def to_device(item, device):
     elif isinstance(item, dict):
         return {k: to_device(v, device) for k, v in item.items()}
     else:
-        raise NotImplementedError(
-            "Call Shilong if you use other containers! type: {}".format(type(item))
-        )
+        raise NotImplementedError("Call Shilong if you use other containers! type: {}".format(type(item)))
 
 
 #
@@ -174,7 +168,10 @@ def get_embedder(multires, i=0):
     }
 
     embedder_obj = Embedder(**embed_kwargs)
-    embed = lambda x, eo=embedder_obj: eo.embed(x)
+
+    def embed(x, eo=embedder_obj):
+        return eo.embed(x)
+
     return embed, embedder_obj.out_dim
 
 
@@ -222,7 +219,7 @@ def get_raw_dict(args):
         return vars(args)
     elif isinstance(args, dict):
         return args
-    elif isinstance(args, SLConfig):
+    elif hasattr(args, "_cfg_dict"):
         return args._cfg_dict
     else:
         raise NotImplementedError("Unknown type {}".format(type(args)))
@@ -285,9 +282,7 @@ class NiceRepr:
             return str(len(self))
         else:
             # In all other cases force the subclass to overload __nice__
-            raise NotImplementedError(
-                f"Define the __nice__ method for {self.__class__!r}"
-            )
+            raise NotImplementedError(f"Define the __nice__ method for {self.__class__!r}")
 
     def __repr__(self):
         """str: the string of the module"""
@@ -394,17 +389,13 @@ class ModelEma(torch.nn.Module):
 
     def _update(self, model, update_fn):
         with torch.no_grad():
-            for ema_v, model_v in zip(
-                self.module.state_dict().values(), model.state_dict().values()
-            ):
+            for ema_v, model_v in zip(self.module.state_dict().values(), model.state_dict().values()):
                 if self.device is not None:
                     model_v = model_v.to(device=self.device)
                 ema_v.copy_(update_fn(ema_v, model_v))
 
     def update(self, model):
-        self._update(
-            model, update_fn=lambda e, m: self.decay * e + (1.0 - self.decay) * m
-        )
+        self._update(model, update_fn=lambda e, m: self.decay * e + (1.0 - self.decay) * m)
 
     def set(self, model):
         self._update(model, update_fn=lambda e, m: m)
@@ -501,10 +492,7 @@ def targets_to(targets: List[Dict[str, Any]], device):
         "caption",
         "dataset_type",
     ]
-    return [
-        {k: v.to(device) if k not in excluded_keys else v for k, v in t.items()}
-        for t in targets
-    ]
+    return [{k: v.to(device) if k not in excluded_keys else v for k, v in t.items()} for t in targets]
 
 
 def get_phrases_from_posmap(

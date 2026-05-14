@@ -12,7 +12,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 logger = logging.getLogger("dinov2")
-XFORMERS_AVAILABLE = True
+XFORMERS_AVAILABLE = False
+
 
 class Attention(nn.Module):
     def __init__(
@@ -45,11 +46,7 @@ class Attention(nn.Module):
 
     def forward(self, x: Tensor, pos=None, attn_mask=None) -> Tensor:
         B, N, C = x.shape
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
-            .permute(2, 0, 3, 1, 4)
-        )
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
         q, k = self.q_norm(q), self.k_norm(k)
         if self.rope is not None and pos is not None:
@@ -61,11 +58,7 @@ class Attention(nn.Module):
                 k,
                 v,
                 dropout_p=self.attn_drop.p if self.training else 0.0,
-                attn_mask=(
-                    (attn_mask)[:, None].repeat(1, self.num_heads, 1, 1)
-                    if attn_mask is not None
-                    else None
-                ),
+                attn_mask=((attn_mask)[:, None].repeat(1, self.num_heads, 1, 1) if attn_mask is not None else None),
             )
         else:
             q = q * self.scale
@@ -81,11 +74,7 @@ class Attention(nn.Module):
 
     def _forward(self, x: Tensor) -> Tensor:
         B, N, C = x.shape
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
-            .permute(2, 0, 3, 1, 4)
-        )
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
 
         q, k, v = qkv[0] * self.scale, qkv[1], qkv[2]
         attn = q @ k.transpose(-2, -1)
@@ -97,6 +86,7 @@ class Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
+
 
 def drop_path(x, drop_prob: float = 0.0, training: bool = False):
     if drop_prob == 0.0 or not training:
@@ -273,9 +263,7 @@ def drop_add_residual_stochastic_depth(
     residual_scale_factor = b / sample_subset_size
 
     # 3) add the residual
-    x_plus_residual = torch.index_add(
-        x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor
-    )
+    x_plus_residual = torch.index_add(x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor)
     return x_plus_residual.view_as(x)
 
 
@@ -285,6 +273,7 @@ def get_branges_scales(x, sample_drop_ratio=0.0):
     brange = (torch.randperm(b, device=x.device))[:sample_subset_size]
     residual_scale_factor = b / sample_subset_size
     return brange, residual_scale_factor
+
 
 def make_2tuple(x):
     if isinstance(x, tuple):
@@ -342,12 +331,8 @@ class PatchEmbed(nn.Module):
         _, _, H, W = x.shape
         patch_H, patch_W = self.patch_size
 
-        assert (
-            H % patch_H == 0
-        ), f"Input image height {H} is not a multiple of patch height {patch_H}"
-        assert (
-            W % patch_W == 0
-        ), f"Input image width {W} is not a multiple of patch width: {patch_W}"
+        assert H % patch_H == 0, f"Input image height {H} is not a multiple of patch height {patch_H}"
+        assert W % patch_W == 0, f"Input image width {W} is not a multiple of patch width: {patch_W}"
 
         x = self.proj(x)  # B C H W
         H, W = x.size(2), x.size(3)
@@ -359,12 +344,11 @@ class PatchEmbed(nn.Module):
 
     def flops(self) -> float:
         Ho, Wo = self.patches_resolution
-        flops = (
-            Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
-        )
+        flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
         if self.norm is not None:
             flops += Ho * Wo * self.embed_dim
         return flops
+
 
 class PositionGetter:
     """Generates and caches 2D spatial positions for patches in a grid.
@@ -381,9 +365,7 @@ class PositionGetter:
         """Initializes the position generator with an empty cache."""
         self.position_cache: Dict[Tuple[int, int], torch.Tensor] = {}
 
-    def __call__(
-        self, batch_size: int, height: int, width: int, device: torch.device
-    ) -> torch.Tensor:
+    def __call__(self, batch_size: int, height: int, width: int, device: torch.device) -> torch.Tensor:
         """Generates spatial positions for a batch of patches.
 
         Args:
@@ -518,32 +500,25 @@ class RotaryPositionEmbedding2D(nn.Module):
         """
         # Validate inputs
         assert tokens.size(-1) % 2 == 0, "Feature dimension must be even"
-        assert (
-            positions.ndim == 3 and positions.shape[-1] == 2
-        ), "Positions must have shape (batch_size, n_tokens, 2)"
+        assert positions.ndim == 3 and positions.shape[-1] == 2, "Positions must have shape (batch_size, n_tokens, 2)"
 
         # Compute feature dimension for each spatial direction
         feature_dim = tokens.size(-1) // 2
 
         # Get frequency components
         max_position = int(positions.max()) + 1
-        cos_comp, sin_comp = self._compute_frequency_components(
-            feature_dim, max_position, tokens.device, tokens.dtype
-        )
+        cos_comp, sin_comp = self._compute_frequency_components(feature_dim, max_position, tokens.device, tokens.dtype)
 
         # Split features for vertical and horizontal processing
         vertical_features, horizontal_features = tokens.chunk(2, dim=-1)
 
         # Apply RoPE separately for each dimension
-        vertical_features = self._apply_1d_rope(
-            vertical_features, positions[..., 0], cos_comp, sin_comp
-        )
-        horizontal_features = self._apply_1d_rope(
-            horizontal_features, positions[..., 1], cos_comp, sin_comp
-        )
+        vertical_features = self._apply_1d_rope(vertical_features, positions[..., 0], cos_comp, sin_comp)
+        horizontal_features = self._apply_1d_rope(horizontal_features, positions[..., 1], cos_comp, sin_comp)
 
         # Combine processed features
         return torch.cat((vertical_features, horizontal_features), dim=-1)
+
 
 class SwiGLUFFN(nn.Module):
     def __init__(
@@ -568,16 +543,7 @@ class SwiGLUFFN(nn.Module):
         return self.w3(hidden)
 
 
-try:
-    from xformers.ops import SwiGLU
-
-    XFORMERS_AVAILABLE = True
-except ImportError:
-    SwiGLU = SwiGLUFFN
-    XFORMERS_AVAILABLE = False
-
-
-class SwiGLUFFNFused(SwiGLU):
+class SwiGLUFFNFused(SwiGLUFFN):
     def __init__(
         self,
         in_features: int,
@@ -596,6 +562,7 @@ class SwiGLUFFNFused(SwiGLU):
             out_features=out_features,
             bias=bias,
         )
+
 
 __all__ = [
     "Mlp",

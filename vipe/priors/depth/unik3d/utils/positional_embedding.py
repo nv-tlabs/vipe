@@ -1,9 +1,8 @@
-from math import log, pi
+from math import log2, pi
 from typing import Optional
 
 import torch
 import torch.nn as nn
-
 from einops import rearrange, repeat
 
 
@@ -190,9 +189,6 @@ class VisionRotaryEmbeddingFast(nn.Module):
 
     def forward(self, t):
         return t * self.freqs_cos + rotate_half(t) * self.freqs_sin
-
-
-from math import log2
 
 
 def generate_fourier_features(

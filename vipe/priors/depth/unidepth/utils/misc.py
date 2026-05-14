@@ -30,9 +30,7 @@ def first_stack(tensors: list[torch.Tensor]) -> torch.Tensor:
 
 
 @torch.jit.script
-def softmax_stack(
-    tensors: list[torch.Tensor], temperature: float = 1.0
-) -> torch.Tensor:
+def softmax_stack(tensors: list[torch.Tensor], temperature: float = 1.0) -> torch.Tensor:
     if len(tensors) == 1:
         return tensors[0]
     return F.softmax(torch.stack(tensors, dim=-1) / temperature, dim=-1).sum(dim=-1)
@@ -52,24 +50,24 @@ def sum_stack(tensors: list[torch.Tensor]) -> torch.Tensor:
     return torch.stack(tensors, dim=-1).sum(dim=-1)
 
 
-def convert_module_to_f16(l):
+def convert_module_to_f16(module):
     """
     Convert primitive modules to float16.
     """
-    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-        l.weight.data = l.weight.data.half()
-        if l.bias is not None:
-            l.bias.data = l.bias.data.half()
+    if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        module.weight.data = module.weight.data.half()
+        if module.bias is not None:
+            module.bias.data = module.bias.data.half()
 
 
-def convert_module_to_f32(l):
+def convert_module_to_f32(module):
     """
     Convert primitive modules to float32, undoing convert_module_to_f16().
     """
-    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-        l.weight.data = l.weight.data.float()
-        if l.bias is not None:
-            l.bias.data = l.bias.data.float()
+    if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        module.weight.data = module.weight.data.float()
+        if module.bias is not None:
+            module.bias.data = module.bias.data.float()
 
 
 def format_seconds(seconds):
@@ -243,14 +241,12 @@ def load_pretrained(state_dict, checkpoint):
     checkpoint_model = checkpoint["model"]
     if any([True if "encoder." in k else False for k in checkpoint_model.keys()]):
         checkpoint_model = {
-            k.replace("encoder.", ""): v
-            for k, v in checkpoint_model.items()
-            if k.startswith("encoder.")
+            k.replace("encoder.", ""): v for k, v in checkpoint_model.items() if k.startswith("encoder.")
         }
         print("Detect pre-trained model, remove [encoder.] prefix.")
     else:
         print("Detect non-pre-trained model, pass without doing anything.")
-    print(f">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
+    print(">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
     checkpoint = load_checkpoint_swin(state_dict, checkpoint_model)
 
 
@@ -308,12 +304,7 @@ def load_checkpoint_swin(model, checkpoint_model):
                     all_rel_pos_bias = []
 
                     for i in range(nH1):
-                        z = (
-                            relative_position_bias_table_pretrained[:, i]
-                            .view(src_size, src_size)
-                            .float()
-                            .numpy()
-                        )
+                        z = relative_position_bias_table_pretrained[:, i].view(src_size, src_size).float().numpy()
                         f_cubic = interpolate.interp2d(x, y, z, kind="cubic")
                         all_rel_pos_bias.append(
                             torch.Tensor(f_cubic(dx, dy))
@@ -326,16 +317,12 @@ def load_checkpoint_swin(model, checkpoint_model):
                     checkpoint_model[key] = new_rel_pos_bias
 
     # delete relative_position_index since we always re-init it
-    relative_position_index_keys = [
-        k for k in checkpoint_model.keys() if "relative_position_index" in k
-    ]
+    relative_position_index_keys = [k for k in checkpoint_model.keys() if "relative_position_index" in k]
     for k in relative_position_index_keys:
         del checkpoint_model[k]
 
     # delete relative_coords_table since we always re-init it
-    relative_coords_table_keys = [
-        k for k in checkpoint_model.keys() if "relative_coords_table" in k
-    ]
+    relative_coords_table_keys = [k for k in checkpoint_model.keys() if "relative_coords_table" in k]
     for k in relative_coords_table_keys:
         del checkpoint_model[k]
 
@@ -368,29 +355,21 @@ def add_padding_metas(out, image_metas):
 # left, right, top, bottom
 def remove_padding(out, paddings):
     H, W = out.shape[-2:]
-    outs = [
-        o[..., padding[2] : H - padding[3], padding[0] : W - padding[1]]
-        for padding, o in zip(paddings, out)
-    ]
+    outs = [o[..., padding[2] : H - padding[3], padding[0] : W - padding[1]] for padding, o in zip(paddings, out)]
     return torch.stack(outs)
 
 
 def remove_padding_metas(out, image_metas):
     B, C, H, W = out.shape
-    device = out.device
     # left, right, top, bottom
-    paddings = [
-        torch.tensor(img_meta.get("paddings", [0] * 4)) for img_meta in image_metas
-    ]
+    paddings = [torch.tensor(img_meta.get("paddings", [0] * 4)) for img_meta in image_metas]
     return remove_padding(out, paddings)
 
 
 def ssi_helper(tensor1, tensor2):
     stability_mat = 1e-4 * torch.eye(2, device=tensor1.device)
     tensor2_one = torch.stack([tensor2, torch.ones_like(tensor2)], dim=1)
-    scale_shift = torch.inverse(tensor2_one.T @ tensor2_one + stability_mat) @ (
-        tensor2_one.T @ tensor1.unsqueeze(1)
-    )
+    scale_shift = torch.inverse(tensor2_one.T @ tensor2_one + stability_mat) @ (tensor2_one.T @ tensor1.unsqueeze(1))
     scale, shift = scale_shift.squeeze().chunk(2, dim=0)
     return scale, shift
 
@@ -405,10 +384,7 @@ def calculate_mean_values(names, values):
         name_values[name]["count"] = name_values[name].get("count", 0.0) + 1
 
     # Calculate mean values and create the output dictionary
-    output_dict = {
-        name: name_values[name]["sum"] / name_values[name]["count"]
-        for name in name_values
-    }
+    output_dict = {name: name_values[name]["sum"] / name_values[name]["count"] for name in name_values}
 
     return output_dict
 
@@ -462,9 +438,7 @@ def masked_mean(
         return data.mean(dim=dim, keepdim=keepdim)
     mask = mask.float()
     mask_sum = torch.sum(mask, dim=dim, keepdim=True)
-    mask_mean = torch.sum(data * mask, dim=dim, keepdim=True) / torch.clamp(
-        mask_sum, min=1.0
-    )
+    mask_mean = torch.sum(data * mask, dim=dim, keepdim=True) / torch.clamp(mask_sum, min=1.0)
     return mask_mean.squeeze(dim) if not keepdim else mask_mean
 
 
@@ -495,15 +469,12 @@ class ProfileMethod:
 
             self.timings.append(elapsed_time)
             if self.track_statistics and len(self.timings) > 25:
-
                 # Compute statistics if tracking
                 timings_array = np.array(self.timings)
                 mean_time = np.mean(timings_array)
                 std_time = np.std(timings_array)
                 quantiles = np.percentile(timings_array, [0, 25, 50, 75, 100])
-                print(
-                    f"{self.model.__class__.__name__}.{self.func_name} took {elapsed_time:.4f} seconds"
-                )
+                print(f"{self.model.__class__.__name__}.{self.func_name} took {elapsed_time:.4f} seconds")
                 print(f"Mean Time: {mean_time:.4f} seconds")
                 print(f"Std Time: {std_time:.4f} seconds")
                 print(
@@ -511,9 +482,7 @@ class ProfileMethod:
                 )
 
             else:
-                print(
-                    f"{self.model.__class__.__name__}.{self.func_name} took {elapsed_time:.4f} seconds"
-                )
+                print(f"{self.model.__class__.__name__}.{self.func_name} took {elapsed_time:.4f} seconds")
 
 
 def profile_method(track_statistics=True, verbose=False):
@@ -554,7 +523,6 @@ class ProfileFunction:
 
             self.timings.append(elapsed_time)
             if self.track_statistics and len(self.timings) > 25:
-
                 # Compute statistics if tracking
                 timings_array = np.array(self.timings)
                 mean_time = np.mean(timings_array)
@@ -619,12 +587,8 @@ def match_gt(tensor1, tensor2, padding1, padding2, mode: str = "bilinear"):
         item2 = tensor2[i]
 
         h1, w1 = item1.shape[1], item1.shape[2]
-        pad1_l, pad1_r, pad1_t, pad1_b = (
-            padding1[i] if padding1 is not None else (0, 0, 0, 0)
-        )
-        pad2_l, pad2_r, pad2_t, pad2_b = (
-            padding2[i] if padding2 is not None else (0, 0, 0, 0)
-        )
+        pad1_l, pad1_r, pad1_t, pad1_b = padding1[i] if padding1 is not None else (0, 0, 0, 0)
+        pad2_l, pad2_r, pad2_t, pad2_b = padding2[i] if padding2 is not None else (0, 0, 0, 0)
         item1_unpadded = item1[:, pad1_t : h1 - pad1_b, pad1_l : w1 - pad1_r]
 
         h2, w2 = (
@@ -632,9 +596,7 @@ def match_gt(tensor1, tensor2, padding1, padding2, mode: str = "bilinear"):
             item2.shape[2] - pad2_l - pad2_r,
         )
 
-        item1_resized = F.interpolate(
-            item1_unpadded.unsqueeze(0).to(tgt_dtype), size=(h2, w2), mode=mode
-        )
+        item1_resized = F.interpolate(item1_unpadded.unsqueeze(0).to(tgt_dtype), size=(h2, w2), mode=mode)
         item1_padded = F.pad(item1_resized, (pad2_l, pad2_r, pad2_t, pad2_b))
         transformed_tensors.append(item1_padded)
 
@@ -665,15 +627,11 @@ def match_intrinsics(K1, tensor1, tensor2, padding1, padding2):
         h2, w2 = tensor2.shape[2], tensor2.shape[3]
 
         # Remove original padding
-        pad1_l, pad1_r, pad1_t, pad1_b = (
-            padding1[i] if padding1 is not None else (0, 0, 0, 0)
-        )
+        pad1_l, pad1_r, pad1_t, pad1_b = padding1[i] if padding1 is not None else (0, 0, 0, 0)
         w1_unpadded, h1_unpadded = w1 - (pad1_l + pad1_r), h1 - (pad1_t + pad1_b)
 
         # Compute new image size after removing original padding
-        pad2_l, pad2_r, pad2_t, pad2_b = (
-            padding2[i] if padding2 is not None else (0, 0, 0, 0)
-        )
+        pad2_l, pad2_r, pad2_t, pad2_b = padding2[i] if padding2 is not None else (0, 0, 0, 0)
         w2_unpadded, h2_unpadded = w2 - (pad2_l + pad2_r), h2 - (pad2_t + pad2_b)
 
         # Compute scaling factors

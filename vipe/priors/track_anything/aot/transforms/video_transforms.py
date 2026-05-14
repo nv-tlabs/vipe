@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 import torch
 import torchvision.transforms as TF
-
 from PIL import Image
 
 from . import image_transforms as IT
@@ -307,7 +306,7 @@ class RandomScaleV2(object):
         sc_y = float(new_h) / h
 
         # Align short edge
-        if not (self.short_edge is None):
+        if self.short_edge is not None:
             if h > w:
                 sc_x *= float(self.short_edge) / w
                 sc_y *= float(self.short_edge) / w
@@ -384,7 +383,7 @@ class RestrictSize(object):
         image = sample["ref_img"]
         h, w = image.shape[:2]
         # Align short edge
-        if not (self.max_short_edge is None):
+        if self.max_short_edge is not None:
             if h > w:
                 short_edge = w
             else:

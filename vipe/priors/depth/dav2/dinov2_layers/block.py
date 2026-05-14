@@ -9,11 +9,9 @@
 #   https://github.com/rwightman/pytorch-image-models/tree/master/timm/layers/patch_embed.py
 
 import logging
-
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
-
 from torch import Tensor, nn
 
 from vipe.ext.xformers import index_select_cat, scaled_index_add
@@ -23,8 +21,8 @@ from .drop_path import DropPath
 from .layer_scale import LayerScale
 from .mlp import Mlp
 
-
-# from xformers.ops import fmha
+fmha = None
+XFORMERS_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -159,6 +157,9 @@ def get_attn_bias_and_cat(x_list, branges=None):
     """
     this will perform the index select, cat the tensors, and provide the attn_bias from cache
     """
+    if fmha is None:
+        raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
+
     batch_sizes = [b.shape[0] for b in branges] if branges is not None else [x.shape[0] for x in x_list]
     all_shapes = tuple((b, x.shape[1]) for b, x in zip(batch_sizes, x_list))
     if all_shapes not in attn_bias_cache.keys():
@@ -247,7 +248,6 @@ class NestedTensorBlock(Block):
         if isinstance(x_or_x_list, Tensor):
             return super().forward(x_or_x_list)
         elif isinstance(x_or_x_list, list):
-            assert XFORMERS_AVAILABLE, "Please install xFormers for nested tensors usage"
-            return self.forward_nested(x_or_x_list)
+            raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
         else:
             raise AssertionError

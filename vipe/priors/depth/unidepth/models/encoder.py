@@ -5,20 +5,18 @@ Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-
 
 import contextlib
 import math
-
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.nn.init import trunc_normal_
 
 from vipe.ext.xformers import index_select_cat, memory_efficient_attention, scaled_index_add
 
-
-# from xformers.ops import fmha
+fmha = None
+XFORMERS_AVAILABLE = False
 
 
 _DINOV2_BASE_URL = "https://dl.fbaipublicfiles.com/dinov2"
@@ -160,6 +158,9 @@ def get_attn_bias_and_cat(x_list, branges=None):
     """
     this will perform the index select, cat the tensors, and provide the attn_bias from cache
     """
+    if fmha is None:
+        raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
+
     batch_sizes = [b.shape[0] for b in branges] if branges is not None else [x.shape[0] for x in x_list]
     all_shapes = tuple((b, x.shape[1]) for b, x in zip(batch_sizes, x_list))
     if all_shapes not in attn_bias_cache.keys():
@@ -395,6 +396,30 @@ class Mlp(nn.Module):
         return x
 
 
+class SwiGLUFFNFused(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: Optional[int] = None,
+        out_features: Optional[int] = None,
+        act_layer: Callable[..., nn.Module] = None,
+        drop: float = 0.0,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        hidden_features = (int(hidden_features * 2 / 3) + 7) // 8 * 8
+        self.w12 = nn.Linear(in_features, 2 * hidden_features, bias=bias)
+        self.w3 = nn.Linear(hidden_features, out_features, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x12 = self.w12(x)
+        x1, x2 = x12.chunk(2, dim=-1)
+        hidden = F.silu(x1) * x2
+        return self.w3(hidden)
+
+
 class Block(nn.Module):
     def __init__(
         self,
@@ -514,9 +539,16 @@ class NestedTensorBlock(Block):
         if isinstance(x_or_x_list, torch.Tensor):
             return super(NestedTensorBlock, self).forward(x_or_x_list)
         elif isinstance(x_or_x_list, list):
-            return self.forward_nested(x_or_x_list)
+            raise NotImplementedError("Nested tensor attention requires xFormers, which is disabled in ViPE")
         else:
             raise AssertionError
+
+
+class BlockChunk(nn.ModuleList):
+    def forward(self, x):
+        for block in self:
+            x = block(x)
+        return x
 
 
 class DinoVisionTransformer(nn.Module):
@@ -851,11 +883,11 @@ def _make_dinov2_model(
             url += "_reg4"
         url += "_pretrain.pth"
         state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
-        info = model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(state_dict, strict=False)
         # print(info)
     elif pretrained is not None:
         state_dict = torch.load(pretrained, map_location="cpu")
-        info = model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(state_dict, strict=False)
         # print(f"loading from {pretrained} with:", info)
     # else:
     # print("Not loading pretrained weights for backbone")

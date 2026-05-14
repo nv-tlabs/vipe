@@ -2,9 +2,6 @@
 # https://github.com/princeton-vl/lietorch
 # Licensed under the BSD-3 License. See THIRD_PARTY_LICENSES.md for details.
 
-import numpy as np
-import torch
-
 
 def check_broadcastable(x, y):
     assert len(x.shape) == len(y.shape)

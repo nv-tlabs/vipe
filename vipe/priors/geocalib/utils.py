@@ -5,7 +5,6 @@
 """Image loading and general conversion utilities."""
 
 import collections.abc as collections
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Optional, Tuple
@@ -15,7 +14,6 @@ import kornia
 import numpy as np
 import torch
 import torchvision
-
 
 # mypy: ignore-errors
 

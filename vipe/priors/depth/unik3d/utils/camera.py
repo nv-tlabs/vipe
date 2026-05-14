@@ -3,10 +3,14 @@ Author: Luigi Piccinelli
 Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-nc/4.0/)
 """
 
+import json
+import random
 from copy import deepcopy
+from math import log
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from .coordinate import coords_grid
@@ -1181,16 +1185,6 @@ class BatchCamera(Camera):
     @property
     def max_fov(self):
         return recursive_apply(self.cameras, lambda camera: camera.max_fov)
-
-
-import json
-import random
-
-
-# sampler helpers
-from math import log
-
-import torch.nn as nn
 
 
 def eucm(boundaries, mult, batch, device, dtype):

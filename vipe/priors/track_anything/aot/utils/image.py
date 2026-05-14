@@ -6,9 +6,7 @@ import threading
 
 import numpy as np
 import torch
-
 from PIL import Image
-
 
 _palette = [
     0,

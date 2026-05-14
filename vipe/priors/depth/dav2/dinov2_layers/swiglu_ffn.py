@@ -7,7 +7,6 @@
 from typing import Callable, Optional
 
 import torch.nn.functional as F
-
 from torch import Tensor, nn
 
 

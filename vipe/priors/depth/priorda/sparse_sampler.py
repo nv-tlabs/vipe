@@ -4,17 +4,18 @@
 
 import re
 import warnings
-
 from typing import Dict
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-
-# import torch_cluster
 from PIL import Image
+
+try:
+    import torch_cluster
+except ImportError:
+    torch_cluster = None
 
 
 class SparseSampler:
@@ -97,7 +98,7 @@ class SparseSampler:
                     ts_geometric = torch.from_numpy(np_geometric)
                 else:
                     # The format should be compatible with Image.open
-                    pil_pgeometric = Image.open(geometric)
+                    pil_geometric = Image.open(geometric)
                     np_geometric = np.asarray(pil_geometric).astype(np.float32)
                     ts_geometric = torch.from_numpy(np_geometric.copy())
             elif isinstance(geometric, np.ndarray):
@@ -332,6 +333,9 @@ class SparseSampler:
         return sparse_depth, sparse_mask, cover_mask
 
     def interpolate_depths(self, sparse_depths, sparse_masks, complete_masks):
+        if torch_cluster is None:
+            raise ImportError("torch_cluster is required for SparseSampler.interpolate_depths")
+
         known_points = torch.nonzero(sparse_masks, as_tuple=False)[..., [0, 2, 1]].float()  # [N, 3] (b, x, y)
         complete_depths = torch.nonzero(complete_masks, as_tuple=False)[..., [0, 2, 1]].float()  # [M, 3] (b, x, y)
 

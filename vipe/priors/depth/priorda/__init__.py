@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import torch
-
 from einops import rearrange
 
 from vipe.utils.misc import unpack_optional

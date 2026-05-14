@@ -8,14 +8,12 @@ from abc import abstractmethod
 from typing import Dict, Optional, Tuple, Union
 
 import torch
-
 from torch.func import jacfwd, vmap
 from torch.nn import functional as F
 
 from .gravity import Gravity
 from .misc import TensorWrapper, autocast
 from .utils import deg2rad, focal2fov, fov2focal, rad2rotmat
-
 
 # flake8: noqa: E741
 # mypy: ignore-errors
@@ -788,7 +786,6 @@ class SimpleMei(BaseCamera):
     @staticmethod
     def build_from_other(camera: BaseCamera, max_r: float = 1.0, resolution: int = 50) -> "SimpleMei":
         import numpy as np
-
         from scipy.optimize import curve_fit
 
         r_samples = np.linspace(0, max_r, resolution)

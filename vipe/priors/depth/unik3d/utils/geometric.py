@@ -1,13 +1,12 @@
 from typing import Tuple
 
 import torch
-
 from torch.nn import functional as F
 
 
 # @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
 def generate_rays(camera_intrinsics: torch.Tensor, image_shape: Tuple[int, int], noisy: bool = False):
-    batch_size, device, dtype = (
+    _batch_size, device, dtype = (
         camera_intrinsics.shape[0],
         camera_intrinsics.device,
         camera_intrinsics.dtype,
@@ -402,7 +401,6 @@ def erode(image, kernel_size: int | tuple[int, int]):
 
 @torch.jit.script
 def iou(mask1: torch.Tensor, mask2: torch.Tensor) -> torch.Tensor:
-    device = mask1.device
 
     # Ensure the masks are binary (0 or 1)
     mask1 = mask1.to(torch.bool)

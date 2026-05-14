@@ -4,17 +4,13 @@
 
 import os
 import time
-
 from collections import OrderedDict
-from datetime import datetime
 from typing import Union
 
 import numpy as np
 import torch
 import torch.nn as nn
-
 from huggingface_hub import hf_hub_download
-from PIL import Image
 
 from .dav2 import build_backbone
 from .depth_completion import DepthCompletion

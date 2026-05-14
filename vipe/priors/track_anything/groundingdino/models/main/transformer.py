@@ -20,7 +20,6 @@ from typing import Optional
 
 import torch
 import torch.utils.checkpoint as checkpoint
-
 from torch import Tensor, nn
 
 from ...util.misc import inverse_sigmoid
@@ -262,7 +261,6 @@ class Transformer(nn.Module):
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
         # two stage
-        enc_topk_proposals = enc_refpoint_embed = None
 
         #########################################################
         # Begin Encoder
@@ -554,7 +552,7 @@ class TransformerEncoder(nn.Module):
                 else:
                     output, memory_text = self.fusion_layers[layer_id](
                         v=output,
-                        l=memory_text,
+                        language=memory_text,
                         attention_mask_v=key_padding_mask,
                         attention_mask_l=text_attention_mask,
                     )

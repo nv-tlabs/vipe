@@ -3,12 +3,9 @@
 # Licensed under the Apache-2.0 License. See THIRD_PARTY_LICENSES.md for details.
 
 from dataclasses import dataclass, field
-from typing import Tuple
 
 import numpy as np
 import torch
-
-from PIL import Image
 
 
 @dataclass

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from vipe.ext.corr import SpatialCorrelationSampler
 
-from .basic import DropOutLogit, DWConv2d, ScaleOffset
+from .basic import DropOutLogit, DWConv2d
 
 
 def multiply_by_ychunks(x, y, chunks=1):
@@ -648,7 +648,7 @@ class GatedPropagation(nn.Module):
         num_head = self.num_head
         hidden_dim = self.hidden_dim
 
-        l, bs, _ = Q.size()
+        seq_len, bs, _ = Q.size()
 
         # Linear projections
         if self.use_linear:
@@ -707,7 +707,7 @@ class GatedPropagation(nn.Module):
         outputs = multiply_by_xchunks(attn, V, self.qk_chunks).permute(2, 0, 1, 3)
 
         # Restore shape
-        outputs = outputs.reshape(l, bs, -1) * U
+        outputs = outputs.reshape(seq_len, bs, -1) * U
 
         outputs = self.dw_conv(outputs, size_2d)
         outputs = self.projection(outputs)

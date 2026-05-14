@@ -10,9 +10,7 @@ from torch.nn import functional as F
 
 
 @torch.jit.script
-def generate_rays(
-    camera_intrinsics: torch.Tensor, image_shape: Tuple[int, int], noisy: bool = False
-):
+def generate_rays(camera_intrinsics: torch.Tensor, image_shape: Tuple[int, int], noisy: bool = False):
     batch_size, device, dtype = (
         camera_intrinsics.shape[0],
         camera_intrinsics.device,
@@ -36,12 +34,8 @@ def generate_rays(
     intrinsics_inv[:, 1, 1] = 1.0 / camera_intrinsics[:, 1, 1]
     intrinsics_inv[:, 0, 2] = -camera_intrinsics[:, 0, 2] / camera_intrinsics[:, 0, 0]
     intrinsics_inv[:, 1, 2] = -camera_intrinsics[:, 1, 2] / camera_intrinsics[:, 1, 1]
-    homogeneous_coords = torch.cat(
-        [pixel_coords, torch.ones_like(pixel_coords[:, :, :1])], dim=2
-    )  # (H, W, 3)
-    ray_directions = torch.matmul(
-        intrinsics_inv, homogeneous_coords.permute(2, 0, 1).flatten(1)
-    )  # (3, H*W)
+    homogeneous_coords = torch.cat([pixel_coords, torch.ones_like(pixel_coords[:, :, :1])], dim=2)  # (H, W, 3)
+    ray_directions = torch.matmul(intrinsics_inv, homogeneous_coords.permute(2, 0, 1).flatten(1))  # (3, H*W)
     ray_directions = F.normalize(ray_directions, dim=1)  # (B, 3, H*W)
     ray_directions = ray_directions.permute(0, 2, 1)  # (B, H*W, 3)
 
@@ -115,9 +109,7 @@ def euclidean_to_spherical_zbuffer(euclidean_tensor: torch.Tensor) -> torch.Tens
 
 
 @torch.jit.script
-def unproject_points(
-    depth: torch.Tensor, camera_intrinsics: torch.Tensor
-) -> torch.Tensor:
+def unproject_points(depth: torch.Tensor, camera_intrinsics: torch.Tensor) -> torch.Tensor:
     """
     Unprojects a batch of depth maps to 3D point clouds using camera intrinsics.
 
@@ -140,19 +132,11 @@ def unproject_points(
     pixel_coords = torch.stack((x_coords, y_coords), dim=-1)  # (H, W, 2)
 
     # Get homogeneous coords (u v 1)
-    pixel_coords_homogeneous = torch.cat(
-        (pixel_coords, torch.ones((height, width, 1), device=device)), dim=-1
-    )
-    pixel_coords_homogeneous = pixel_coords_homogeneous.permute(2, 0, 1).flatten(
-        1
-    )  # (3, H*W)
+    pixel_coords_homogeneous = torch.cat((pixel_coords, torch.ones((height, width, 1), device=device)), dim=-1)
+    pixel_coords_homogeneous = pixel_coords_homogeneous.permute(2, 0, 1).flatten(1)  # (3, H*W)
     # Apply K^-1 @ (u v 1): [B, 3, 3] @ [3, H*W] -> [B, 3, H*W]
-    unprojected_points = torch.matmul(
-        torch.inverse(camera_intrinsics), pixel_coords_homogeneous
-    )  # (B, 3, H*W)
-    unprojected_points = unprojected_points.view(
-        batch_size, 3, height, width
-    )  # (B, 3, H, W)
+    unprojected_points = torch.matmul(torch.inverse(camera_intrinsics), pixel_coords_homogeneous)  # (B, 3, H*W)
+    unprojected_points = unprojected_points.view(batch_size, 3, height, width)  # (B, 3, H, W)
     unprojected_points = unprojected_points * depth  # (B, 3, H, W)
     return unprojected_points
 
@@ -184,20 +168,14 @@ def project_points(
     flat_indices = flat_points_2d.long()
 
     # Create depth maps and counts using scatter_add, (B, H, W)
-    depth_maps = torch.zeros(
-        [points_3d.shape[0], *image_shape], device=points_3d.device
-    )
+    depth_maps = torch.zeros([points_3d.shape[0], *image_shape], device=points_3d.device)
     counts = torch.zeros([points_3d.shape[0], *image_shape], device=points_3d.device)
 
     # Loop over batches to apply masks and accumulate depth/count values
     for i in range(points_3d.shape[0]):
         valid_indices = flat_indices[i, valid_mask[i]]
-        depth_maps[i].view(-1).scatter_add_(
-            0, valid_indices, points_3d[i, valid_mask[i], 2]
-        )
-        counts[i].view(-1).scatter_add_(
-            0, valid_indices, torch.ones_like(points_3d[i, valid_mask[i], 2])
-        )
+        depth_maps[i].view(-1).scatter_add_(0, valid_indices, points_3d[i, valid_mask[i], 2])
+        counts[i].view(-1).scatter_add_(0, valid_indices, torch.ones_like(points_3d[i, valid_mask[i], 2]))
 
     # Calculate mean depth for each pixel in each batch
     mean_depth_maps = depth_maps / counts.clamp(min=1.0)
@@ -234,9 +212,7 @@ def flat_interpolate(
 ) -> torch.Tensor:
     if old[0] == new[0] and old[1] == new[1]:
         return flat_tensor
-    tensor = flat_tensor.view(flat_tensor.shape[0], old[0], old[1], -1).permute(
-        0, 3, 1, 2
-    )  # b c h w
+    tensor = flat_tensor.view(flat_tensor.shape[0], old[0], old[1], -1).permute(0, 3, 1, 2)  # b c h w
     tensor_interp = F.interpolate(
         tensor,
         size=(new[0], new[1]),
@@ -244,11 +220,7 @@ def flat_interpolate(
         align_corners=False,
         antialias=antialias,
     )
-    flat_tensor_interp = tensor_interp.view(
-        flat_tensor.shape[0], -1, new[0] * new[1]
-    ).permute(
-        0, 2, 1
-    )  # b (h w) c
+    flat_tensor_interp = tensor_interp.view(flat_tensor.shape[0], -1, new[0] * new[1]).permute(0, 2, 1)  # b (h w) c
     return flat_tensor_interp.contiguous()
 
 
@@ -286,7 +258,6 @@ def erode(image, kernel_size: int | tuple[int, int]):
 
 @torch.jit.script
 def iou(mask1: torch.Tensor, mask2: torch.Tensor) -> torch.Tensor:
-    device = mask1.device
 
     # Ensure the masks are binary (0 or 1)
     mask1 = mask1.to(torch.bool)

@@ -4,7 +4,6 @@
 
 from omegaconf import DictConfig
 
-
 config = DictConfig(
     {
         "model": {

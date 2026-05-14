@@ -5,11 +5,8 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from torchvision.ops import box_convert
 
 from ..datasets import transforms as T
-from ..models import build_model
-from .misc import clean_state_dict
 
 # from .slconfig import SLConfig
 from .utils import get_best_phrase_from_logits, get_phrases_from_posmap
@@ -24,6 +21,12 @@ def preprocess_caption(caption: str) -> str:
     if result.endswith("."):
         return result
     return result + "."
+
+
+def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda"):
+    raise NotImplementedError(
+        "The legacy GroundingDINO Model wrapper is not wired in this vendored copy; use Detector instead."
+    )
 
 
 def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
@@ -57,12 +60,8 @@ def predict(
     with torch.no_grad():
         outputs = model(image[None], captions=[caption])
 
-    prediction_logits = (
-        outputs["pred_logits"].cpu().sigmoid()[0]
-    )  # prediction_logits.shape = (nq, 256)
-    prediction_boxes = outputs["pred_boxes"].cpu()[
-        0
-    ]  # prediction_boxes.shape = (nq, 4)
+    prediction_logits = outputs["pred_logits"].cpu().sigmoid()[0]  # prediction_logits.shape = (nq, 256)
+    prediction_boxes = outputs["pred_boxes"].cpu()[0]  # prediction_boxes.shape = (nq, 4)
 
     mask = prediction_logits.max(dim=1)[0] > box_threshold
     logits = prediction_logits[mask]  # logits.shape = (n, 256)
@@ -72,11 +71,7 @@ def predict(
     tokenized = tokenizer(caption)
 
     if remove_combined:
-        sep_idx = [
-            i
-            for i in range(len(tokenized["input_ids"]))
-            if tokenized["input_ids"][i] in [101, 102, 1012]
-        ]
+        sep_idx = [i for i in range(len(tokenized["input_ids"])) if tokenized["input_ids"][i] in [101, 102, 1012]]
 
         phrases = []
         for logit in logits:
@@ -85,9 +80,9 @@ def predict(
             right_idx = sep_idx[insert_idx]
             left_idx = sep_idx[insert_idx - 1]
             phrases.append(
-                get_phrases_from_posmap(
-                    logit > text_threshold, tokenized, tokenizer, left_idx, right_idx
-                ).replace(".", "")
+                get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer, left_idx, right_idx).replace(
+                    ".", ""
+                )
             )
     else:
         # phrases = [
@@ -96,9 +91,7 @@ def predict(
         #     ).replace(".", "")
         #     for logit in logits
         # ]
-        phrases = [
-            get_best_phrase_from_logits(logit, tokenized, tokenizer) for logit in logits
-        ]
+        phrases = [get_best_phrase_from_logits(logit, tokenized, tokenizer) for logit in logits]
 
     return boxes, logits.max(dim=1)[0], phrases
 
@@ -109,10 +102,7 @@ def predict(
 
 
 class Model:
-
-    def __init__(
-        self, model_config_path: str, model_checkpoint_path: str, device: str = "cuda"
-    ):
+    def __init__(self, model_config_path: str, model_checkpoint_path: str, device: str = "cuda"):
         self.model = load_model(
             model_config_path=model_config_path,
             model_checkpoint_path=model_checkpoint_path,
@@ -155,9 +145,7 @@ class Model:
             device=self.device,
         )
         source_h, source_w, _ = image.shape
-        detections = Model.post_process_result(
-            source_h=source_h, source_w=source_w, boxes=boxes, logits=logits
-        )
+        detections = Model.post_process_result(source_h=source_h, source_w=source_w, boxes=boxes, logits=logits)
         return detections, phrases
 
     def predict_with_classes(
@@ -197,9 +185,7 @@ class Model:
             device=self.device,
         )
         source_h, source_w, _ = image.shape
-        detections = Model.post_process_result(
-            source_h=source_h, source_w=source_w, boxes=boxes, logits=logits
-        )
+        detections = Model.post_process_result(source_h=source_h, source_w=source_w, boxes=boxes, logits=logits)
         class_id = Model.phrases2classes(phrases=phrases, classes=classes)
         detections.class_id = class_id
         return detections

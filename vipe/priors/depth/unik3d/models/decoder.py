@@ -6,7 +6,6 @@ Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from einops import rearrange
 from torch.nn.init import trunc_normal_
 
@@ -361,8 +360,6 @@ class Decoder(nn.Module):
         # camera layer
         intrinsics, sh_coeffs = self.angular_module(cls_tokens=cls_tokens)
         B, N = intrinsics.shape
-        device = intrinsics.device
-        dtype = intrinsics.dtype
 
         id_coords = coords_grid(B, H, W, device=sh_coeffs.device)
 

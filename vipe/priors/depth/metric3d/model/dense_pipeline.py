@@ -51,7 +51,6 @@ class DensePredModel(nn.Module):
 class BaseDepthModel(nn.Module):
     def __init__(self, cfg, **kwargs) -> None:
         super(BaseDepthModel, self).__init__()
-        model_type = cfg.model.type
         self.depth_model = DensePredModel(cfg)
 
     def forward(self, data):

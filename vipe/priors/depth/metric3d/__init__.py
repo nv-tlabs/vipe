@@ -17,8 +17,8 @@ from dataclasses import dataclass
 
 import torch
 
-from vipe.utils.misc import unpack_optional
 from vipe.utils.cameras import CameraType
+from vipe.utils.misc import unpack_optional
 
 from ..base import DepthEstimationInput, DepthEstimationModel, DepthEstimationResult, DepthType
 from .model_fn import (

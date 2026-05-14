@@ -5,12 +5,10 @@
 """Tensor class for gravity vector in camera frame."""
 
 import torch
-
 from torch.nn import functional as F
 
 from .misc import EuclideanManifold, SphericalManifold, TensorWrapper, autocast
 from .utils import rad2rotmat
-
 
 # mypy: ignore-errors
 

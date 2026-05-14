@@ -3,7 +3,7 @@ Author: Luigi Piccinelli
 Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-nc/4.0/)
 """
 
-from math import pi
+from math import log2, pi
 from typing import Optional
 
 import torch
@@ -12,9 +12,7 @@ from einops import rearrange, repeat
 
 
 class PositionEmbeddingSine(nn.Module):
-    def __init__(
-        self, num_pos_feats=64, temperature=10000, normalize=False, scale=None
-    ):
+    def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
         super().__init__()
         self.num_pos_feats = num_pos_feats
         self.temperature = temperature
@@ -25,13 +23,9 @@ class PositionEmbeddingSine(nn.Module):
             scale = 2 * pi
         self.scale = scale
 
-    def forward(
-        self, x: torch.Tensor, mask: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if mask is None:
-            mask = torch.zeros(
-                (x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool
-            )
+            mask = torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool)
         not_mask = ~mask
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
         x_embed = not_mask.cumsum(2, dtype=torch.float32)
@@ -41,18 +35,12 @@ class PositionEmbeddingSine(nn.Module):
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
         dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
-        dim_t = self.temperature ** (
-            2 * torch.div(dim_t, 2, rounding_mode="floor") / self.num_pos_feats
-        )
+        dim_t = self.temperature ** (2 * torch.div(dim_t, 2, rounding_mode="floor") / self.num_pos_feats)
 
         pos_x = x_embed[:, :, :, None] / dim_t
         pos_y = y_embed[:, :, :, None] / dim_t
-        pos_x = torch.stack(
-            (pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4
-        ).flatten(3)
-        pos_y = torch.stack(
-            (pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4
-        ).flatten(3)
+        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
+        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
         pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
         return pos
 
@@ -92,9 +80,9 @@ def broadcat(tensors, dim=-1):
     dim = (dim + shape_len) if dim < 0 else dim
     dims = list(zip(*map(lambda t: list(t.shape), tensors)))
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    assert all(
-        [*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]
-    ), "invalid dimensions for broadcastable concatentation"
+    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), (
+        "invalid dimensions for broadcastable concatentation"
+    )
     max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
     expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_tensors), max_dims))
     expanded_dims.insert(dim, (dim, dims[dim]))
@@ -126,9 +114,7 @@ class VisionRotaryEmbedding(nn.Module):
         if custom_freqs:
             freqs = custom_freqs
         elif freqs_for == "lang":
-            freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
-            )
+            freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
         elif freqs_for == "constant":
@@ -156,9 +142,9 @@ class VisionRotaryEmbedding(nn.Module):
     def forward(self, t, start_index=0):
         rot_dim = self.freqs_cos.shape[-1]
         end_index = start_index + rot_dim
-        assert (
-            rot_dim <= t.shape[-1]
-        ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
+        assert rot_dim <= t.shape[-1], (
+            f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
+        )
         t_left, t, t_right = (
             t[..., :start_index],
             t[..., start_index:end_index],
@@ -184,9 +170,7 @@ class VisionRotaryEmbeddingFast(nn.Module):
         if custom_freqs:
             freqs = custom_freqs
         elif freqs_for == "lang":
-            freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
-            )
+            freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
         elif freqs_for == "constant":
@@ -212,9 +196,6 @@ class VisionRotaryEmbeddingFast(nn.Module):
         return t * self.freqs_cos + rotate_half(t) * self.freqs_sin
 
 
-from math import log2
-
-
 def generate_fourier_features(
     x: torch.Tensor,
     dim: int = 512,
@@ -228,13 +209,9 @@ def generate_fourier_features(
     num_bands = dim // (2 * input_dim) if use_cos else dim // input_dim
 
     if use_log:
-        scales = 2.0 ** torch.linspace(
-            0.0, log2(max_freq), steps=num_bands, device=device, dtype=dtype
-        )
+        scales = 2.0 ** torch.linspace(0.0, log2(max_freq), steps=num_bands, device=device, dtype=dtype)
     else:
-        scales = torch.linspace(
-            1.0, max_freq / 2, num_bands, device=device, dtype=dtype
-        )
+        scales = torch.linspace(1.0, max_freq / 2, num_bands, device=device, dtype=dtype)
 
     x = x.unsqueeze(-1)
     scales = scales[(*((None,) * (len(x.shape) - 1)), Ellipsis)]

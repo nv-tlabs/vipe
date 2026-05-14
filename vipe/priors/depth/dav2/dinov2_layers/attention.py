@@ -11,11 +11,9 @@
 import logging
 
 import torch
-
 from torch import Tensor, nn
 
 from vipe.ext.xformers import memory_efficient_attention
-
 
 logger = logging.getLogger(__name__)
 

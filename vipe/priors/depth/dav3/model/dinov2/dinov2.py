@@ -9,6 +9,7 @@
 
 
 from typing import List
+
 import torch.nn as nn
 
 from vipe.priors.depth.dav3.model.dinov2.vision_transformer import (

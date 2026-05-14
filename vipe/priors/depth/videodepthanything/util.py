@@ -28,8 +28,8 @@ def compute_scale(prediction, target, mask):
     mask = mask.astype(np.float32)
 
     a_00 = np.sum(mask * prediction * prediction)
-    a_01 = np.sum(mask * prediction)
-    a_11 = np.sum(mask)
+    np.sum(mask * prediction)
+    np.sum(mask)
 
     # right hand side: b = [b_0, b_1]
     b_0 = np.sum(mask * prediction * target)
@@ -69,13 +69,8 @@ def get_interpolate_frames(frame_list_pre, frame_list_post):
     min_w = 0.0
     max_w = 1.0
     step = (max_w - min_w) / (len(frame_list_pre) - 1)
-    post_w_list = (
-        [min_w] + [i * step for i in range(1, len(frame_list_pre) - 1)] + [max_w]
-    )
+    post_w_list = [min_w] + [i * step for i in range(1, len(frame_list_pre) - 1)] + [max_w]
     interpolated_frames = []
     for i in range(len(frame_list_pre)):
-        interpolated_frames.append(
-            frame_list_pre[i] * (1 - post_w_list[i])
-            + frame_list_post[i] * post_w_list[i]
-        )
+        interpolated_frames.append(frame_list_pre[i] * (1 - post_w_list[i]) + frame_list_post[i] * post_w_list[i])
     return interpolated_frames
