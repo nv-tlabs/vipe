@@ -32,6 +32,7 @@ from vipe.config.streams import BaseStreamListConfig, FrameDirStreamListConfig, 
 from vipe.config.vipe import ViPEConfig
 
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "reference" / "configuration.md"
+CONFIG_ROOT = REPO_ROOT / "configs"
 
 MODEL_SECTIONS: list[tuple[str, list[type[BaseConfigSchema]]]] = [
     ("Top-Level Config", [ViPEConfig]),
@@ -191,7 +192,7 @@ def _pipeline_preset_table() -> str:
         "| Preset | Purpose | Pipeline Class | Camera | Keyframe Depth | Depth Post-Processing |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    available = {path.stem: path for path in (REPO_ROOT / "configs" / "pipeline").glob("*.yaml")}
+    available = {path.stem: path for path in (CONFIG_ROOT / "pipeline").glob("*.yaml")}
     ordered_names = [name for name in PIPELINE_PRESET_ORDER if name in available]
     ordered_names.extend(sorted(set(available) - set(ordered_names)))
     for name in ordered_names:
@@ -232,7 +233,7 @@ def _stream_preset_table() -> str:
         "| Preset | Implementation | `frame_start` | `frame_end` | `frame_skip` | `cached` |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    for path in sorted((REPO_ROOT / "configs" / "streams").glob("*.yaml")):
+    for path in sorted((CONFIG_ROOT / "streams").glob("*.yaml")):
         data = _load_config_yaml(path)
         lines.append(
             "| "

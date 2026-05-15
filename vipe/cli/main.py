@@ -95,7 +95,7 @@ def visualize(data_path: Path, port: int):
 
 
 @click.group()
-@click.version_option()
+@click.version_option(package_name="nvidia-vipe")
 def main():
     """NVIDIA Video Pose Engine (ViPE) CLI"""
     pass

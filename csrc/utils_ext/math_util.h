@@ -1056,19 +1056,19 @@ inline _CPU_AND_GPU_CODE_ uint4 max(uint4 a, uint4 b)
 // - linear interpolation between a and b, based on value t in [0, 1] range
 ////////////////////////////////////////////////////////////////////////////////
 
-inline _CPU_AND_GPU_CODE_ float lerp(float a, float b, float t)
+inline _CPU_AND_GPU_CODE_ float vipe_lerp(float a, float b, float t)
 {
     return a + t*(b-a);
 }
-inline _CPU_AND_GPU_CODE_ float2 lerp(float2 a, float2 b, float t)
+inline _CPU_AND_GPU_CODE_ float2 vipe_lerp(float2 a, float2 b, float t)
 {
     return a + t*(b-a);
 }
-inline _CPU_AND_GPU_CODE_ float3 lerp(float3 a, float3 b, float t)
+inline _CPU_AND_GPU_CODE_ float3 vipe_lerp(float3 a, float3 b, float t)
 {
     return a + t*(b-a);
 }
-inline _CPU_AND_GPU_CODE_ float4 lerp(float4 a, float4 b, float t)
+inline _CPU_AND_GPU_CODE_ float4 vipe_lerp(float4 a, float4 b, float t)
 {
     return a + t*(b-a);
 }

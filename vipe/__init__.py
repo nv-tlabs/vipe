@@ -14,10 +14,11 @@
 # limitations under the License.
 
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from omegaconf import OmegaConf
+
+from vipe._paths import get_config_path
 
 if TYPE_CHECKING:
     from vipe.pipeline import make_pipeline as make_pipeline
@@ -31,7 +32,7 @@ def _version_info(version_string: str) -> tuple[int, ...]:
 
 
 try:
-    __version__ = version("vipe")
+    __version__ = version("nvidia-vipe")
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 __version_info__ = _version_info(__version__)
@@ -40,10 +41,6 @@ if not OmegaConf.has_resolver("eq"):
     OmegaConf.register_new_resolver("eq", lambda a, b: a == b)
 if not OmegaConf.has_resolver("neq"):
     OmegaConf.register_new_resolver("neq", lambda a, b: a != b)
-
-
-def get_config_path() -> Path:
-    return Path(__file__).parent.parent / "configs"
 
 
 def __getattr__(name: str) -> Any:
