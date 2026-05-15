@@ -8,20 +8,21 @@
 
 ViPE estimates camera intrinsics, camera motion, and dense near-metric depth maps from unconstrained raw videos, including pinhole, wide-angle, and 360-degree panorama footage.
 
-## Links
+<p align="center">
+  <a href="https://research.nvidia.com/labs/toronto-ai/vipe"><img src="https://img.shields.io/badge/Project%20Page-76B900?logo=nvidia&logoColor=white" alt="Project Page"/></a>
+  <a href="https://arxiv.org/abs/2508.10934"><img src="https://img.shields.io/badge/arXiv-2508.10934-B31B1B?logo=arxiv&logoColor=white" alt="arXiv"/></a>
+  <a href="https://pypi.org/project/nvidia-vipe/"><img src="https://img.shields.io/pypi/v/nvidia-vipe?logo=pypi&logoColor=white&label=PyPI" alt="PyPI"/></a>
+  <a href="https://nv-tlabs.github.io/vipe/"><img src="https://img.shields.io/badge/Documentation-blue?logo=readthedocs&logoColor=white" alt="Documentation"/></a>
+  <a href="https://nv-tlabs.github.io/vipe/dataset/"><img src="https://img.shields.io/badge/Datasets-4B8BBE?logo=databricks&logoColor=white" alt="Datasets"/></a>
+</p>
 
-- 📖 [Documentation](https://nv-tlabs.github.io/vipe/)
-- 🌐 [Project page](https://research.nvidia.com/labs/toronto-ai/vipe)
-- 📄 [Technical whitepaper](https://research.nvidia.com/labs/toronto-ai/vipe/assets/paper.pdf)
-- 📊 [Datasets](https://nv-tlabs.github.io/vipe/dataset/)
+## News
 
-## Installation
-
-```bash
-pip install nvidia-vipe
-```
-
-This installs the `vipe` Python package and the `vipe` CLI. ViPE releases are published as source distributions, so pip builds the native CUDA extensions during installation. The environment needs a CUDA-enabled PyTorch build and an available CUDA toolkit with `nvcc`.
+- **2026/05**: Merged Panorama estimation pipeline & bump release version to 1.0.0.
+- **2026/01**: Integration with [Depth-Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) for depth estimation (use `dav3` pipeline).
+- **2025/10**: Add support to run on wide-angle videos.
+- **2025/09**: Add support to run [Lyra](https://github.com/nv-tlabs/lyra) pipeline.
+- **2025/08**: Initial release of ViPE.
 
 ## License
 
