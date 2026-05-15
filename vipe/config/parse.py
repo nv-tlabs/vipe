@@ -9,11 +9,12 @@ from typing import Sequence
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+from vipe._paths import get_config_path
 from vipe.config.vipe import ViPEConfig
 
 
 def _default_config_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "configs"
+    return get_config_path()
 
 
 def register_config_resolvers() -> None:

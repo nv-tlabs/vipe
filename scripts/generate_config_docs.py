@@ -32,7 +32,7 @@ from vipe.config.streams import BaseStreamListConfig, FrameDirStreamListConfig, 
 from vipe.config.vipe import ViPEConfig
 
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "reference" / "configuration.md"
-CONFIG_ROOT = REPO_ROOT / "vipe" / "configs"
+CONFIG_ROOT = REPO_ROOT / "configs"
 
 MODEL_SECTIONS: list[tuple[str, list[type[BaseConfigSchema]]]] = [
     ("Top-Level Config", [ViPEConfig]),

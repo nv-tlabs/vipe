@@ -6,6 +6,7 @@ import pytest
 from omegaconf import DictConfig
 from pydantic import ValidationError
 
+from vipe import get_config_path
 from vipe.config import (
     DefaultPipelineConfig,
     FrameDirStreamListConfig,
@@ -72,6 +73,14 @@ def test_parse_typed_config_accepts_config_path_from_repo_root(tmp_path: Path) -
 
     assert isinstance(config, ViPEConfig)
     assert isinstance(config.pipeline, DefaultPipelineConfig)
+
+
+def test_config_source_tree_is_root_level_only() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    assert (repo_root / "configs" / "default.yaml").is_file()
+    assert not (repo_root / "vipe" / "configs").exists()
+    assert get_config_path() == repo_root / "configs"
 
 
 def test_typed_config_stream_factory_compatibility(tmp_path: Path) -> None:

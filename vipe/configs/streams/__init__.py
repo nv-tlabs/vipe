@@ -1,1 +1,0 @@
-"""Stream config package marker."""

@@ -3,5 +3,5 @@ include README.md
 include THIRD_PARTY_LICENSES.md
 recursive-include csrc *
 prune csrc/include
-recursive-include vipe/configs *.yaml
+recursive-include configs *.yaml
 recursive-include vipe/priors *.yaml

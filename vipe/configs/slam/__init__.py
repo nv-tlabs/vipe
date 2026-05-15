@@ -1,1 +1,0 @@
-"""SLAM config package marker."""

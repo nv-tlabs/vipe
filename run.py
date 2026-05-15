@@ -2,7 +2,7 @@ import hydra
 from omegaconf import DictConfig
 
 
-@hydra.main(version_base=None, config_path="vipe/configs", config_name="default")
+@hydra.main(version_base=None, config_path="configs", config_name="default")
 def run(args: DictConfig) -> None:
     from vipe.config import validate_typed_config
     from vipe.streams.base import StreamList
