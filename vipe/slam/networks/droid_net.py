@@ -535,9 +535,8 @@ class DroidNet(nn.Module):
         if not ckpt_path.exists():
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             gdown.download(
-                "https://drive.google.com/file/d/1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh/view",
+                id="1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh",
                 output=str(ckpt_path),
-                fuzzy=True,
             )
 
         state_dict = OrderedDict(

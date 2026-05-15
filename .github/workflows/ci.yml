@@ -17,14 +17,21 @@ jobs:
   test:
     name: Test
     runs-on: self-hosted
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
+      CUDA_HOME: /usr/local/cuda-12.8
       UV_CACHE_DIR: /tmp/uv-cache
       UV_LINK_MODE: copy
+      VIPE_SMOKE_OUTPUT: ci_outputs/dog-example-default
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Configure CUDA paths
+        run: |
+          echo "$CUDA_HOME/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -35,19 +42,93 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
 
       - name: Install dependencies
-        run: uv sync --locked --dev --group docs
+        timeout-minutes: 30
+        run: uv sync --locked --dev --group docs --no-install-project
+
+      - name: Ensure PyTorch supports runner GPU
+        run: |
+          if ! uv run --no-sync python - <<'PY'
+          import sys
+          import torch
+
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA is required for the ViPE smoke test.")
+
+          major, minor = torch.cuda.get_device_capability(0)
+          device_arch = f"sm_{major}{minor}"
+          supported_arches = torch.cuda.get_arch_list()
+          print(f"device={torch.cuda.get_device_name(0)} arch={device_arch}")
+          print(f"torch={torch.__version__} cuda={torch.version.cuda} supported_arches={supported_arches}")
+          sys.exit(0 if device_arch in supported_arches else 1)
+          PY
+          then
+            echo "Installed PyTorch wheel does not support this runner GPU; installing a V100-compatible CUDA wheel."
+            uv pip install \
+              --index-url https://download.pytorch.org/whl/cu124 \
+              --extra-index-url https://pypi.org/simple \
+              --index-strategy unsafe-best-match \
+              --force-reinstall \
+              "torch==2.6.0+cu124" \
+              "torchvision==0.21.0+cu124"
+          fi
+
+          uv run --no-sync python - <<'PY' >> "$GITHUB_ENV"
+          import torch
+
+          major, minor = torch.cuda.get_device_capability(0)
+          device_arch = f"sm_{major}{minor}"
+          supported_arches = torch.cuda.get_arch_list()
+          print(f"TORCH_CUDA_ARCH_LIST={major}.{minor}")
+          if device_arch not in supported_arches:
+              raise SystemExit(f"PyTorch still does not support runner GPU arch {device_arch}: {supported_arches}")
+          PY
+
+      - name: Install ViPE package
+        timeout-minutes: 20
+        run: uv pip install --no-build-isolation -e .
 
       - name: Lint
-        run: uv run --dev ruff check .
+        run: uv run --no-sync ruff check .
 
       - name: Type check
-        run: uv run --dev mypy
+        run: uv run --no-sync mypy
 
       - name: Check generated docs
-        run: uv run --dev --group docs python scripts/generate_config_docs.py --check
+        run: uv run --no-sync python scripts/generate_config_docs.py --check
 
       - name: Build docs
-        run: uv run --dev --group docs mkdocs build --strict
+        run: uv run --no-sync mkdocs build --strict
 
       - name: Test
-        run: uv run --dev pytest -q
+        timeout-minutes: 20
+        run: uv run --no-sync pytest -q
+
+      - name: Run dog-example smoke test
+        timeout-minutes: 45
+        run: |
+          rm -rf "$VIPE_SMOKE_OUTPUT"
+          uv run --no-sync python run.py \
+            pipeline=default \
+            streams=raw_mp4_stream \
+            streams.base_path=assets/examples/dog-example.mp4 \
+            streams.frame_end=64 \
+            pipeline.output.path="$VIPE_SMOKE_OUTPUT" \
+            pipeline.output.save_artifacts=true \
+            pipeline.output.save_viz=false \
+            pipeline.slam.visualize=false
+
+      - name: Validate dog-example smoke output
+        run: |
+          uv run --no-sync python .github/scripts/validate_smoke_output.py \
+            "$VIPE_SMOKE_OUTPUT" \
+            dog-example \
+            --expected-frames 64
+
+      - name: Upload dog-example smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dog-example-smoke-output
+          path: ${{ env.VIPE_SMOKE_OUTPUT }}
+          if-no-files-found: ignore
+          retention-days: 7
