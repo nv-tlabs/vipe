@@ -1,5 +1,17 @@
 # Installation
 
+## From PyPI
+
+Published ViPE releases are available directly from PyPI:
+
+```bash
+pip install nvidia-vipe
+```
+
+This installs the `vipe` Python package and the `vipe` command-line tool. ViPE releases are published as source distributions, so pip builds the native CUDA extensions during installation. The environment needs a CUDA-enabled PyTorch build and a CUDA toolkit with `nvcc`.
+
+## From Source
+
 ViPE uses [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html) for CUDA/native tooling and [uv](https://docs.astral.sh/uv/) for the local Python environment in `.venv`.
 
 ```bash

@@ -36,6 +36,7 @@ cuda_flags = get_cuda_flags()
 packages = find_packages()
 setup(
     packages=packages,
+    include_package_data=True,
     ext_modules=[
         CUDAExtension(
             f"{PACKAGE_NAME}_ext",

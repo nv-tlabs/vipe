@@ -13,7 +13,7 @@ from vipe.config.vipe import ViPEConfig
 
 
 def _default_config_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "configs"
+    return Path(__file__).resolve().parents[1] / "configs"
 
 
 def register_config_resolvers() -> None:

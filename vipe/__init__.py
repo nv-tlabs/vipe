@@ -31,7 +31,7 @@ def _version_info(version_string: str) -> tuple[int, ...]:
 
 
 try:
-    __version__ = version("vipe")
+    __version__ = version("nvidia-vipe")
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 __version_info__ = _version_info(__version__)
@@ -43,7 +43,7 @@ if not OmegaConf.has_resolver("neq"):
 
 
 def get_config_path() -> Path:
-    return Path(__file__).parent.parent / "configs"
+    return Path(__file__).parent / "configs"
 
 
 def __getattr__(name: str) -> Any:

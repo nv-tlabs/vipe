@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=40.8.0", "wheel", "torch"]
+requires = ["setuptools>=77", "wheel", "torch"]
 build-backend = "setuptools.build_meta"
 
 [tool.ruff]
@@ -59,13 +59,15 @@ module = [
 ignore_missing_imports = true
 
 [project]
-name = "vipe"
-version = "0.1.1"
+name = "nvidia-vipe"
+version = "0.1.2"
 description = "NVIDIA Video Pose Engine"
 authors = [
     {name = "The ViPE Authors", email = "jiahuih@nvidia.com"},
 ]
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10,<3.15"
 dependencies = [
     "torch",
@@ -84,22 +86,45 @@ dependencies = [
     "opencv-python",
     "OpenEXR<3.3.0",
     "pydantic>=2,<3",
+    "pillow",
     "python-pycg",
     "ray",
     "rerun-sdk",
     "safetensors",
+    "scipy",
     "timm",
     "tqdm",
     "transformers>=4,<5",
     "viser",
 ]
+keywords = ["computer-vision", "depth-estimation", "nvidia", "pose-estimation", "video"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://research.nvidia.com/labs/toronto-ai/vipe"
+Repository = "https://github.com/nv-tlabs/vipe"
+Paper = "https://research.nvidia.com/labs/toronto-ai/vipe/assets/paper.pdf"
 
 [dependency-groups]
 dev = [
+    "build>=1,<2",
     "mypy>=1.15,<2",
     "pre-commit>=4,<5",
     "pytest>=8,<9",
     "ruff>=0.12,<1",
+    "twine>=6,<7",
 ]
 docs = [
     "hydra-core",
@@ -115,7 +140,7 @@ vipe = "vipe.cli.main:main"
 default-groups = []
 
 [tool.uv.extra-build-dependencies]
-vipe = [
+nvidia-vipe = [
     {requirement = "torch", match-runtime = true},
 ]
 
