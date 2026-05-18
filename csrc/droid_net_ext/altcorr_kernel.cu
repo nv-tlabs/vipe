@@ -138,6 +138,108 @@ __global__ void altcorr_forward_kernel(const torch::PackedTensorAccessor32<scala
 }
 
 template <typename scalar_t>
+__global__ void altcorr_index_forward_kernel(
+    const torch::PackedTensorAccessor32<scalar_t, 5, torch::RestrictPtrTraits> fmap1,
+    const torch::PackedTensorAccessor32<scalar_t, 5, torch::RestrictPtrTraits> fmap2,
+    const torch::PackedTensorAccessor32<float, 5, torch::RestrictPtrTraits> coords,
+    const torch::PackedTensorAccessor32<int64_t, 1, torch::RestrictPtrTraits> ii,
+    const torch::PackedTensorAccessor32<int64_t, 1, torch::RestrictPtrTraits> jj,
+    torch::PackedTensorAccessor32<float, 5, torch::RestrictPtrTraits> corr, int r, int level_offset,
+    float coord_scale) {
+    const int bm = blockIdx.x;
+    const int m = bm % coords.size(1);
+    const int b = bm / coords.size(1);
+    const int src = static_cast<int>(ii[m]);
+    const int dst = static_cast<int>(jj[m]);
+    const int h0 = blockIdx.y * blockDim.x;
+    const int w0 = blockIdx.z * blockDim.y;
+    const int tid = threadIdx.x * blockDim.y + threadIdx.y;
+
+    const int H1 = coords.size(2);
+    const int W1 = coords.size(3);
+    const int H2 = fmap2.size(2);
+    const int W2 = fmap2.size(3);
+    const int C = fmap1.size(4);
+
+    __shared__ scalar_t f1[CHANNEL_STRIDE][BLOCK_HW];
+    __shared__ scalar_t f2[CHANNEL_STRIDE][BLOCK_HW];
+
+    __shared__ float x2s[BLOCK_HW];
+    __shared__ float y2s[BLOCK_HW];
+
+    const int h1 = h0 + threadIdx.x;
+    const int w1 = w0 + threadIdx.y;
+    const bool valid1 = within_bounds(h1, w1, H1, W1);
+
+    if (valid1) {
+        x2s[tid] = coords[b][m][h1][w1][0] / coord_scale;
+        y2s[tid] = coords[b][m][h1][w1][1] / coord_scale;
+    } else {
+        x2s[tid] = 0.0f;
+        y2s[tid] = 0.0f;
+    }
+
+    const float x2 = x2s[tid];
+    const float y2 = y2s[tid];
+    const float dx = x2 - floorf(x2);
+    const float dy = y2 - floorf(y2);
+    const int rd = 2 * r + 1;
+
+    for (int c = 0; c < C; c += CHANNEL_STRIDE) {
+        for (int k = 0; k < BLOCK_HW; k += BLOCK_HW / CHANNEL_STRIDE) {
+            int k1 = k + tid / CHANNEL_STRIDE;
+            int hk = h0 + k1 / BLOCK_W;
+            int wk = w0 + k1 % BLOCK_W;
+            int c1 = c + tid % CHANNEL_STRIDE;
+
+            if (within_bounds(hk, wk, H1, W1) && c1 < C)
+                f1[tid % CHANNEL_STRIDE][k1] = fmap1[b][src][hk][wk][c1];
+            else
+                f1[tid % CHANNEL_STRIDE][k1] = static_cast<scalar_t>(0.0);
+        }
+
+        __syncthreads();
+
+        for (int iy = 0; iy < rd + 1; iy++) {
+            for (int ix = 0; ix < rd + 1; ix++) {
+                for (int k = 0; k < BLOCK_HW; k += BLOCK_HW / CHANNEL_STRIDE) {
+                    int k1 = k + tid / CHANNEL_STRIDE;
+                    int h2 = static_cast<int>(floorf(y2s[k1])) - r + iy;
+                    int w2 = static_cast<int>(floorf(x2s[k1])) - r + ix;
+                    int c2 = c + tid % CHANNEL_STRIDE;
+
+                    if (within_bounds(h2, w2, H2, W2) && c2 < C)
+                        f2[tid % CHANNEL_STRIDE][k1] = fmap2[b][dst][h2][w2][c2];
+                    else
+                        f2[tid % CHANNEL_STRIDE][k1] = static_cast<scalar_t>(0.0);
+                }
+
+                __syncthreads();
+
+                if (valid1) {
+                    float s = 0.0f;
+                    for (int k = 0; k < CHANNEL_STRIDE; k++) {
+                        s += static_cast<float>(f1[k][tid]) * static_cast<float>(f2[k][tid]);
+                    }
+
+                    float *corr_ptr = &corr[b][m][level_offset][h1][w1];
+
+                    if (iy > 0 && ix > 0) *(corr_ptr + ((iy - 1) + rd * (ix - 1)) * H1 * W1) += s * dy * dx;
+
+                    if (iy > 0 && ix < rd) *(corr_ptr + ((iy - 1) + rd * ix) * H1 * W1) += s * dy * (1.0f - dx);
+
+                    if (iy < rd && ix > 0) *(corr_ptr + (iy + rd * (ix - 1)) * H1 * W1) += s * (1.0f - dy) * dx;
+
+                    if (iy < rd && ix < rd) *(corr_ptr + (iy + rd * ix) * H1 * W1) += s * (1.0f - dy) * (1.0f - dx);
+                }
+
+                __syncthreads();
+            }
+        }
+    }
+}
+
+template <typename scalar_t>
 __global__ void altcorr_backward_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> fmap1,
     const torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> fmap2,
@@ -284,6 +386,38 @@ std::vector<torch::Tensor> altcorr_cuda_forward(torch::Tensor fmap1, torch::Tens
                                                 coords.packed_accessor32<float, 5, torch::RestrictPtrTraits>(),
                                                 corr.packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>(),
                                                 radius);
+                                        }));
+
+    return {corr};
+}
+
+std::vector<torch::Tensor> altcorr_index_cuda_forward(torch::Tensor fmap1, std::vector<torch::Tensor> fmap2_pyramid,
+                                                      torch::Tensor coords, torch::Tensor ii, torch::Tensor jj,
+                                                      int radius) {
+    const auto B = coords.size(0);
+    const auto M = coords.size(1);
+    const auto H = coords.size(2);
+    const auto W = coords.size(3);
+    const auto rd = 2 * radius + 1;
+    const auto L = static_cast<int64_t>(fmap2_pyramid.size());
+
+    auto corr = torch::zeros({B, M, L * rd * rd, H, W}, fmap1.options().dtype(torch::kFloat));
+
+    const dim3 blocks(B * M, (H + BLOCK_H - 1) / BLOCK_H, (W + BLOCK_W - 1) / BLOCK_W);
+    const dim3 threads(BLOCK_H, BLOCK_W);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(fmap1.scalar_type(), "altcorr_index_forward_kernel", ([&] {
+                                            for (int64_t level = 0; level < L; ++level) {
+                                                altcorr_index_forward_kernel<scalar_t><<<blocks, threads>>>(
+                                                    fmap1.packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>(),
+                                                    fmap2_pyramid[level].packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>(),
+                                                    coords.packed_accessor32<float, 5, torch::RestrictPtrTraits>(),
+                                                    ii.packed_accessor32<int64_t, 1, torch::RestrictPtrTraits>(),
+                                                    jj.packed_accessor32<int64_t, 1, torch::RestrictPtrTraits>(),
+                                                    corr.packed_accessor32<float, 5, torch::RestrictPtrTraits>(),
+                                                    radius, static_cast<int>(level * rd * rd),
+                                                    static_cast<float>(1 << level));
+                                            }
                                         }));
 
     return {corr};

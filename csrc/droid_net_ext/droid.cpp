@@ -5,6 +5,7 @@
  */
 
 #include <torch/extension.h>
+#include <pybind11/stl.h>
 #include <vector>
 
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -17,6 +18,9 @@ std::vector<torch::Tensor> altcorr_cuda_forward(torch::Tensor fmap1, torch::Tens
                                                 int radius);
 std::vector<torch::Tensor> altcorr_cuda_backward(torch::Tensor fmap1, torch::Tensor fmap2, torch::Tensor coords,
                                                  torch::Tensor corr_grad, int radius);
+std::vector<torch::Tensor> altcorr_index_cuda_forward(torch::Tensor fmap1, std::vector<torch::Tensor> fmap2_pyramid,
+                                                      torch::Tensor coords, torch::Tensor ii, torch::Tensor jj,
+                                                      int radius);
 
 // c++ python binding
 std::vector<torch::Tensor> corr_index_forward(torch::Tensor volume, torch::Tensor coords, int radius) {
@@ -44,6 +48,20 @@ std::vector<torch::Tensor> altcorr_forward(torch::Tensor fmap1, torch::Tensor fm
     return altcorr_cuda_forward(fmap1, fmap2, coords, radius);
 }
 
+std::vector<torch::Tensor> altcorr_index_forward(torch::Tensor fmap1, std::vector<torch::Tensor> fmap2_pyramid,
+                                                 torch::Tensor coords, torch::Tensor ii, torch::Tensor jj,
+                                                 int radius) {
+    CHECK_INPUT(fmap1);
+    CHECK_INPUT(coords);
+    CHECK_INPUT(ii);
+    CHECK_INPUT(jj);
+    for (const auto& fmap2 : fmap2_pyramid) {
+        CHECK_INPUT(fmap2);
+    }
+
+    return altcorr_index_cuda_forward(fmap1, fmap2_pyramid, coords, ii, jj, radius);
+}
+
 std::vector<torch::Tensor> altcorr_backward(torch::Tensor fmap1, torch::Tensor fmap2, torch::Tensor coords,
                                             torch::Tensor corr_grad, int radius) {
     CHECK_INPUT(fmap1);
@@ -57,6 +75,7 @@ std::vector<torch::Tensor> altcorr_backward(torch::Tensor fmap1, torch::Tensor f
 void pybind_droid_net_ext(py::module& m) {
     // correlation volume kernels
     m.def("altcorr_forward", &altcorr_forward, "ALTCORR forward");
+    m.def("altcorr_index_forward", &altcorr_index_forward, "ALTCORR indexed forward");
     m.def("altcorr_backward", &altcorr_backward, "ALTCORR backward");
     m.def("corr_index_forward", &corr_index_forward, "INDEX forward");
     m.def("corr_index_backward", &corr_index_backward, "INDEX backward");
