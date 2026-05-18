@@ -19,7 +19,7 @@ from typing import Any
 
 import torch
 
-from ..maths.matrix import SparseBlockMatrixDict, SparseMatrixSubview, SparseNullMatrix
+from ..maths.matrix import SparseBlockMatrixDict, SparseMatrixSubview, SparseNullMatrix, diagonal_schur_complement
 from ..maths.retractor import BaseRetractor
 from ..maths.vector import SparseBlockVector, SparseNullVector, SparseVectorDict, SparseVectorSubview
 from .kernel import RobustKernel
@@ -75,6 +75,8 @@ class Solver:
     def set_fixed(self, group_name: str, fixed_inds: torch.Tensor | None = None):
         # None means everything is fixed
         self._warn_if_no_terms(group_name)
+        if fixed_inds is not None:
+            fixed_inds = torch.unique(fixed_inds)
         self.group_fixed_inds[group_name] = fixed_inds
 
     def set_marginilized(self, group_name: str, marginalized: bool = True):
@@ -119,21 +121,27 @@ class Solver:
 
         fully_fixed_groups = {t for t, inds in self.group_fixed_inds.items() if inds is None}
 
-        energy = 0.0
+        energy: torch.Tensor | None = None
         for term, kernel in zip(self.terms, self.kernels):
             # Compute the newest term formulation
             term.update(self)
-            term_return = term.forward(variables, jacobian=True)
-            term_group_names = list(term.group_names().difference(fully_fixed_groups))
+            active_group_names = term.group_names().difference(fully_fixed_groups)
+            term_return = term.forward(
+                variables,
+                jacobian=bool(active_group_names),
+                active_group_names=active_group_names,
+            )
+            term_group_names = list(active_group_names)
 
             if kernel is not None:
                 term_return.apply_robust_kernel(kernel)
 
             if self.compute_energy:
-                energy += term_return.residual().sum().item()
+                cur_energy = term_return.residual().sum()
+                energy = cur_energy if energy is None else energy + cur_energy
 
             for group_name, fixed_inds in self.group_fixed_inds.items():
-                if group_name in term_group_names and fixed_inds is not None:
+                if group_name in term_group_names and fixed_inds is not None and fixed_inds.numel() > 0:
                     term_return.remove_jcol_inds(group_name, fixed_inds)
 
             # Compute RHS
@@ -172,9 +180,14 @@ class Solver:
             rhs_w = SparseVectorSubview(rhs, marginalized_group_names)
 
             # Apply Schur's formula
-            h_cinv = lhs_e @ lhs_c.inverse()
-            lhs_reg = lhs_h - h_cinv @ lhs_e.transpose()
-            rhs_reg = rhs_v - h_cinv * rhs_w
+            lhs_c_inv = lhs_c.inverse()
+            schur_result = diagonal_schur_complement(lhs_h, lhs_e, lhs_c_inv, rhs_v, rhs_w)
+            if schur_result is None:
+                h_cinv = lhs_e @ lhs_c_inv
+                lhs_reg = lhs_h - h_cinv @ lhs_e.transpose()
+                rhs_reg = rhs_v - h_cinv * rhs_w
+            else:
+                lhs_reg, rhs_reg = schur_result
 
             x_reg: SparseVectorSubview = self._solve(lhs_reg, rhs_reg)
 
@@ -193,4 +206,4 @@ class Solver:
                 x_dict[group_name].data,
             )
 
-        return energy
+        return energy.item() if energy is not None else 0.0

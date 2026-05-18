@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
 from einops import rearrange
 
+from vipe.ext import slam_ext
 from vipe.ext.lietorch import SE3
 from vipe.utils.cameras import CameraType
 
@@ -51,11 +53,18 @@ class ConcreteTermEvalReturn(TermEvalReturn):
     J: dict[str, SparseBlockMatrix]  # group_name -> (n_occ, res_dim, manifold_dim)
     w: torch.Tensor  # (n_terms, res_dim, )
     r: torch.Tensor  # (n_terms, res_dim, )
+    _nwr_cache: torch.Tensor | None = field(default=None, init=False, repr=False)
 
     # n_occ = number of occurrences of this group_name in all the terms.
     # i.e. the number of blocks in the sparse Jacobian matrix with size n_terms x n_vars
 
     def jtwj(self, group_name_row: str, group_name_col: str) -> SparseBlockMatrix:
+        if os.environ.get("VIPE_ENABLE_BA_WEIGHTED_ASSEMBLY", "0") == "1":
+            try:
+                return self.J[group_name_row].weighted_tmult_mat_by_rows(self.J[group_name_col], self.w).coalesce()
+            except NotImplementedError:
+                pass
+
         wJ = self.J[group_name_col].scale_w_left(self.w)
         try:
             return self.J[group_name_row].tmult_mat(wJ).coalesce()
@@ -63,7 +72,9 @@ class ConcreteTermEvalReturn(TermEvalReturn):
             return wJ.tmult_mat(self.J[group_name_row]).transpose().coalesce()
 
     def nwjtr(self, group_name: str) -> SparseBlockVector:
-        return self.J[group_name].tmult_vec(-self.w * self.r).coalesce()
+        if self._nwr_cache is None:
+            self._nwr_cache = -self.w * self.r
+        return self.J[group_name].tmult_vec(self._nwr_cache).coalesce()
 
     def remove_jcol_inds(self, group_name: str, col_inds: torch.Tensor):
         j_group = self.J[group_name]
@@ -73,6 +84,7 @@ class ConcreteTermEvalReturn(TermEvalReturn):
     def apply_robust_kernel(self, kernel: RobustKernel):
         robust_weight = kernel.apply(self.r)
         self.w = self.w * robust_weight
+        self._nwr_cache = None
 
     def residual(self) -> torch.Tensor:
         return torch.sum(self.r * self.r * self.w, dim=1)
@@ -80,7 +92,12 @@ class ConcreteTermEvalReturn(TermEvalReturn):
 
 class SolverTerm(ABC):
     @abstractmethod
-    def forward(self, variables: dict[str, Any], jacobian: bool = True) -> TermEvalReturn: ...
+    def forward(
+        self,
+        variables: dict[str, Any],
+        jacobian: bool = True,
+        active_group_names: set[str] | None = None,
+    ) -> TermEvalReturn: ...
 
     @abstractmethod
     def group_names(self) -> set[str]: ...
@@ -149,7 +166,89 @@ class DenseDepthFlowTerm(SolverTerm):
             names.add("rig")
         return names
 
-    def forward(self, variables: dict[str, Any], jacobian: bool = True) -> TermEvalReturn:
+    def _forward_fused_pinhole(
+        self,
+        pose: SE3,
+        dense_disp: torch.Tensor,
+        intrinsics: torch.Tensor,
+        rig: SE3,
+        jacobian: bool,
+        active_group_names: set[str],
+        optimize_intrinsics: bool,
+        optimize_rig: bool,
+        optimize_pose_disp: bool,
+    ) -> TermEvalReturn | None:
+        if os.environ.get("VIPE_ENABLE_BA_FUSED_TERM", "0") != "1":
+            return None
+        if self.camera_type != CameraType.PINHOLE or optimize_rig:
+            return None
+        if intrinsics.shape != (1, 4) or rig.shape[0] != 1:
+            return None
+        if not (pose.data.is_cuda and dense_disp.is_cuda and intrinsics.is_cuda and self.target.is_cuda):
+            return None
+        if pose.data.dtype != torch.float32 or dense_disp.dtype != torch.float32 or intrinsics.dtype != torch.float32:
+            return None
+        if not torch.all(self.rig_i_inds == 0).item() or not torch.all(self.rig_j_inds == 0).item():
+            return None
+
+        identity_rig = torch.as_tensor([0, 0, 0, 0, 0, 0, 1], dtype=rig.data.dtype, device=rig.data.device)
+        if not torch.allclose(rig.data[0], identity_rig):
+            return None
+
+        height, width = self.image_size
+        scaled_intrinsics = (
+            self.camera_type.build_camera_model(intrinsics).scaled(1.0 / self.intrinsics_factor).intrinsics[0]
+        )
+        compute_pose_disp = jacobian and optimize_pose_disp
+        compute_intrinsics = jacobian and optimize_intrinsics
+
+        try:
+            residual, weight, Ji, Jj, Jz, Jfi, Jfj = slam_ext.dense_depth_flow_term(
+                pose.data.contiguous(),
+                dense_disp.view(-1, height, width).contiguous(),
+                scaled_intrinsics.contiguous(),
+                self.target.contiguous(),
+                self.weight.contiguous(),
+                self.pose_i_inds.contiguous(),
+                self.pose_j_inds.contiguous(),
+                self.dense_disp_i_inds.contiguous(),
+                compute_pose_disp,
+                compute_intrinsics,
+                1.0 / self.intrinsics_factor,
+            )
+        except (AttributeError, TypeError):
+            return None
+
+        J_dict = {}
+        if jacobian:
+            term_inds = torch.arange(self.n_terms, device=pose.device)
+            if "pose" in active_group_names:
+                J_dict["pose"] = SparseDenseBlockMatrix(
+                    i_inds=torch.cat([term_inds, term_inds]),
+                    j_inds=torch.cat([self.pose_i_inds, self.pose_j_inds]),
+                    data=torch.cat([Ji, Jj], dim=0),
+                )
+            if "dense_disp" in active_group_names:
+                J_dict["dense_disp"] = SparseMDiagonalBlockMatrix(
+                    i_inds=term_inds,
+                    j_inds=self.dense_disp_i_inds,
+                    data=Jz,
+                )
+            if optimize_intrinsics:
+                J_dict["intrinsics"] = SparseDenseBlockMatrix(
+                    i_inds=torch.cat([term_inds, term_inds]),
+                    j_inds=torch.cat([self.rig_i_inds, self.rig_j_inds]),
+                    data=torch.cat([Jfi, Jfj], dim=0),
+                )
+
+        return ConcreteTermEvalReturn(J=J_dict, w=weight, r=residual)
+
+    def forward(
+        self,
+        variables: dict[str, Any],
+        jacobian: bool = True,
+        active_group_names: set[str] | None = None,
+    ) -> TermEvalReturn:
         """
         variables contain:
             - pose: (n_var, ) SE3 of poses
@@ -159,20 +258,40 @@ class DenseDepthFlowTerm(SolverTerm):
         # TODO: To accelerate, you can return a PrecomputedTermEvalReturn with kernels from Droid-SLAM.
         """
         pose, dense_disp = variables["pose"], variables["dense_disp"]
-        if optimize_intrinsics := self.intrinsics is None:
+        if active_group_names is None:
+            active_group_names = self.group_names()
+
+        if self.intrinsics is None:
             intrinsics = variables["intrinsics"]
         else:
             intrinsics = self.intrinsics
-        if optimize_rig := self.rig is None:
+        optimize_intrinsics = self.intrinsics is None and "intrinsics" in active_group_names
+        if self.rig is None:
             rig = variables["rig"]
         else:
             rig = self.rig
+        optimize_rig = self.rig is None and "rig" in active_group_names
+        optimize_pose_disp = "pose" in active_group_names or "dense_disp" in active_group_names
 
         assert isinstance(pose, SE3) and isinstance(dense_disp, torch.Tensor)
         assert dense_disp.shape[1] == self.image_size[0] * self.image_size[1]
         assert intrinsics.shape[0] == rig.shape[0]
 
         camera_model_cls = self.camera_type.camera_model_cls()
+
+        fused_return = self._forward_fused_pinhole(
+            pose,
+            dense_disp,
+            intrinsics,
+            rig,
+            jacobian,
+            active_group_names,
+            optimize_intrinsics,
+            optimize_rig,
+            optimize_pose_disp,
+        )
+        if fused_return is not None:
+            return fused_return
 
         coords, valid, (Ji, Jj, Jz), (Jfi, Jfj), (Jri, Jrj) = geom.iproj_i_proj_j_disp(
             pose,
@@ -186,7 +305,7 @@ class DenseDepthFlowTerm(SolverTerm):
             self.rig_i_inds,
             self.rig_j_inds,
             self.dense_disp_i_inds,
-            jacobian_p_d=jacobian,
+            jacobian_p_d=jacobian and optimize_pose_disp,
             jacobian_f=jacobian and optimize_intrinsics,
             jacobian_r=jacobian and optimize_rig,
         )
@@ -196,23 +315,27 @@ class DenseDepthFlowTerm(SolverTerm):
 
         J_dict = {}
         if jacobian:
-            assert Ji is not None and Jj is not None and Jz is not None
-            Ji = rearrange(Ji, "n h w c d -> n (h w c) d", c=2, d=6)
-            Jj = rearrange(Jj, "n h w c d -> n (h w c) d", c=2, d=6)
-            Jz = rearrange(Jz, "n h w c d -> n (h w) (c d)", c=2, d=1)
             term_inds = torch.arange(self.n_terms).to(pose.device)
-            J_dict = {
-                "pose": SparseDenseBlockMatrix(
+            if "pose" in active_group_names:
+                assert Ji is not None and Jj is not None
+                Ji = rearrange(Ji, "n h w c d -> n (h w c) d", c=2, d=6)
+                Jj = rearrange(Jj, "n h w c d -> n (h w c) d", c=2, d=6)
+            if "dense_disp" in active_group_names:
+                assert Jz is not None
+                Jz = rearrange(Jz, "n h w c d -> n (h w) (c d)", c=2, d=1)
+
+            if "pose" in active_group_names:
+                J_dict["pose"] = SparseDenseBlockMatrix(
                     i_inds=torch.cat([term_inds, term_inds]),
                     j_inds=torch.cat([self.pose_i_inds, self.pose_j_inds]),
                     data=torch.cat([Ji, Jj], dim=0),
-                ),
-                "dense_disp": SparseMDiagonalBlockMatrix(
+                )
+            if "dense_disp" in active_group_names:
+                J_dict["dense_disp"] = SparseMDiagonalBlockMatrix(
                     i_inds=term_inds,
                     j_inds=self.dense_disp_i_inds,
                     data=Jz,
-                ),
-            }
+                )
             if optimize_intrinsics:
                 assert Jfi is not None and Jfj is not None
                 Jfi = rearrange(Jfi, "n h w c d -> n (h w c) d", c=2)
@@ -285,7 +408,12 @@ class DispSensRegularizationTerm(SolverTerm):
     def group_names(self) -> set[str]:
         return {"dense_disp"}
 
-    def forward(self, variables: dict[str, Any], jacobian: bool = True) -> TermEvalReturn:
+    def forward(
+        self,
+        variables: dict[str, Any],
+        jacobian: bool = True,
+        active_group_names: set[str] | None = None,
+    ) -> TermEvalReturn:
         """
         variables contain:
             - dense_disp: (n_var, H*W) tensor of disparities
@@ -361,7 +489,12 @@ class TracksFlowTerm(SolverTerm):
             names.add("intrinsics")
         return names
 
-    def forward(self, variables: dict[str, Any], jacobian: bool = True) -> TermEvalReturn:
+    def forward(
+        self,
+        variables: dict[str, Any],
+        jacobian: bool = True,
+        active_group_names: set[str] | None = None,
+    ) -> TermEvalReturn:
         """
         variables contain:
             - pose: (n_var, ) SE3 of poses
@@ -369,10 +502,15 @@ class TracksFlowTerm(SolverTerm):
             - intrinsics: (Q, 4) tensor of intrinsics (optional)
         """
         pose, tracks_disp = variables["pose"], variables["tracks_disp"]
-        if optimize_intrinsics := self.intrinsics is None:
+        if active_group_names is None:
+            active_group_names = self.group_names()
+
+        if self.intrinsics is None:
             intrinsics = variables["intrinsics"]
         else:
             intrinsics = self.intrinsics
+        optimize_intrinsics = self.intrinsics is None and "intrinsics" in active_group_names
+        optimize_pose_disp = "pose" in active_group_names or "tracks_disp" in active_group_names
 
         assert isinstance(pose, SE3) and isinstance(tracks_disp, torch.Tensor)
         assert tracks_disp.shape[1] == self.n_tracks
@@ -390,7 +528,7 @@ class TracksFlowTerm(SolverTerm):
             self.rig_i_inds,
             self.rig_j_inds,
             self.tracks_i_inds,
-            jacobian_p_d=jacobian,
+            jacobian_p_d=jacobian and optimize_pose_disp,
             jacobian_f=jacobian and optimize_intrinsics,
             jacobian_r=False,
         )
@@ -398,23 +536,27 @@ class TracksFlowTerm(SolverTerm):
 
         J_dict = {}
         if jacobian:
-            assert Ji is not None and Jj is not None and Jz is not None
-            Ji = rearrange(Ji, "n t c d -> n (t c) d", c=2, d=6)
-            Jj = rearrange(Jj, "n t c d -> n (t c) d", c=2, d=6)
-            Jz = rearrange(Jz, "n t c d -> n (t) (c d)", c=2, d=1)
             term_inds = torch.arange(self.n_terms).to(pose.device)
-            J_dict = {
-                "pose": SparseDenseBlockMatrix(
+            if "pose" in active_group_names:
+                assert Ji is not None and Jj is not None
+                Ji = rearrange(Ji, "n t c d -> n (t c) d", c=2, d=6)
+                Jj = rearrange(Jj, "n t c d -> n (t c) d", c=2, d=6)
+            if "tracks_disp" in active_group_names:
+                assert Jz is not None
+                Jz = rearrange(Jz, "n t c d -> n (t) (c d)", c=2, d=1)
+
+            if "pose" in active_group_names:
+                J_dict["pose"] = SparseDenseBlockMatrix(
                     i_inds=torch.cat([term_inds, term_inds]),
                     j_inds=torch.cat([self.pose_i_inds, self.pose_j_inds]),
                     data=torch.cat([Ji, Jj], dim=0),
-                ),
-                "tracks_disp": SparseMDiagonalBlockMatrix(
+                )
+            if "tracks_disp" in active_group_names:
+                J_dict["tracks_disp"] = SparseMDiagonalBlockMatrix(
                     i_inds=term_inds,
                     j_inds=self.tracks_i_inds,
                     data=Jz,
-                ),
-            }
+                )
             if optimize_intrinsics:
                 assert Jfi is not None and Jfj is not None
                 Jfi = rearrange(Jfi, "n t c d -> n (t c) d", c=2)

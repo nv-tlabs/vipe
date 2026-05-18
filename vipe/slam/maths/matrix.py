@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -21,7 +22,12 @@ from einops import rearrange
 
 from vipe.ext.scatter import scatter_add
 
+from . import triton_kernels
 from .vector import RavelMapping, SparseBlockVector, SparseNullVector, SparseVectorDict, SparseVectorSubview
+
+
+def _matching_where_max_elements() -> int:
+    return int(os.environ.get("VIPE_BA_MATCHING_WHERE_MAX_ELEMENTS", "32000000"))
 
 
 @dataclass(kw_only=True)
@@ -33,6 +39,13 @@ class SparseBlockMatrix:
         raise NotImplementedError
 
     def tmult_mat(self, mat: "SparseBlockMatrix") -> "SparseBlockMatrix":
+        raise NotImplementedError
+
+    def weighted_tmult_mat_by_rows(
+        self,
+        mat: "SparseBlockMatrix",
+        weight: torch.Tensor,
+    ) -> "SparseBlockMatrix":
         raise NotImplementedError
 
     def scale_w_left(self, vec: torch.Tensor) -> "SparseBlockMatrix":
@@ -63,6 +76,15 @@ class SparseBlockMatrix:
         raise NotImplementedError
 
     def _tmult_mat_elements(self, other_i_inds: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            self.i_inds.is_cuda
+            and other_i_inds.is_cuda
+            and self.i_inds.numel() * other_i_inds.numel() <= _matching_where_max_elements()
+        ):
+            return torch.where(self.i_inds[:, None] == other_i_inds[None, :])
+        if self.i_inds.is_cuda and other_i_inds.is_cuda:
+            return _matching_index_pairs_searchsorted(self.i_inds, other_i_inds)
+
         other_mapping: defaultdict = defaultdict(list)
         for i, v in enumerate(other_i_inds.cpu().numpy()):
             other_mapping[v].append(i)
@@ -145,6 +167,96 @@ class SparseDenseBlockMatrix(SparseBlockMatrix):
         return SparseDenseBlockMatrix(
             i_inds=self.j_inds[self_inds],
             j_inds=mat.j_inds[mat_inds],
+            data=new_data,
+        )
+
+    def weighted_tmult_mat_by_rows(
+        self,
+        mat: SparseBlockMatrix,
+        weight: torch.Tensor,
+    ) -> SparseBlockMatrix:
+        self_inds, mat_inds = self._tmult_mat_elements(mat.i_inds)
+        self_data = self.data[self_inds]
+        weight_data = weight[self.i_inds[self_inds]]
+
+        if isinstance(mat, SparseDenseBlockMatrix):
+            new_data = triton_kernels.row_weighted_dense_dense_tmult_mat(self_data, mat.data[mat_inds], weight_data)
+            if new_data is None:
+                new_data = torch.einsum("bij,bi,bik->bjk", self_data, weight_data, mat.data[mat_inds])
+            return SparseDenseBlockMatrix(
+                i_inds=self.j_inds[self_inds],
+                j_inds=mat.j_inds[mat_inds],
+                data=new_data,
+            )
+
+        if isinstance(mat, SparseMDiagonalBlockMatrix):
+            mat_data = mat.data[mat_inds]
+            n_diags = mat_data.shape[-1]
+            self_data_by_diag = rearrange(self_data, "n (r d) c -> n r d c", d=n_diags)
+            weight_data_by_diag = rearrange(weight_data, "n (r d) -> n r d", d=n_diags)
+            new_data = (self_data_by_diag * weight_data_by_diag.unsqueeze(-1) * mat_data.unsqueeze(-1)).sum(dim=2)
+            return SparseDenseBlockMatrix(
+                i_inds=self.j_inds[self_inds],
+                j_inds=mat.j_inds[mat_inds],
+                data=new_data.transpose(1, 2),
+            )
+
+        raise NotImplementedError
+
+    def weighted_outer_tmult_mat(
+        self,
+        mat: "SparseDenseBlockMatrix",
+        diag: "SparseMDiagonalBlockMatrix",
+    ) -> "SparseDenseBlockMatrix":
+        assert isinstance(mat, SparseDenseBlockMatrix)
+        assert isinstance(diag, SparseMDiagonalBlockMatrix)
+        assert diag.data.shape[-1] == 1
+        assert self.data.shape[2] == mat.data.shape[2] == diag.data.shape[1]
+
+        self_inds, mat_inds = _matching_index_pairs(self.j_inds, mat.j_inds)
+        diag_inds = _lookup_indices(diag.i_inds, self.j_inds[self_inds])
+
+        self_data = self.data[self_inds]
+        mat_data = mat.data[mat_inds]
+        diag_data = diag.data[diag_inds]
+        new_data = triton_kernels.weighted_dense_dense_tmult_mat(self_data, mat_data, diag_data)
+        if new_data is None:
+            new_data = torch.einsum("bik,bk,bjk->bij", self_data, diag_data.squeeze(-1), mat_data)
+
+        return SparseDenseBlockMatrix(
+            i_inds=self.i_inds[self_inds],
+            j_inds=mat.i_inds[mat_inds],
+            data=new_data,
+        )
+
+    def weighted_tmult_vec(
+        self,
+        diag: "SparseMDiagonalBlockMatrix",
+        vec: SparseBlockVector,
+    ) -> SparseBlockVector:
+        assert isinstance(diag, SparseMDiagonalBlockMatrix)
+        assert diag.data.shape[-1] == 1
+        assert self.data.shape[2] == diag.data.shape[1] == vec.data.shape[1]
+
+        vec_lookup = _build_lookup(vec.inds)
+        vec_inds = vec_lookup[self.j_inds]
+        keep_mask = vec_inds >= 0
+        if not bool(torch.any(keep_mask).item()):
+            return SparseNullVector()
+
+        self_inds = torch.where(keep_mask)[0]
+        diag_inds = _lookup_indices(diag.i_inds, self.j_inds[self_inds])
+        vec_inds = vec_inds[self_inds]
+
+        self_data = self.data[self_inds]
+        diag_data = diag.data[diag_inds]
+        vec_data = vec.data[vec_inds]
+        new_data = triton_kernels.weighted_dense_tmult_vec(self_data, diag_data, vec_data)
+        if new_data is None:
+            new_data = torch.einsum("bik,bk,bk->bi", self_data, diag_data.squeeze(-1), vec_data)
+
+        return SparseBlockVector(
+            inds=self.i_inds[self_inds],
             data=new_data,
         )
 
@@ -281,15 +393,47 @@ class SparseMDiagonalBlockMatrix(SparseBlockMatrix):
         else:
             assert isinstance(mat, SparseDenseBlockMatrix)
             # (n_matrix_elements, N, n_diags, 1) * (n_matrix_elements, (N, n_diags), block_cols)
-            new_data = (
-                self.data[self_inds].unsqueeze(-1)
-                * rearrange(mat.data[mat_inds], "n (r d) c -> n r d c", d=self.data.shape[-1])
-            ).sum(-2)
+            self_data = self.data[self_inds]
+            mat_data = mat.data[mat_inds]
+            new_data = triton_kernels.mdiag_dense_tmult_mat(self_data, mat_data)
+            if new_data is None:
+                new_data = (
+                    self_data.unsqueeze(-1) * rearrange(mat_data, "n (r d) c -> n r d c", d=self.data.shape[-1])
+                ).sum(-2)
             return SparseDenseBlockMatrix(
                 i_inds=self.j_inds[self_inds],
                 j_inds=mat.j_inds[mat_inds],
                 data=new_data,
             )
+
+    def weighted_tmult_mat_by_rows(
+        self,
+        mat: SparseBlockMatrix,
+        weight: torch.Tensor,
+    ) -> SparseBlockMatrix:
+        self_inds, mat_inds = self._tmult_mat_elements(mat.i_inds)
+        self_data = self.data[self_inds]
+        weight_data = weight[self.i_inds[self_inds]].view_as(self_data)
+
+        if isinstance(mat, SparseMDiagonalBlockMatrix):
+            new_data = torch.sum(self_data * weight_data * mat.data[mat_inds], dim=-1)
+            return SparseMDiagonalBlockMatrix(
+                i_inds=self.j_inds[self_inds],
+                j_inds=mat.j_inds[mat_inds],
+                data=new_data.unsqueeze(-1),
+            )
+
+        if isinstance(mat, SparseDenseBlockMatrix):
+            mat_data = mat.data[mat_inds]
+            mat_data_by_diag = rearrange(mat_data, "n (r d) c -> n r d c", d=self_data.shape[-1])
+            new_data = (self_data.unsqueeze(-1) * weight_data.unsqueeze(-1) * mat_data_by_diag).sum(dim=2)
+            return SparseDenseBlockMatrix(
+                i_inds=self.j_inds[self_inds],
+                j_inds=mat.j_inds[mat_inds],
+                data=new_data,
+            )
+
+        raise NotImplementedError
 
     def scale_w_left(self, vec: torch.Tensor) -> SparseBlockMatrix:
         return SparseMDiagonalBlockMatrix(
@@ -512,3 +656,147 @@ class SparseMatrixSubview:
         assert len(self.row_group_names) == 1
         assert len(self.col_group_names) == 1
         return self.get(self.row_group_names[0], self.col_group_names[0])
+
+
+def _build_lookup(inds: torch.Tensor) -> torch.Tensor:
+    if inds.numel() == 0:
+        return torch.empty((0,), device=inds.device, dtype=torch.long)
+
+    lookup = torch.full(
+        (int(inds.max().item()) + 1,),
+        -1,
+        dtype=torch.long,
+        device=inds.device,
+    )
+    lookup[inds] = torch.arange(inds.shape[0], device=inds.device)
+    return lookup
+
+
+def _lookup_indices(source_inds: torch.Tensor, query_inds: torch.Tensor) -> torch.Tensor:
+    lookup = _build_lookup(source_inds)
+    if query_inds.numel() == 0:
+        return query_inds
+    assert int(query_inds.max().item()) < lookup.shape[0]
+    result = lookup[query_inds]
+    assert bool(torch.all(result >= 0).item())
+    return result
+
+
+def _matching_index_pairs(lhs_inds: torch.Tensor, rhs_inds: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    if lhs_inds.is_cuda and rhs_inds.is_cuda and lhs_inds.numel() * rhs_inds.numel() <= _matching_where_max_elements():
+        return torch.where(lhs_inds[:, None] == rhs_inds[None, :])
+    if lhs_inds.is_cuda and rhs_inds.is_cuda:
+        return _matching_index_pairs_searchsorted(lhs_inds, rhs_inds)
+
+    rhs_mapping: defaultdict = defaultdict(list)
+    for i, v in enumerate(rhs_inds.cpu().numpy()):
+        rhs_mapping[v].append(i)
+
+    lhs_matches, rhs_matches = [], []
+    for i, v in enumerate(lhs_inds.cpu().numpy()):
+        for j in rhs_mapping.get(v, []):
+            lhs_matches.append(i)
+            rhs_matches.append(j)
+
+    return (
+        torch.tensor(lhs_matches, device=lhs_inds.device),
+        torch.tensor(rhs_matches, device=rhs_inds.device),
+    )
+
+
+def _matching_index_pairs_searchsorted(
+    lhs_inds: torch.Tensor,
+    rhs_inds: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if lhs_inds.numel() == 0 or rhs_inds.numel() == 0:
+        return torch.empty((0,), device=lhs_inds.device, dtype=torch.long), torch.empty(
+            (0,),
+            device=rhs_inds.device,
+            dtype=torch.long,
+        )
+
+    rhs_order = torch.argsort(rhs_inds, stable=True)
+    rhs_sorted = rhs_inds[rhs_order]
+    start = torch.searchsorted(rhs_sorted, lhs_inds, side="left")
+    end = torch.searchsorted(rhs_sorted, lhs_inds, side="right")
+    counts = end - start
+
+    lhs_matches = torch.repeat_interleave(torch.arange(lhs_inds.shape[0], device=lhs_inds.device), counts)
+    if lhs_matches.numel() == 0:
+        return lhs_matches, torch.empty((0,), device=rhs_inds.device, dtype=torch.long)
+
+    group_start = torch.repeat_interleave(start, counts)
+    group_base = torch.repeat_interleave(torch.cumsum(counts, dim=0) - counts, counts)
+    local_offsets = torch.arange(lhs_matches.shape[0], device=lhs_inds.device) - group_base
+    rhs_matches = rhs_order[group_start + local_offsets]
+    return lhs_matches, rhs_matches
+
+
+def _can_use_fused_diagonal_schur(lhs_e: SparseMatrixSubview, lhs_c_inv: SparseMatrixSubview) -> bool:
+    if os.environ.get("VIPE_ENABLE_BA_FUSED_SCHUR", "0") != "1":
+        return False
+
+    for row_name in lhs_e.row_group_names:
+        for col_name in lhs_e.col_group_names:
+            block = lhs_e.get(row_name, col_name)
+            if not isinstance(block, SparseDenseBlockMatrix | SparseNullMatrix):
+                return False
+
+    for group_name in lhs_e.col_group_names:
+        diag = lhs_c_inv.get(group_name, group_name)
+        if not isinstance(diag, SparseMDiagonalBlockMatrix) or diag.data.shape[-1] != 1:
+            return False
+        for other_group_name in lhs_e.col_group_names:
+            if group_name != other_group_name and not isinstance(
+                lhs_c_inv.get(group_name, other_group_name), SparseNullMatrix
+            ):
+                return False
+
+    return True
+
+
+def diagonal_schur_complement(
+    lhs_h: SparseMatrixSubview,
+    lhs_e: SparseMatrixSubview,
+    lhs_c_inv: SparseMatrixSubview,
+    rhs_v: SparseVectorSubview,
+    rhs_w: SparseVectorSubview,
+) -> tuple[SparseMatrixSubview, SparseVectorSubview] | None:
+    if not _can_use_fused_diagonal_schur(lhs_e, lhs_c_inv):
+        return None
+
+    schur_matrices: SparseBlockMatrixDict = {}
+    for row_name in lhs_e.row_group_names:
+        for col_name in lhs_e.row_group_names:
+            target_key = (row_name, col_name)
+            schur_matrices[target_key] = SparseNullMatrix()
+            for marg_name in lhs_e.col_group_names:
+                row_block = lhs_e.get(row_name, marg_name)
+                col_block = lhs_e.get(col_name, marg_name)
+                if isinstance(row_block, SparseNullMatrix) or isinstance(col_block, SparseNullMatrix):
+                    continue
+                assert isinstance(row_block, SparseDenseBlockMatrix)
+                assert isinstance(col_block, SparseDenseBlockMatrix)
+                diag = lhs_c_inv.get(marg_name, marg_name)
+                assert isinstance(diag, SparseMDiagonalBlockMatrix)
+                schur_matrices[target_key] += row_block.weighted_outer_tmult_mat(col_block, diag).coalesce()
+
+    schur_vectors: SparseVectorDict = {}
+    for row_name in lhs_e.row_group_names:
+        schur_vectors[row_name] = SparseNullVector()
+        for marg_name in lhs_e.col_group_names:
+            row_block = lhs_e.get(row_name, marg_name)
+            if isinstance(row_block, SparseNullMatrix):
+                continue
+            assert isinstance(row_block, SparseDenseBlockMatrix)
+            diag = lhs_c_inv.get(marg_name, marg_name)
+            assert isinstance(diag, SparseMDiagonalBlockMatrix)
+            schur_vectors[row_name] += row_block.weighted_tmult_vec(diag, rhs_w.vectors[marg_name]).coalesce()
+
+    lhs_schur = SparseMatrixSubview(
+        matrices=schur_matrices,
+        row_group_names=lhs_e.row_group_names,
+        col_group_names=lhs_e.row_group_names,
+    )
+    rhs_schur = SparseVectorSubview(vectors=schur_vectors, group_names=lhs_e.row_group_names)
+    return lhs_h - lhs_schur, rhs_v - rhs_schur
