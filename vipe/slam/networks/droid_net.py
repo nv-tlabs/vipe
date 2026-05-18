@@ -141,7 +141,7 @@ class AltCorrBlock:
             self.pyramid.append(fmap_lvl.view(*sz))
             fmaps = F.avg_pool2d(fmaps, 2, stride=2)
 
-    def corr_fn(self, coords, ii, jj):
+    def corr_fn_reference(self, coords, ii, jj):
         B, N, H, W, S, _ = coords.shape
         coords = coords.permute(0, 1, 4, 2, 3, 5)
 
@@ -161,6 +161,26 @@ class AltCorrBlock:
 
         corr = torch.cat(corr_list, dim=2)
         return corr
+
+    def corr_fn_indexed(self, coords, ii, jj):
+        if coords.shape[-2] != 1:
+            return self.corr_fn_reference(coords, ii, jj)
+
+        coords = coords.squeeze(dim=-2).contiguous()
+        ii = ii.contiguous()
+        jj = jj.contiguous()
+        (corr,) = droid_net_ext.altcorr_index_forward(
+            self.pyramid[0],
+            self.pyramid,
+            coords,
+            ii,
+            jj,
+            self.radius,
+        )
+        return corr.unsqueeze(dim=-1)
+
+    def corr_fn(self, coords, ii, jj):
+        return self.corr_fn_indexed(coords, ii, jj)
 
     def __call__(self, coords, ii, jj):
         squeeze_output = False
