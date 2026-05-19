@@ -19,6 +19,7 @@
 # -------------------------------------------------------------------------------------------------
 
 import logging
+import os
 
 import numpy as np
 import rerun as rr
@@ -361,6 +362,121 @@ class GraphBuffer:
             dj.reshape(-1),
         )
 
+    def _try_bundle_adjustment_droid(
+        self,
+        target: torch.Tensor,
+        weight: torch.Tensor,
+        disp_damping: torch.Tensor,
+        ii: torch.Tensor,
+        jj: torch.Tensor,
+        t0: int,
+        t1: int,
+        n_iters: int,
+        pose_damping: float,
+        pose_ep: float,
+        motion_only: bool,
+        limited_disp: bool,
+        optimize_intrinsics: bool,
+        optimize_rig_rotation: bool,
+    ) -> bool:
+        if os.environ.get("VIPE_ENABLE_DROID_BA_FAST_PATH", "0") != "1":
+            return False
+        if self.n_views != 1 or self.camera_type != CameraType.PINHOLE:
+            return False
+        if optimize_rig_rotation:
+            return False
+        if t0 >= t1:
+            return False
+        if target.shape[0] != ii.shape[0] or weight.shape[0] != ii.shape[0]:
+            return False
+
+        edge_mask = ii != jj
+        if not torch.any(edge_mask):
+            return False
+        if not torch.all(edge_mask):
+            ii = ii[edge_mask]
+            jj = jj[edge_mask]
+            target = target[edge_mask]
+            weight = weight[edge_mask]
+
+        identity_rig = torch.as_tensor([0, 0, 0, 0, 0, 0, 1], dtype=self.rig.dtype, device=self.rig.device)
+        if not torch.allclose(self.rig[0], identity_rig):
+            return False
+
+        ht, wd = self.height // 8, self.width // 8
+
+        if self.sparse_tracks.enabled:
+            view_inds = torch.zeros_like(ii)
+            sparse_target, sparse_weight = self.sparse_tracks.compute_dense_disp_target_weight(
+                source_view_inds=view_inds,
+                source_frame_inds=self.tstamp[ii],
+                target_view_inds=view_inds,
+                target_frame_inds=self.tstamp[jj],
+                image_size=(self.height, self.width),
+                dense_disp_size=(ht, wd),
+            )
+            sparse_target = sparse_target.flatten(1, 2)
+            sparse_weight = sparse_weight.flatten(1, 2)
+            combined_weight = weight + sparse_weight
+            combined_target = torch.where(
+                combined_weight > 0,
+                (weight * target + sparse_weight * sparse_target) / combined_weight.clamp_min(1e-12),
+                target,
+            )
+            target, weight = combined_target, combined_weight
+
+        target = rearrange(target, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
+        weight = rearrange(weight, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
+
+        kx = torch.unique(torch.cat([torch.arange(t0, t1, device=self.device), ii]))
+        eta = (0.2 * disp_damping[kx] + 1e-7).contiguous()
+        intrinsics_scale = 1.0 / 8.0
+        intrinsics = (
+            self.camera_type.build_camera_model(self.intrinsics)
+            .pinhole()
+            .scaled(intrinsics_scale)
+            .intrinsics[0]
+            .contiguous()
+        )
+        depth_active = torch.ones(self.disps.shape[0], dtype=self.disps.dtype, device=self.device)
+        if limited_disp:
+            depth_active.zero_()
+            depth_active[t0:t1] = 1.0
+
+        intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
+
+        try:
+            slam_ext.ba_extended(
+                self.poses,
+                self.disps[:, 0],
+                intrinsics,
+                self.disps_sens[:, 0],
+                target,
+                weight,
+                eta,
+                ii.contiguous(),
+                jj.contiguous(),
+                depth_active.contiguous(),
+                t0,
+                t1,
+                n_iters,
+                pose_damping,
+                pose_ep,
+                motion_only,
+                float(self.ba_config.dense_disp_alpha),
+                bool(optimize_intrinsics),
+                1e-6 * intrinsics_damping_scale,
+                1e-6 * intrinsics_damping_scale,
+                intrinsics_scale,
+            )
+        except (AttributeError, TypeError):
+            return False
+
+        if optimize_intrinsics:
+            self.intrinsics[0, :4] = intrinsics / intrinsics_scale
+
+        return True
+
     def expand_tracks_edges(self, ii: torch.Tensor, tracks_length: int):
         iis = [ii] * (tracks_length - 1)
         jjs = [ii - m - 1 for m in range(tracks_length - 1)]
@@ -402,7 +518,6 @@ class GraphBuffer:
         di_unique = torch.unique(di)
         pi_unique = torch.unique(ii)  # Should be equivalent to unique(pi)
 
-        solver = Solver(compute_energy=verbose)
         robust_kernel = build_robust_kernel(
             name=self.ba_config.get("robust_kernel", None),
             threshold=float(self.ba_config.get("robust_kernel_threshold", 1.0)),
@@ -410,6 +525,27 @@ class GraphBuffer:
             gnc_mu_step=float(self.ba_config.get("gnc_mu_step", 1.4)),
             gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
+
+        if robust_kernel is None and self._try_bundle_adjustment_droid(
+            target,
+            weight,
+            disp_damping,
+            ii,
+            jj,
+            t0,
+            t1,
+            n_iters,
+            pose_damping,
+            pose_ep,
+            motion_only,
+            limited_disp,
+            optimize_intrinsics,
+            optimize_rig_rotation,
+        ):
+            self.disps.clamp_(min=0.001)
+            return
+
+        solver = Solver(compute_energy=verbose)
         solver.add_term(
             DenseDepthFlowTerm(
                 pose_i_inds=pi,
