@@ -1,16 +1,15 @@
 import unittest
 
-try:
-    import torch
+import torch
 
-    from vipe.ext import slam_ext
-except ImportError:  # pragma: no cover - lets discovery work without the runtime env
-    torch = None
-    slam_ext = None
+from vipe.ext import slam_ext
 
 
-def _has_cuda_slam_ext() -> bool:
-    return torch is not None and torch.cuda.is_available() and slam_ext is not None
+def _require_cuda_slam_ext() -> None:
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for slam_ext BA tests")
+    if not hasattr(slam_ext, "ba_extended"):
+        raise RuntimeError("slam_ext.ba_extended is required for slam_ext BA tests")
 
 
 def _make_ba_inputs(device: str = "cuda"):
@@ -34,8 +33,11 @@ def _make_ba_inputs(device: str = "cuda"):
     return poses, disps, intrinsics, disps_sens, targets, weights, eta, ii, jj
 
 
-@unittest.skipUnless(_has_cuda_slam_ext(), "CUDA slam extension is required")
 class SlamExtBAExtendedTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        _require_cuda_slam_ext()
+
     def test_extended_matches_legacy_when_optional_features_are_disabled(self):
         inputs = _make_ba_inputs()
         poses0, disps0, intrinsics0, disps_sens, targets, weights, eta, ii, jj = inputs

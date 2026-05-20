@@ -4,45 +4,24 @@ from __future__ import annotations
 
 import unittest
 
-try:
-    import torch
-    from omegaconf import OmegaConf
+import scipy  # noqa: F401
+import torch
+from omegaconf import OmegaConf
 
-    from vipe.ext import slam_ext
-    from vipe.slam.components.buffer import GraphBuffer
-except ImportError:  # pragma: no cover - lets discovery work without the runtime env
-    torch = None
-    OmegaConf = None
-    slam_ext = None
-    GraphBuffer = None
-
-try:
-    from vipe.slam.components.sparse_tracks import DummySparseTracks
-    from vipe.utils.cameras import CameraType
-except ImportError:  # pragma: no cover
-    DummySparseTracks = None
-    CameraType = None
-
-try:
-    import scipy  # noqa: F401
-except ImportError:  # pragma: no cover
-    scipy = None
+from vipe.ext import slam_ext
+from vipe.slam.components.buffer import GraphBuffer
+from vipe.slam.components.sparse_tracks import DummySparseTracks
+from vipe.utils.cameras import CameraType
 
 
-def _has_cuda_ba_runtime() -> bool:
-    return (
-        torch is not None
-        and torch.cuda.is_available()
-        and slam_ext is not None
-        and hasattr(slam_ext, "ba_extended")
-        and scipy is not None
-        and GraphBuffer is not None
-        and DummySparseTracks is not None
-        and CameraType is not None
-    )
+def _require_cuda_ba_runtime() -> None:
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for fused BA parity tests")
+    if not hasattr(slam_ext, "ba_extended"):
+        raise RuntimeError("slam_ext.ba_extended is required for fused BA parity tests")
 
 
-class FixtureSparseTracks(DummySparseTracks if DummySparseTracks is not None else object):
+class FixtureSparseTracks(DummySparseTracks):
     def __init__(self, n_views: int, enabled: bool) -> None:
         super().__init__(n_views)
         self.enabled = enabled
@@ -207,8 +186,11 @@ def _run_fused_bundle_adjustment(video, ba_inputs, *, motion_only: bool, limited
     return used_fused_ba
 
 
-@unittest.skipUnless(_has_cuda_ba_runtime(), "CUDA slam extension and scipy are required")
 class GraphBufferFusedBATest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        _require_cuda_ba_runtime()
+
     def assert_graph_buffers_close(self, actual, expected) -> None:
         torch.testing.assert_close(actual.poses[:5], expected.poses[:5], atol=2e-4, rtol=2e-4)
         torch.testing.assert_close(actual.disps[:5], expected.disps[:5], atol=2e-4, rtol=2e-4)
