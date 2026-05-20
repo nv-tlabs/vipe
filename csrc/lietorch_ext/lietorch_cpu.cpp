@@ -16,6 +16,21 @@
 #include "se3.h"
 #include "sim3.h"
 
+// F16 fix (2026-05-19): wrap CPU kernel templates in an anonymous namespace
+// to give them INTERNAL linkage on Windows.  Without this, the MSVC linker
+// silently collapses the CPU template (`void inv_forward_kernel(...)` in
+// this file) with the SAME-named __global__ CUDA template in
+// lietorch_gpu.cu.  Result on Windows: the GPU dispatch function
+// `inv_forward_gpu` calls into the CPU template instead of launching the
+// CUDA kernel, derefencing CUDA device pointers on the host →
+// STATUS_ACCESS_VIOLATION (0xC0000005).
+//
+// On Linux this works "by accident" because GCC's name-mangling
+// distinguishes `__global__` and host versions; on MSVC the mangled
+// symbols collide.  Putting the host versions in an anonymous namespace
+// gives them per-translation-unit linkage, eliminating the collision.
+namespace {
+
 template <typename Group, typename scalar_t>
 void exp_forward_kernel(const scalar_t* a_ptr, scalar_t* X_ptr, int batch_size) {
     // exponential map forward kernel
@@ -356,6 +371,8 @@ void jleft_forward_kernel(const scalar_t* X_ptr, const scalar_t* a_ptr, scalar_t
         }
     });
 }
+
+}  // anonymous namespace — end of CPU kernel templates (F16 fix)
 
 // unary operations
 

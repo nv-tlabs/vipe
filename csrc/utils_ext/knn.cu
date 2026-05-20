@@ -34,8 +34,11 @@ std::vector<torch::Tensor> nearestNeighbours(torch::Tensor query, torch::Tensor 
     torch::Tensor strided_tree = tree;
     torch::Tensor strided_query = query;
     torch::Device device = tree.device();
-    long n_queries = query.size(0);
-    long n_tree = tree.size(0);
+    // Use int64_t (not `long`) — on Windows MSVC `long` is 32-bit which
+    // would silently truncate point-cloud sizes ≥ 2^31.  GCC/Linux `long`
+    // is 64-bit so this is a no-op there.
+    int64_t n_queries = query.size(0);
+    int64_t n_tree = tree.size(0);
 
     if (strided_tree.stride(0) != 4) {
         strided_tree = torch::zeros({n_tree, 4}, torch::dtype(torch::kFloat32).device(device));

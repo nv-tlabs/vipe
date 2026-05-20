@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -270,11 +271,27 @@ def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStrea
                 height, width = metric_depth.shape
                 header = OpenEXR.Header(width, height)
                 header["channels"] = {"Z": Imath.Channel(Imath.PixelType(Imath.PixelType.HALF))}
-                with tempfile.NamedTemporaryFile(suffix=".exr") as f:
-                    exr = OpenEXR.OutputFile(f.name, header)
+                # F16 follow-up fix (Windows port, 2026-05-19): on Windows,
+                # `tempfile.NamedTemporaryFile` keeps an exclusive lock on
+                # the underlying file until the context manager exits; a
+                # second open from another library (here OpenEXR) hits
+                # "Permission denied". The POSIX behaviour (concurrent
+                # opens allowed) is what the upstream code assumes.
+                # Workaround: create the file with delete=False, close the
+                # Python-side handle immediately, write via OpenEXR, then
+                # add to zip + manually unlink.
+                tmp = tempfile.NamedTemporaryFile(suffix=".exr", delete=False)
+                tmp.close()
+                try:
+                    exr = OpenEXR.OutputFile(tmp.name, header)
                     exr.writePixels({"Z": metric_depth.astype(np.float16).tobytes()})
                     exr.close()
-                    z.write(f.name, f"{frame_idx:05d}.exr")
+                    z.write(tmp.name, f"{frame_idx:05d}.exr")
+                finally:
+                    try:
+                        os.unlink(tmp.name)
+                    except OSError:
+                        pass
 
 
 def read_depth_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
