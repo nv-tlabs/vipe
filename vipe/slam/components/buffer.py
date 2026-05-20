@@ -379,6 +379,7 @@ class GraphBuffer:
         optimize_rig_rotation: bool,
         weight_dense_disp: float,
         weight_tracks: float,
+        verbose: bool,
     ) -> bool:
         if not bool(self.ba_config.get("fused", False)):
             return False
@@ -448,6 +449,21 @@ class GraphBuffer:
             depth_active[t0:t1] = 1.0
 
         intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
+        initial_energy = (
+            self._compute_fused_ba_energy(
+                target=target,
+                weight=weight,
+                ii=ii,
+                jj=jj,
+                kx=kx,
+                intrinsics=intrinsics,
+                depth_active=depth_active,
+                motion_only=motion_only,
+                weight_dense_disp=weight_dense_disp,
+            )
+            if verbose
+            else None
+        )
 
         try:
             slam_ext.ba_extended(
@@ -476,10 +492,67 @@ class GraphBuffer:
         except (AttributeError, TypeError):
             return False
 
+        if verbose:
+            final_energy = self._compute_fused_ba_energy(
+                target=target,
+                weight=weight,
+                ii=ii,
+                jj=jj,
+                kx=kx,
+                intrinsics=intrinsics,
+                depth_active=depth_active,
+                motion_only=motion_only,
+                weight_dense_disp=weight_dense_disp,
+            )
+            logger.info(f"BA iters = {n_iters}, energy: {initial_energy} -> {final_energy}")
+
         if optimize_intrinsics:
             self.intrinsics[0, :4] = intrinsics / intrinsics_scale
 
         return True
+
+    def _compute_fused_ba_energy(
+        self,
+        *,
+        target: torch.Tensor,
+        weight: torch.Tensor,
+        ii: torch.Tensor,
+        jj: torch.Tensor,
+        kx: torch.Tensor,
+        intrinsics: torch.Tensor,
+        depth_active: torch.Tensor,
+        motion_only: bool,
+        weight_dense_disp: float,
+    ) -> float:
+        qi = torch.zeros_like(ii)
+        qj = torch.zeros_like(jj)
+        coords, valid_mask, _, _, _ = geom.iproj_i_proj_j_disp(
+            SE3(self.poses),
+            self.disps[:, 0],
+            None,
+            intrinsics[None],
+            self.camera_type,
+            SE3(self.rig),
+            ii,
+            jj,
+            qi,
+            qj,
+            ii,
+            jacobian_p_d=False,
+            jacobian_f=False,
+            jacobian_r=False,
+        )
+        target = rearrange(target, "k c h w -> k h w c", c=2)
+        weight = rearrange(weight, "k c h w -> k h w c", c=2)
+        flow_energy = ((coords - target).square() * valid_mask * (weight_dense_disp * weight)).sum()
+
+        if motion_only:
+            return float(flow_energy.item())
+
+        sens = self.disps_sens[kx, 0]
+        sens_mask = (sens > 0).to(dtype=self.disps.dtype) * depth_active[kx].view(-1, 1, 1)
+        sens_energy = (self.ba_config.dense_disp_alpha * (self.disps[kx, 0] - sens).square() * sens_mask).sum()
+        return float((flow_energy + sens_energy).item())
 
     def expand_tracks_edges(self, ii: torch.Tensor, tracks_length: int):
         iis = [ii] * (tracks_length - 1)
@@ -547,6 +620,7 @@ class GraphBuffer:
             optimize_rig_rotation,
             weight_dense_disp,
             weight_tracks,
+            verbose,
         ):
             self.disps.clamp_(min=0.001)
             return

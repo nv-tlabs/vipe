@@ -181,6 +181,7 @@ def _run_fused_bundle_adjustment(video, ba_inputs, *, motion_only: bool, limited
         optimize_rig_rotation=False,
         weight_dense_disp=0.001,
         weight_tracks=0.001,
+        verbose=False,
     )
     video.disps.clamp_(min=0.001)
     return used_fused_ba
@@ -243,6 +244,32 @@ class GraphBufferFusedBATest(unittest.TestCase):
         self.assertTrue(used_fused_ba)
         torch.testing.assert_close(fused.disps, original_fused_disps, atol=0.0, rtol=0.0)
         self.assert_graph_buffers_close(fused, generic)
+
+    def test_fused_ba_logs_energy_when_verbose(self):
+        fused = _make_video(fused=True, sparse_tracks_enabled=False)
+        ba_inputs = _make_real_run_shaped_ba_inputs(fused)
+        target, weight, disp_damping, ii, jj = ba_inputs
+
+        with self.assertLogs("vipe.slam.components.buffer", level="INFO") as logs:
+            fused.bundle_adjustment(
+                target=target.clone(),
+                weight=weight.clone(),
+                disp_damping=disp_damping.clone(),
+                ii=ii.clone(),
+                jj=jj.clone(),
+                t0=1,
+                t1=5,
+                n_iters=1,
+                pose_damping=1e-3,
+                pose_ep=0.1,
+                motion_only=False,
+                limited_disp=False,
+                optimize_intrinsics=False,
+                optimize_rig_rotation=False,
+                verbose=True,
+            )
+
+        self.assertRegex(logs.output[-1], r"BA iters = 1, energy: [0-9.eE+-]+ -> [0-9.eE+-]+")
 
     def test_hydra_config_gate_disables_fused_ba_without_env_vars(self):
         disabled = _make_video(fused=False, sparse_tracks_enabled=False)
