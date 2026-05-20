@@ -47,6 +47,7 @@ keyframe_depth: metric3d-small
 
 ba:
   dense_disp_alpha: 0.001
+  fused: false
   intrinsics_damping_scale: 1.0
   # robust kernel for dense-flow residual: null (L2) | huber | tukey | gnc_tls
   robust_kernel: null
