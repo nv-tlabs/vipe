@@ -26,6 +26,8 @@ from vipe.priors.depth import DepthEstimationInput, make_depth_model
 from vipe.priors.depth.alignment import align_inv_depth_to_depth
 from vipe.priors.depth.priorda import PriorDAModel
 from vipe.priors.depth.videodepthanything import VideoDepthAnythingDepthModel
+from vipe.priors.dynamic_mask import DynamicMaskPipeline
+from vipe.priors.flow import SeaRaftModel
 from vipe.priors.geocalib import GeoCalib
 from vipe.priors.track_anything import TrackAnythingPipeline
 from vipe.slam.interface import SLAMOutput
@@ -143,6 +145,114 @@ class TrackAnythingProcessor(StreamProcessor):
 
         frame.mask = erode(frame_instance_mask, self.mask_expand)
         return frame
+
+
+class DynamicMaskProcessor(StreamProcessor):
+    """Two-pass processor that auto-selects dynamic instances by optical-flow
+    motion score (no text prompt required).
+
+    Pass 0: cache RGB frames + run TrackAnything in auto-seg mode to get
+    consistent class-agnostic instance ids across frames.
+    Pass 1 (after the dynamic-mask pipeline has been resolved): emit each
+    cached frame with `frame.instance` / `frame.instance_phrases` set to the
+    auto-seg result, and `frame.mask` set to the binary "valid pixel" mask
+    (True for static / sky pixels, False over instances scored as dynamic).
+    """
+
+    n_passes_required = 2
+
+    def __init__(
+        self,
+        sam_run_gap: int = 30,
+        sam_points_per_side: int = 30,
+        mask_expand: int = 5,
+        flow_iters: int | None = None,
+        flow_alpha: float = 0.5,
+        flow_beta: float = 0.5,
+        keep_motion_ratio: float = 0.25,
+        min_area_ratio: float = 1e-4,
+        filter_time_thres: float = 1e-4,
+        ransac_threshold: float = 0.01,
+    ) -> None:
+        self.mask_expand = mask_expand
+        self.sam_run_gap = sam_run_gap
+        self.sam_points_per_side = sam_points_per_side
+        self.flow_iters = flow_iters
+        self.flow_alpha = flow_alpha
+        self.flow_beta = flow_beta
+        self.keep_motion_ratio = keep_motion_ratio
+        self.min_area_ratio = min_area_ratio
+        self.filter_time_thres = filter_time_thres
+        self.ransac_threshold = ransac_threshold
+
+        self._instances: list[np.ndarray] | None = None
+        self._instance_phrases: dict[int, str] | None = None
+        self._dynamic_masks: list[torch.Tensor] | None = None
+        self._cached_frames: list[VideoFrame] | None = None
+
+    def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
+        return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
+
+    def update_iterator(self, previous_iterator: Iterator[VideoFrame], pass_idx: int) -> Iterator[VideoFrame]:
+        if pass_idx == 0:
+            tracker = TrackAnythingPipeline(
+                mask_phrases=None,
+                sam_points_per_side=self.sam_points_per_side,
+                sam_run_gap=self.sam_run_gap,
+            )
+            cached_frames: list[VideoFrame] = []
+            instance_maps: list[np.ndarray] = []
+            instance_phrases: dict[int, str] = {}
+
+            for frame in previous_iterator:
+                inst, phrases = tracker.track(frame)
+                instance_maps.append(inst.detach().cpu().numpy().astype(np.int32))
+                instance_phrases.update({int(k): v for k, v in phrases.items()})
+                cached_frames.append(frame)
+                yield frame
+
+            S = len(cached_frames)
+            if S < 2:
+                H, W = cached_frames[0].rgb.shape[:2] if S == 1 else (1, 1)
+                self._dynamic_masks = [torch.zeros((H, W), dtype=torch.bool) for _ in range(S)]
+            else:
+                rgb_tensor = torch.stack(
+                    [f.rgb.permute(2, 0, 1).float() for f in cached_frames], dim=0
+                )
+                instances_tensor = torch.from_numpy(np.stack(instance_maps, axis=0))
+                flow_model = SeaRaftModel(iters=self.flow_iters)
+                dyn = DynamicMaskPipeline(
+                    flow_model=flow_model,
+                    flow_alpha=self.flow_alpha,
+                    flow_beta=self.flow_beta,
+                    ransac_threshold=self.ransac_threshold,
+                    keep_motion_ratio=self.keep_motion_ratio,
+                    min_area_ratio=self.min_area_ratio,
+                    filter_time_thres=self.filter_time_thres,
+                )
+                out = dyn.compute(rgb_tensor, instances_tensor)
+                logger.info(
+                    "DynamicMaskProcessor: motion scores=%s, selected=%s",
+                    out.instance_motion_scores,
+                    out.selected_instances,
+                )
+                self._dynamic_masks = [out.masks[i] for i in range(S)]
+
+            self._instances = instance_maps
+            self._instance_phrases = instance_phrases
+            self._cached_frames = cached_frames
+            return
+
+        assert self._dynamic_masks is not None and self._instances is not None
+        cached_frames = self._cached_frames or []
+        for i, frame in enumerate(cached_frames):
+            inst = torch.from_numpy(self._instances[i]).to(frame.rgb.device)
+            frame.instance = inst.to(torch.uint8) if int(inst.max().item()) < 256 else inst
+            frame.instance_phrases = dict(self._instance_phrases or {})
+
+            dyn = self._dynamic_masks[i].to(frame.rgb.device)
+            frame.mask = erode(~dyn, self.mask_expand)
+            yield frame
 
 
 class AdaptiveDepthProcessor(StreamProcessor):

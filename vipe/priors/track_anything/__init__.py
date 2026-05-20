@@ -16,7 +16,7 @@ from .seg_tracker import SegTracker
 class TrackAnythingPipeline:
     def __init__(
         self,
-        mask_phrases: list[str],
+        mask_phrases: list[str] | None,
         sam_points_per_side: int = 30,
         sam_run_gap: int = 10,
     ) -> None:
@@ -44,7 +44,8 @@ class TrackAnythingPipeline:
             "reset_image": True,
         }
         self.frame_idx = 0
-        self.caption = "".join([m + "." for m in mask_phrases])
+        self.auto_mode = mask_phrases is None or len(mask_phrases) == 0
+        self.caption = "".join([m + "." for m in (mask_phrases or [])])
         self.sam_run_gap = sam_run_gap
         self.segtracker = SegTracker(
             segtracker_args={
@@ -95,12 +96,24 @@ class TrackAnythingPipeline:
         rgb_frame = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
 
         if self.frame_idx == 0:
-            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
+            if self.auto_mode:
+                pred_mask = self.segtracker.seg_everything(rgb_frame)
+                pred_phrase = {int(i): "object" for i in np.unique(pred_mask) if int(i) != 0}
+            else:
+                pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
+                    rgb_frame, self.caption, **self.threshold_args
+                )
             self.segtracker.add_reference(rgb_frame, pred_mask)
             self.instance_phrase.update(pred_phrase)
 
         elif self.frame_idx % self.sam_run_gap == 0:
-            seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
+            if self.auto_mode:
+                seg_mask = self.segtracker.seg_everything(rgb_frame)
+                pred_phrase = {int(i): "object" for i in np.unique(seg_mask) if int(i) != 0}
+            else:
+                seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(
+                    rgb_frame, self.caption, **self.threshold_args
+                )
             track_mask = self.segtracker.track(rgb_frame)
             new_obj_mask, seg_to_new_mapping = self.segtracker.find_new_objs(track_mask, seg_mask)
             if np.sum(new_obj_mask > 0) > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
