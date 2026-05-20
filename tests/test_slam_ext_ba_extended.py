@@ -126,6 +126,40 @@ class SlamExtBAExtendedTest(unittest.TestCase):
         self.assertGreater((intrinsics[:2] - original_intrinsics[:2]).abs().max().item(), 0.0)
         torch.testing.assert_close(disps[1], original_disps[1], atol=0.0, rtol=0.0)
 
+    def test_extended_returns_kernel_energy_when_requested(self):
+        inputs = _make_ba_inputs()
+        poses, disps, intrinsics, disps_sens, targets, weights, eta, ii, jj = inputs
+        depth_active = torch.ones(poses.shape[0], device=poses.device)
+
+        _, _, energy = slam_ext.ba_extended(
+            poses,
+            disps,
+            intrinsics,
+            disps_sens,
+            targets,
+            weights,
+            eta,
+            ii,
+            jj,
+            depth_active,
+            1,
+            4,
+            2,
+            1e-3,
+            0.1,
+            False,
+            0.001,
+            False,
+            1e-6,
+            1e-6,
+            0.125,
+            True,
+        )
+
+        self.assertEqual(tuple(energy.shape), (2,))
+        self.assertTrue(torch.isfinite(energy).all().item())
+        self.assertGreater(energy[0].item(), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
