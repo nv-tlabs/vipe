@@ -17,7 +17,7 @@ class BAConfig(BaseConfigSchema):
         ge=0.0,
         description="Weight for dense-disparity regularization during bundle adjustment.",
     )
-    fused: bool = Field(description="Use the fused CUDA bundle-adjustment path when the graph layout is supported.")
+    fused: bool = Field(description="Use the fused CUDA bundle-adjustment path; unsupported layouts raise an error.")
     intrinsics_damping_scale: float = Field(
         gt=0.0,
         description="Multiplier for damping applied to optimized camera intrinsics.",

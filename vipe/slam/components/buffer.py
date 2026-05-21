@@ -381,23 +381,26 @@ class GraphBuffer:
         weight_tracks: float,
         verbose: bool,
     ) -> bool:
+        def fail(reason: str) -> None:
+            raise RuntimeError(f"Fused BA is enabled, but {reason}. Set ba.fused=false to use the generic BA solver.")
+
         if not bool(self.ba_config.get("fused", False)):
             return False
         if self.n_views != 1 or self.camera_type != CameraType.PINHOLE:
-            return False
+            fail("it only supports single-view pinhole-camera graph buffers")
         if optimize_rig_rotation:
-            return False
+            fail("it does not support optimizing rig rotation")
         if t0 >= t1:
-            return False
+            fail("the active optimization range is empty")
         if target.shape[0] != ii.shape[0] or weight.shape[0] != ii.shape[0]:
-            return False
+            fail("target/weight edge counts do not match the graph edges")
         # The DROID CUDA kernel applies the 0.001 dense-flow scale internally.
         if weight_dense_disp != 0.001 or weight_tracks != 0.001:
-            return False
+            fail("the configured dense-flow or sparse-track weights are unsupported")
 
         edge_mask = ii != jj
         if not torch.any(edge_mask):
-            return False
+            fail("the graph contains no non-self edges")
         if not torch.all(edge_mask):
             ii = ii[edge_mask]
             jj = jj[edge_mask]
@@ -406,7 +409,7 @@ class GraphBuffer:
 
         identity_rig = torch.as_tensor([0, 0, 0, 0, 0, 0, 1], dtype=self.rig.dtype, device=self.rig.device)
         if not torch.allclose(self.rig[0], identity_rig):
-            return False
+            fail("it only supports identity rig extrinsics")
 
         ht, wd = self.height // 8, self.width // 8
 
@@ -475,8 +478,11 @@ class GraphBuffer:
                 intrinsics_scale,
                 verbose,
             )
-        except (AttributeError, TypeError):
-            return False
+        except (AttributeError, TypeError) as exc:
+            raise RuntimeError(
+                "Fused BA is enabled, but the loaded vipe_ext runtime does not match the fused BA API. "
+                "Rebuild the extension or run with VIPE_EXT_JIT=1."
+            ) from exc
 
         if verbose:
             logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0].item()} -> {ba_energy[-1].item()}")
@@ -535,7 +541,13 @@ class GraphBuffer:
             gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
 
-        if robust_kernel is None and self._try_fused_ba(
+        if bool(self.ba_config.get("fused", False)) and robust_kernel is not None:
+            raise RuntimeError(
+                "Fused BA is enabled, but robust kernels are not supported. "
+                "Set ba.fused=false to use the generic BA solver."
+            )
+
+        if self._try_fused_ba(
             target,
             weight,
             disp_damping,

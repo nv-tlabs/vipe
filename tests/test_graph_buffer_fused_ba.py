@@ -271,6 +271,55 @@ class GraphBufferFusedBATest(unittest.TestCase):
 
         self.assertRegex(logs.output[-1], r"BA iters = 1, energy: [0-9.eE+-]+ -> [0-9.eE+-]+")
 
+    def test_fused_ba_errors_for_unsupported_layout_instead_of_falling_back(self):
+        fused = _make_video(fused=True, sparse_tracks_enabled=False)
+        ba_inputs = _make_real_run_shaped_ba_inputs(fused)
+        target, weight, disp_damping, ii, jj = ba_inputs
+
+        with self.assertRaisesRegex(RuntimeError, "does not support optimizing rig rotation"):
+            fused.bundle_adjustment(
+                target=target.clone(),
+                weight=weight.clone(),
+                disp_damping=disp_damping.clone(),
+                ii=ii.clone(),
+                jj=jj.clone(),
+                t0=1,
+                t1=5,
+                n_iters=1,
+                pose_damping=1e-3,
+                pose_ep=0.1,
+                motion_only=False,
+                limited_disp=False,
+                optimize_intrinsics=False,
+                optimize_rig_rotation=True,
+                verbose=False,
+            )
+
+    def test_fused_ba_errors_for_robust_kernel_instead_of_falling_back(self):
+        fused = _make_video(fused=True, sparse_tracks_enabled=False)
+        fused.ba_config.robust_kernel = "huber"
+        ba_inputs = _make_real_run_shaped_ba_inputs(fused)
+        target, weight, disp_damping, ii, jj = ba_inputs
+
+        with self.assertRaisesRegex(RuntimeError, "robust kernels are not supported"):
+            fused.bundle_adjustment(
+                target=target.clone(),
+                weight=weight.clone(),
+                disp_damping=disp_damping.clone(),
+                ii=ii.clone(),
+                jj=jj.clone(),
+                t0=1,
+                t1=5,
+                n_iters=1,
+                pose_damping=1e-3,
+                pose_ep=0.1,
+                motion_only=False,
+                limited_disp=False,
+                optimize_intrinsics=False,
+                optimize_rig_rotation=False,
+                verbose=False,
+            )
+
     def test_hydra_config_gate_disables_fused_ba_without_env_vars(self):
         disabled = _make_video(fused=False, sparse_tracks_enabled=False)
         ba_inputs = _make_real_run_shaped_ba_inputs(disabled)

@@ -220,7 +220,7 @@ Bundle-adjustment solver and robust loss options.
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `dense_disp_alpha` | float | required | >= 0.0 | Weight for dense-disparity regularization during bundle adjustment. |
-| `fused` | bool | required | - | Use the fused CUDA bundle-adjustment path when the graph layout is supported. |
+| `fused` | bool | required | - | Use the fused CUDA bundle-adjustment path; unsupported layouts raise an error. |
 | `intrinsics_damping_scale` | float | required | > 0.0 | Multiplier for damping applied to optimized camera intrinsics. |
 | `robust_kernel` | `huber` \| `tukey` \| `gnc_tls` \| null | required | - | Robust loss for dense-flow residuals. Set to null for L2 residuals. |
 | `robust_kernel_threshold` | float | required | > 0.0 | Robust-kernel threshold in 1/8-resolution feature-map pixels. |
