@@ -290,14 +290,13 @@ class PanoramaAnnotationPipeline(Pipeline):
                 )
 
         depth_align_model = self.post_cfg.depth_align_model
-        output_stream = CachedVideoStream(
-            MergedPanoramaVideoStream(
-                cached_video_stream,
-                slam_streams,
-                slam_output,
-                pano_depth_method=depth_align_model,
-            )
+        merged_stream = MergedPanoramaVideoStream(
+            cached_video_stream,
+            slam_streams,
+            slam_output,
+            pano_depth_method=depth_align_model,
         )
+        output_stream: VideoStream = CachedVideoStream(merged_stream) if self.out_cfg.save_viz else merged_stream
 
         if self.out_cfg.save_artifacts:
             io.save_artifacts(artifact_path, output_stream)
@@ -307,6 +306,7 @@ class PanoramaAnnotationPipeline(Pipeline):
                 pickle.dump({"finished": True}, f)
 
         if self.out_cfg.save_viz:
+            assert isinstance(output_stream, CachedVideoStream)
             save_projection_video(
                 artifact_path.meta_vis_path,
                 output_stream,

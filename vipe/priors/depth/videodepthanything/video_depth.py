@@ -111,12 +111,10 @@ class VideoDepthAnything(nn.Module):
         for frame_id in tqdm(range(0, org_video_len, frame_step)):
             cur_list = []
             for i in range(INFER_LEN):
-                # cur_list.append(torch.from_numpy(transform({'image': frame_list[frame_id+i].astype(np.float32) / 255.0})['image']).unsqueeze(0).unsqueeze(0))
-                cur_list.append(
-                    torch.from_numpy(transform({"image": frame_list[frame_id + i].astype(np.float32)})["image"])
-                    .unsqueeze(0)
-                    .unsqueeze(0)
-                )
+                image = frame_list[frame_id + i].astype(np.float32)
+                if np.issubdtype(frame_list[frame_id + i].dtype, np.integer):
+                    image /= np.iinfo(frame_list[frame_id + i].dtype).max
+                cur_list.append(torch.from_numpy(transform({"image": image})["image"]).unsqueeze(0).unsqueeze(0))
             cur_input = torch.cat(cur_list, dim=1).to(device)
             if pre_input is not None:
                 cur_input[:, :OVERLAP, ...] = pre_input[:, KEYFRAMES, ...]

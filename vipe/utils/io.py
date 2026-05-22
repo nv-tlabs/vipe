@@ -16,6 +16,7 @@
 import logging
 import tempfile
 import zipfile
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, cast
@@ -277,6 +278,17 @@ def save_depth_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStrea
                     z.write(f.name, f"{frame_idx:05d}.exr")
 
 
+def _write_depth_exr(z: zipfile.ZipFile, frame_idx: int, metric_depth: np.ndarray) -> None:
+    height, width = metric_depth.shape
+    header = OpenEXR.Header(width, height)
+    header["channels"] = {"Z": Imath.Channel(Imath.PixelType(Imath.PixelType.HALF))}
+    with tempfile.NamedTemporaryFile(suffix=".exr") as f:
+        exr = OpenEXR.OutputFile(f.name, header)
+        exr.writePixels({"Z": metric_depth.astype(np.float16).tobytes()})
+        exr.close()
+        z.write(f.name, f"{frame_idx:05d}.exr")
+
+
 def read_depth_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
     """
     Read metric depth from zipped exr files.
@@ -340,40 +352,66 @@ def read_instance_phrases(instance_phrase_path: Path) -> dict[int, str]:
 
 def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
     """
-    Save each attribute independently.
+    Save each attribute in one pass over the stream.
     """
 
-    # Save OpenCV cam2world matrices as 4x4 matrix in npz file
-    save_pose_artifacts(out_path, cached_final_stream)
-
-    # Save intrinsics as [fx, fy, cx, cy] in npz file
-    save_intrinsics_artifacts(out_path, cached_final_stream)
-
-    # Save original RGB as H264-encoded video.
-    save_rgb_artifacts(out_path, cached_final_stream)
-
-    # Save metric depth as zipped exr files.
-    save_depth_artifacts(out_path, cached_final_stream)
-
-    # Save Instance mask as zipped PNG files.
-    instance_list = [
-        (frame_idx, frame_data.instance)
-        for frame_idx, frame_data in enumerate(cached_final_stream)
-        if frame_data.instance is not None
-    ]
-    if len(instance_list) > 0:
-        out_path.mask_path.parent.mkdir(exist_ok=True, parents=True)
-        with zipfile.ZipFile(out_path.mask_path, "w", zipfile.ZIP_DEFLATED) as z:
-            for frame_idx, instance in instance_list:
-                _, mask_buffer = cv2.imencode(".png", instance.cpu().numpy().astype(np.uint8))
-                z.writestr(f"{frame_idx:05d}.png", mask_buffer.tobytes())
-
-    # Save Instance phrases as txt file.
+    pose_list = []
+    intrinsics_list = []
+    camera_type_list = []
     instance_phrases_combined = {}
-    for frame_data in cached_final_stream:
-        assert isinstance(frame_data, VideoFrame)
-        if frame_data.instance_phrases is not None:
-            instance_phrases_combined.update(frame_data.instance_phrases)
+
+    with ExitStack() as stack, VideoWriter(out_path.rgb_path, cached_final_stream.fps()) as rgb_writer:
+        depth_zip: zipfile.ZipFile | None = None
+        mask_zip: zipfile.ZipFile | None = None
+
+        for frame_idx, frame_data in enumerate(cached_final_stream):
+            assert isinstance(frame_data, VideoFrame)
+
+            if frame_data.pose is not None:
+                pose_list.append((frame_idx, frame_data.pose.matrix().cpu().numpy()))
+
+            if frame_data.intrinsics is not None:
+                intrinsics_list.append((frame_idx, frame_data.intrinsics.cpu().numpy()))
+
+            if frame_data.camera_type is not None:
+                camera_type_list.append((frame_idx, frame_data.camera_type))
+
+            rgb_writer.write((frame_data.rgb.cpu().numpy() * 255).astype(np.uint8))
+
+            if frame_data.metric_depth is not None:
+                if depth_zip is None:
+                    out_path.depth_path.parent.mkdir(exist_ok=True, parents=True)
+                    depth_zip = stack.enter_context(zipfile.ZipFile(out_path.depth_path, "w", zipfile.ZIP_DEFLATED))
+                _write_depth_exr(depth_zip, frame_idx, frame_data.metric_depth.cpu().numpy())
+
+            if frame_data.instance is not None:
+                if mask_zip is None:
+                    out_path.mask_path.parent.mkdir(exist_ok=True, parents=True)
+                    mask_zip = stack.enter_context(zipfile.ZipFile(out_path.mask_path, "w", zipfile.ZIP_DEFLATED))
+                _, mask_buffer = cv2.imencode(".png", frame_data.instance.cpu().numpy().astype(np.uint8))
+                mask_zip.writestr(f"{frame_idx:05d}.png", mask_buffer.tobytes())
+
+            if frame_data.instance_phrases is not None:
+                instance_phrases_combined.update(frame_data.instance_phrases)
+
+    if len(pose_list) > 0:
+        pose_data = np.stack([pose for _, pose in pose_list], axis=0)
+        pose_inds = np.array([frame_idx for frame_idx, _ in pose_list])
+        out_path.pose_path.parent.mkdir(exist_ok=True, parents=True)
+        np.savez(out_path.pose_path, data=pose_data, inds=pose_inds)
+
+    if len(intrinsics_list) > 0:
+        intrinsics_data = np.stack([intrinsics for _, intrinsics in intrinsics_list], axis=0)
+        intrinsics_inds = np.array([frame_idx for frame_idx, _ in intrinsics_list])
+        out_path.intrinsics_path.parent.mkdir(exist_ok=True, parents=True)
+        np.savez(out_path.intrinsics_path, data=intrinsics_data, inds=intrinsics_inds)
+
+    if len(camera_type_list) > 0:
+        out_path.camera_type_path.parent.mkdir(exist_ok=True, parents=True)
+        with out_path.camera_type_path.open("w") as f:
+            for frame_idx, camera_type_data in camera_type_list:
+                f.write(f"{frame_idx}: {camera_type_data.name}\n")
+
     if len(instance_phrases_combined) > 0:
         out_path.mask_phrase_path.parent.mkdir(exist_ok=True, parents=True)
         with out_path.mask_phrase_path.open("w") as f:
