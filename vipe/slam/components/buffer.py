@@ -361,7 +361,7 @@ class GraphBuffer:
             dj.reshape(-1),
         )
 
-    def _try_fused_ba(
+    def _fused_ba(
         self,
         target: torch.Tensor,
         weight: torch.Tensor,
@@ -380,12 +380,10 @@ class GraphBuffer:
         weight_dense_disp: float,
         weight_tracks: float,
         verbose: bool,
-    ) -> bool:
+    ) -> None:
         def fail(reason: str) -> None:
             raise RuntimeError(f"Fused BA is enabled, but {reason}. Set ba.fused=false to use the generic BA solver.")
 
-        if not bool(self.ba_config.get("fused", False)):
-            return False
         if self.n_views != 1 or self.camera_type != CameraType.PINHOLE:
             fail("it only supports single-view pinhole-camera graph buffers")
         if optimize_rig_rotation:
@@ -490,8 +488,6 @@ class GraphBuffer:
         if optimize_intrinsics:
             self.intrinsics[0, :4] = intrinsics / intrinsics_scale
 
-        return True
-
     def expand_tracks_edges(self, ii: torch.Tensor, tracks_length: int):
         iis = [ii] * (tracks_length - 1)
         jjs = [ii - m - 1 for m in range(tracks_length - 1)]
@@ -541,31 +537,32 @@ class GraphBuffer:
             gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
 
-        if bool(self.ba_config.get("fused", False)) and robust_kernel is not None:
-            raise RuntimeError(
-                "Fused BA is enabled, but robust kernels are not supported. "
-                "Set ba.fused=false to use the generic BA solver."
-            )
+        if self.ba_config.fused:
+            if robust_kernel is not None:
+                raise RuntimeError(
+                    "Fused BA is enabled, but robust kernels are not supported. "
+                    "Set ba.fused=false to use the generic BA solver."
+                )
 
-        if self._try_fused_ba(
-            target,
-            weight,
-            disp_damping,
-            ii,
-            jj,
-            t0,
-            t1,
-            n_iters,
-            pose_damping,
-            pose_ep,
-            motion_only,
-            limited_disp,
-            optimize_intrinsics,
-            optimize_rig_rotation,
-            weight_dense_disp,
-            weight_tracks,
-            verbose,
-        ):
+            self._fused_ba(
+                target,
+                weight,
+                disp_damping,
+                ii,
+                jj,
+                t0,
+                t1,
+                n_iters,
+                pose_damping,
+                pose_ep,
+                motion_only,
+                limited_disp,
+                optimize_intrinsics,
+                optimize_rig_rotation,
+                weight_dense_disp,
+                weight_tracks,
+                verbose,
+            )
             self.disps.clamp_(min=0.001)
             return
 

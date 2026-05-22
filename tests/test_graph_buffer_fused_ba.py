@@ -164,7 +164,10 @@ def _run_generic_bundle_adjustment(
 
 def _run_fused_bundle_adjustment(video, ba_inputs, *, motion_only: bool, limited_disp: bool, optimize_intrinsics: bool):
     target, weight, disp_damping, ii, jj = ba_inputs
-    used_fused_ba = video._try_fused_ba(
+    if not video.ba_config.fused:
+        return False
+
+    video._fused_ba(
         target=target.clone(),
         weight=weight.clone(),
         disp_damping=disp_damping.clone(),
@@ -184,7 +187,7 @@ def _run_fused_bundle_adjustment(video, ba_inputs, *, motion_only: bool, limited
         verbose=False,
     )
     video.disps.clamp_(min=0.001)
-    return used_fused_ba
+    return True
 
 
 class GraphBufferFusedBATest(unittest.TestCase):
