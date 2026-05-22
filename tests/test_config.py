@@ -123,6 +123,16 @@ def test_typed_config_pipeline_factory_compatibility(tmp_path: Path) -> None:
     assert Path(pipeline.out_cfg.path) == tmp_path / "out"
 
 
+def test_parse_typed_config_accepts_fused_ba_override(tmp_path: Path) -> None:
+    config = parse_typed_config(
+        "default",
+        [*_base_overrides(tmp_path), "pipeline.slam.ba.fused=true"],
+    )
+
+    assert isinstance(config.pipeline, DefaultPipelineConfig)
+    assert config.pipeline.slam.ba.fused is True
+
+
 @pytest.mark.parametrize(
     "override",
     [

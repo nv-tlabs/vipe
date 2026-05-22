@@ -361,6 +361,133 @@ class GraphBuffer:
             dj.reshape(-1),
         )
 
+    def _fused_ba(
+        self,
+        target: torch.Tensor,
+        weight: torch.Tensor,
+        disp_damping: torch.Tensor,
+        ii: torch.Tensor,
+        jj: torch.Tensor,
+        t0: int,
+        t1: int,
+        n_iters: int,
+        pose_damping: float,
+        pose_ep: float,
+        motion_only: bool,
+        limited_disp: bool,
+        optimize_intrinsics: bool,
+        optimize_rig_rotation: bool,
+        weight_dense_disp: float,
+        weight_tracks: float,
+        verbose: bool,
+    ) -> None:
+        def fail(reason: str) -> None:
+            raise RuntimeError(f"Fused BA is enabled, but {reason}. Set ba.fused=false to use the generic BA solver.")
+
+        if self.n_views != 1 or self.camera_type != CameraType.PINHOLE:
+            fail("it only supports single-view pinhole-camera graph buffers")
+        if optimize_rig_rotation:
+            fail("it does not support optimizing rig rotation")
+        if t0 >= t1:
+            fail("the active optimization range is empty")
+        if target.shape[0] != ii.shape[0] or weight.shape[0] != ii.shape[0]:
+            fail("target/weight edge counts do not match the graph edges")
+        # The DROID CUDA kernel applies the 0.001 dense-flow scale internally.
+        if weight_dense_disp != 0.001 or weight_tracks != 0.001:
+            fail("the configured dense-flow or sparse-track weights are unsupported")
+
+        edge_mask = ii != jj
+        if not torch.any(edge_mask):
+            fail("the graph contains no non-self edges")
+        if not torch.all(edge_mask):
+            ii = ii[edge_mask]
+            jj = jj[edge_mask]
+            target = target[edge_mask]
+            weight = weight[edge_mask]
+
+        identity_rig = torch.as_tensor([0, 0, 0, 0, 0, 0, 1], dtype=self.rig.dtype, device=self.rig.device)
+        if not torch.allclose(self.rig[0], identity_rig):
+            fail("it only supports identity rig extrinsics")
+
+        ht, wd = self.height // 8, self.width // 8
+
+        if self.sparse_tracks.enabled:
+            view_inds = torch.zeros_like(ii)
+            sparse_target, sparse_weight = self.sparse_tracks.compute_dense_disp_target_weight(
+                source_view_inds=view_inds,
+                source_frame_inds=self.tstamp[ii],
+                target_view_inds=view_inds,
+                target_frame_inds=self.tstamp[jj],
+                image_size=(self.height, self.width),
+                dense_disp_size=(ht, wd),
+            )
+            sparse_target = sparse_target.flatten(1, 2)
+            sparse_weight = sparse_weight.flatten(1, 2)
+            combined_weight = weight + sparse_weight
+            combined_target = torch.where(
+                combined_weight > 0,
+                (weight * target + sparse_weight * sparse_target) / combined_weight.clamp_min(1e-12),
+                target,
+            )
+            target, weight = combined_target, combined_weight
+
+        target = rearrange(target, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
+        weight = rearrange(weight, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
+
+        kx = torch.unique(torch.cat([torch.arange(t0, t1, device=self.device), ii]))
+        eta = (0.2 * disp_damping[kx] + 1e-7).contiguous()
+        intrinsics_scale = 1.0 / 8.0
+        intrinsics = (
+            self.camera_type.build_camera_model(self.intrinsics)
+            .pinhole()
+            .scaled(intrinsics_scale)
+            .intrinsics[0]
+            .contiguous()
+        )
+        depth_active = torch.ones(self.disps.shape[0], dtype=self.disps.dtype, device=self.device)
+        if limited_disp:
+            depth_active.zero_()
+            depth_active[t0:t1] = 1.0
+
+        intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
+
+        try:
+            _, _, ba_energy = slam_ext.ba_extended(
+                self.poses,
+                self.disps[:, 0],
+                intrinsics,
+                self.disps_sens[:, 0],
+                target,
+                weight,
+                eta,
+                ii.contiguous(),
+                jj.contiguous(),
+                depth_active.contiguous(),
+                t0,
+                t1,
+                n_iters,
+                pose_damping,
+                pose_ep,
+                motion_only,
+                float(self.ba_config.dense_disp_alpha),
+                bool(optimize_intrinsics),
+                1e-6 * intrinsics_damping_scale,
+                1e-6 * intrinsics_damping_scale,
+                intrinsics_scale,
+                verbose,
+            )
+        except (AttributeError, TypeError) as exc:
+            raise RuntimeError(
+                "Fused BA is enabled, but the loaded vipe_ext runtime does not match the fused BA API. "
+                "Rebuild the extension or run with VIPE_EXT_JIT=1."
+            ) from exc
+
+        if verbose:
+            logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0].item()} -> {ba_energy[-1].item()}")
+
+        if optimize_intrinsics:
+            self.intrinsics[0, :4] = intrinsics / intrinsics_scale
+
     def expand_tracks_edges(self, ii: torch.Tensor, tracks_length: int):
         iis = [ii] * (tracks_length - 1)
         jjs = [ii - m - 1 for m in range(tracks_length - 1)]
@@ -402,7 +529,6 @@ class GraphBuffer:
         di_unique = torch.unique(di)
         pi_unique = torch.unique(ii)  # Should be equivalent to unique(pi)
 
-        solver = Solver(compute_energy=verbose)
         robust_kernel = build_robust_kernel(
             name=self.ba_config.get("robust_kernel", None),
             threshold=float(self.ba_config.get("robust_kernel_threshold", 1.0)),
@@ -410,6 +536,37 @@ class GraphBuffer:
             gnc_mu_step=float(self.ba_config.get("gnc_mu_step", 1.4)),
             gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
+
+        if self.ba_config.fused:
+            if robust_kernel is not None:
+                raise RuntimeError(
+                    "Fused BA is enabled, but robust kernels are not supported. "
+                    "Set ba.fused=false to use the generic BA solver."
+                )
+
+            self._fused_ba(
+                target,
+                weight,
+                disp_damping,
+                ii,
+                jj,
+                t0,
+                t1,
+                n_iters,
+                pose_damping,
+                pose_ep,
+                motion_only,
+                limited_disp,
+                optimize_intrinsics,
+                optimize_rig_rotation,
+                weight_dense_disp,
+                weight_tracks,
+                verbose,
+            )
+            self.disps.clamp_(min=0.001)
+            return
+
+        solver = Solver(compute_energy=verbose)
         solver.add_term(
             DenseDepthFlowTerm(
                 pose_i_inds=pi,
