@@ -15,6 +15,7 @@ from .sampson import sampson_error_for_frame
 @dataclass
 class DynamicMaskOutput:
     masks: torch.Tensor  # (S, H, W) bool — final dynamic mask per frame
+    optical_flow: torch.Tensor  # (S, H, W, 4) float — [fwd_dx, fwd_dy, bwd_dx, bwd_dy] in pixels
     sampson: torch.Tensor  # (S, H, W) float — Sampson error per pixel per frame
     fwd_consistency: torch.Tensor  # (S, H, W) bool — forward consistency mask
     bwd_consistency: torch.Tensor  # (S, H, W) bool — backward consistency mask
@@ -218,6 +219,13 @@ class DynamicMaskPipeline:
         assert instances.shape == (S, H, W), f"instances shape mismatch: {instances.shape}"
 
         fwd_flow, bwd_flow = self._compute_pairwise_flow(frames)
+        optical_flow = torch.cat(
+            [
+                torch.nn.functional.pad(fwd_flow, (0, 0, 0, 0, 0, 0, 0, 1)),
+                torch.nn.functional.pad(bwd_flow, (0, 0, 0, 0, 0, 0, 1, 0)),
+            ],
+            dim=1,
+        ).permute(0, 2, 3, 1)
         per_frame_fwd_mask, per_frame_bwd_mask = self._compute_consistency_masks(fwd_flow, bwd_flow)
         sampson = self._compute_sampson_errors(
             fwd_flow, bwd_flow, per_frame_fwd_mask, per_frame_bwd_mask, H, W
@@ -235,6 +243,7 @@ class DynamicMaskPipeline:
         if not keep_ids:
             return DynamicMaskOutput(
                 masks=torch.zeros((S, H, W), dtype=torch.bool),
+                optical_flow=optical_flow,
                 sampson=sampson,
                 fwd_consistency=per_frame_fwd_mask,
                 bwd_consistency=per_frame_bwd_mask,
@@ -271,6 +280,7 @@ class DynamicMaskPipeline:
 
         return DynamicMaskOutput(
             masks=sel_mask,
+            optical_flow=optical_flow,
             sampson=sampson,
             fwd_consistency=per_frame_fwd_mask,
             bwd_consistency=per_frame_bwd_mask,

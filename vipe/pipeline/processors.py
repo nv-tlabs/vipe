@@ -292,10 +292,17 @@ class DynamicMaskProcessor(StreamProcessor):
         self._instances: list[np.ndarray] | None = None
         self._instance_phrases: dict[int, str] | None = None
         self._dynamic_masks: list[torch.Tensor] | None = None
+        self._optical_flows: list[torch.Tensor] | None = None
+        self._flow_consistency: list[torch.Tensor] | None = None
         self._cached_frames: list[VideoFrame] | None = None
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
-        return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
+        return previous_attributes | {
+            FrameAttribute.INSTANCE,
+            FrameAttribute.MASK,
+            FrameAttribute.OPTICAL_FLOW,
+            FrameAttribute.FLOW_CONSISTENCY,
+        }
 
     def update_iterator(self, previous_iterator: Iterator[VideoFrame], pass_idx: int) -> Iterator[VideoFrame]:
         if pass_idx == 0:
@@ -319,6 +326,8 @@ class DynamicMaskProcessor(StreamProcessor):
             if S < 2:
                 H, W = cached_frames[0].rgb.shape[:2] if S == 1 else (1, 1)
                 self._dynamic_masks = [torch.zeros((H, W), dtype=torch.bool) for _ in range(S)]
+                self._optical_flows = [torch.zeros((H, W, 4), dtype=torch.float32) for _ in range(S)]
+                self._flow_consistency = [torch.ones((H, W, 2), dtype=torch.bool) for _ in range(S)]
             else:
                 rgb_tensor = torch.stack(
                     [f.rgb.permute(2, 0, 1).float() for f in cached_frames], dim=0
@@ -341,13 +350,22 @@ class DynamicMaskProcessor(StreamProcessor):
                     out.selected_instances,
                 )
                 self._dynamic_masks = [out.masks[i] for i in range(S)]
+                self._optical_flows = [out.optical_flow[i] for i in range(S)]
+                self._flow_consistency = [
+                    torch.stack([out.fwd_consistency[i], out.bwd_consistency[i]], dim=-1) for i in range(S)
+                ]
 
             self._instances = instance_maps
             self._instance_phrases = instance_phrases
             self._cached_frames = cached_frames
             return
 
-        assert self._dynamic_masks is not None and self._instances is not None
+        assert (
+            self._dynamic_masks is not None
+            and self._instances is not None
+            and self._optical_flows is not None
+            and self._flow_consistency is not None
+        )
         cached_frames = self._cached_frames or []
         for i, frame in enumerate(cached_frames):
             inst = torch.from_numpy(self._instances[i]).to(frame.rgb.device)
@@ -356,6 +374,8 @@ class DynamicMaskProcessor(StreamProcessor):
 
             dyn = self._dynamic_masks[i].to(frame.rgb.device)
             frame.mask = erode(~dyn, self.mask_expand)
+            frame.optical_flow = self._optical_flows[i].to(frame.rgb.device)
+            frame.flow_consistency = self._flow_consistency[i].to(frame.rgb.device)
             yield frame
 
 
