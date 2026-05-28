@@ -129,6 +129,13 @@ def colorize_depth(
     return depth
 
 
+def pad_image_width(img: np.ndarray, target_width: int, fill_value: int = 0) -> np.ndarray:
+    if img.shape[1] >= target_width:
+        return img
+    pad_width = target_width - img.shape[1]
+    return np.pad(img, ((0, 0), (0, pad_width), (0, 0)), mode="constant", constant_values=fill_value)
+
+
 def draw_points_batch(
     canvas: np.ndarray,
     pts: np.ndarray,
@@ -486,6 +493,8 @@ def save_projection_video(
                 for img in img_iterator:
                     img_row.append(next(img))
                 img_rows.append(np.concatenate(img_row, axis=1))
+            max_row_width = max(img_row.shape[1] for img_row in img_rows)
+            img_rows = [pad_image_width(img_row, max_row_width) for img_row in img_rows]
             img_final = np.concatenate(img_rows, axis=0)
             text_desc = f"Frame {frame_idx:03d}"
             # text_desc += f" | BA {slam_output.ba_residual:.4f}"
