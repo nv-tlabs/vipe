@@ -37,6 +37,7 @@ from vipe.utils.visualization import save_projection_video
 from . import AnnotationPipelineOutput, Pipeline
 from .processors import (
     AdaptiveDepthProcessor,
+    DynamicMaskProcessor,
     GeoCalibIntrinsicsProcessor,
     MultiviewDepthProcessor,
     TrackAnythingProcessor,
@@ -68,13 +69,25 @@ class DefaultAnnotationPipeline(Pipeline):
 
         init_processors.append(GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type))
         if self.init_cfg.instance is not None:
-            init_processors.append(
-                TrackAnythingProcessor(
-                    self.init_cfg.instance.phrases,
-                    add_sky=self.init_cfg.instance.add_sky,
-                    sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+            mode = self.init_cfg.instance.get("mode", "text")
+            if mode == "motion":
+                init_processors.append(
+                    DynamicMaskProcessor(
+                        sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                        sam_points_per_side=self.init_cfg.instance.get("sam_points_per_side", 16),
+                        keep_motion_ratio=self.init_cfg.instance.get("keep_motion_ratio", 0.15),
+                        flow_alpha=self.init_cfg.instance.get("flow_alpha", 0.5),
+                        flow_beta=self.init_cfg.instance.get("flow_beta", 0.5),
+                    )
                 )
-            )
+            else:
+                init_processors.append(
+                    TrackAnythingProcessor(
+                        self.init_cfg.instance.phrases,
+                        add_sky=self.init_cfg.instance.add_sky,
+                        sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    )
+                )
         return ProcessedVideoStream(video_stream, init_processors)
 
     def _add_post_processors(

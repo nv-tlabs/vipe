@@ -1,0 +1,30 @@
+{
+    "name": "spring-M",
+    "dataset": "spring",
+    "gpus": [0, 1, 2, 3, 4, 5, 6, 7],
+
+    "use_var": true,
+    "var_min": 0,
+    "var_max": 10,
+    "pretrain": "resnet34",
+    "initial_dim": 64,
+    "block_dims": [64, 128, 256],
+    "radius": 4,
+    "dim": 128,
+    "num_blocks": 2,
+    "iters": 4,
+
+    "image_size": [540, 960],
+    "scale": -1,
+    "batch_size": 32,
+    "epsilon": 1e-8,
+    "lr": 4e-4,
+    "wdecay": 1e-5,
+    "dropout": 0,
+    "clip": 1.0,
+    "gamma": 0.85,
+    "num_steps": 120000,
+    
+    "restore_ckpt": null,
+    "coarse_config": null
+}

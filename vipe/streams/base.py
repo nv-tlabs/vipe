@@ -40,6 +40,8 @@ class FrameAttribute(Enum):
     INSTANCE = "instance"
     MASK = "mask"
     METRIC_DEPTH = "metric_depth"
+    OPTICAL_FLOW = "optical_flow"
+    FLOW_CONSISTENCY = "flow_consistency"
 
 
 @dataclass(kw_only=True, slots=True)
@@ -57,6 +59,10 @@ class VideoFrame:
     - instance_phrases: A dictionary of instance id to phrase mapping.
     - mask: Binary mask of the frame. The shape is (H, W), with 0 for invalid pixels.
     - metric_depth: The depth map of the frame. The shape is (H, W). Value is in metric scale.
+    - optical_flow: Forward/backward optical flow. The shape is (H, W, 4), with
+      channels [fwd_dx, fwd_dy, bwd_dx, bwd_dy] in pixels.
+    - flow_consistency: Forward/backward optical-flow consistency masks. The
+      shape is (H, W, 2), with channels [fwd_mask, bwd_mask].
     - information: Additional information about the frame
     """
 
@@ -71,6 +77,8 @@ class VideoFrame:
     instance_phrases: dict[int, str] | None = None
     mask: torch.Tensor | None = None
     metric_depth: torch.Tensor | None = None
+    optical_flow: torch.Tensor | None = None
+    flow_consistency: torch.Tensor | None = None
     information: str = ""
 
     def size(self) -> tuple[int, int]:
@@ -94,6 +102,10 @@ class VideoFrame:
             attributes.add(FrameAttribute.MASK)
         if self.metric_depth is not None:
             attributes.add(FrameAttribute.METRIC_DEPTH)
+        if self.optical_flow is not None:
+            attributes.add(FrameAttribute.OPTICAL_FLOW)
+        if self.flow_consistency is not None:
+            attributes.add(FrameAttribute.FLOW_CONSISTENCY)
 
         return attributes
 
@@ -110,6 +122,10 @@ class VideoFrame:
             return self.mask
         if attribute == FrameAttribute.METRIC_DEPTH:
             return self.metric_depth
+        if attribute == FrameAttribute.OPTICAL_FLOW:
+            return self.optical_flow
+        if attribute == FrameAttribute.FLOW_CONSISTENCY:
+            return self.flow_consistency
         raise ValueError(f"Attribute {attribute} is not available in the frame.")
 
     def set_attribute(self, attribute: FrameAttribute, value: Any) -> None:
@@ -125,6 +141,10 @@ class VideoFrame:
             self.mask = value
         elif attribute == FrameAttribute.METRIC_DEPTH:
             self.metric_depth = value
+        elif attribute == FrameAttribute.OPTICAL_FLOW:
+            self.optical_flow = value
+        elif attribute == FrameAttribute.FLOW_CONSISTENCY:
+            self.flow_consistency = value
         else:
             raise ValueError(f"Attribute {attribute} is not available in the frame.")
 
@@ -139,6 +159,8 @@ class VideoFrame:
             instance=map_cpu(self.instance),
             instance_phrases=self.instance_phrases,
             metric_depth=map_cpu(self.metric_depth),
+            optical_flow=map_cpu(self.optical_flow),
+            flow_consistency=map_cpu(self.flow_consistency),
             pose=map_cpu(self.pose),
             intrinsics=map_cpu(self.intrinsics),
             camera_type=self.camera_type,
@@ -156,6 +178,8 @@ class VideoFrame:
             instance=map_cuda(self.instance),
             instance_phrases=self.instance_phrases,
             metric_depth=map_cuda(self.metric_depth),
+            optical_flow=map_cuda(self.optical_flow),
+            flow_consistency=map_cuda(self.flow_consistency),
             pose=map_cuda(self.pose),
             intrinsics=map_cuda(self.intrinsics),
             camera_type=self.camera_type,
@@ -191,6 +215,34 @@ class VideoFrame:
                 0, 0
             ]
 
+        new_optical_flow = None
+        if self.optical_flow is not None:
+            new_optical_flow = (
+                torch.nn.functional.interpolate(
+                    self.optical_flow.permute(2, 0, 1)[None],
+                    size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .squeeze(0)
+                .permute(1, 2, 0)
+            )
+            new_optical_flow[..., [0, 2]] *= w1 / w0
+            new_optical_flow[..., [1, 3]] *= h1 / h0
+
+        new_flow_consistency = None
+        if self.flow_consistency is not None:
+            new_flow_consistency = (
+                torch.nn.functional.interpolate(
+                    self.flow_consistency.permute(2, 0, 1)[None].float(),
+                    size,
+                    mode="nearest",
+                )
+                .squeeze(0)
+                .permute(1, 2, 0)
+                .bool()
+            )
+
         new_intrinsics = None
         if self.intrinsics is not None:
             new_intrinsics = self.intrinsics.clone()
@@ -206,6 +258,8 @@ class VideoFrame:
             instance=new_instance,
             instance_phrases=self.instance_phrases,
             metric_depth=new_metric_depth,
+            optical_flow=new_optical_flow,
+            flow_consistency=new_flow_consistency,
             pose=self.pose,
             intrinsics=new_intrinsics,
             camera_type=new_camera_type,
@@ -233,6 +287,14 @@ class VideoFrame:
         if self.metric_depth is not None:
             new_metric_depth = self.metric_depth[top:bottom, left:right]
 
+        new_optical_flow = None
+        if self.optical_flow is not None:
+            new_optical_flow = self.optical_flow[top:bottom, left:right]
+
+        new_flow_consistency = None
+        if self.flow_consistency is not None:
+            new_flow_consistency = self.flow_consistency[top:bottom, left:right]
+
         new_intrinsics = None
         if self.intrinsics is not None:
             new_intrinsics = self.intrinsics.clone()
@@ -248,6 +310,8 @@ class VideoFrame:
             instance=new_instance,
             instance_phrases=self.instance_phrases,
             metric_depth=new_metric_depth,
+            optical_flow=new_optical_flow,
+            flow_consistency=new_flow_consistency,
             pose=self.pose,
             intrinsics=new_intrinsics,
             camera_type=new_camera_type,

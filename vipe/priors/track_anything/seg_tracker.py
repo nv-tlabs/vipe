@@ -113,6 +113,40 @@ class SegTracker:
     def restart_tracker(self):
         self.tracker.restart()
 
+    def seg_everything(self, origin_frame: np.ndarray) -> np.ndarray:
+        """Class-agnostic auto-segmentation of `origin_frame` using SAM's
+        automatic mask generator. Returns a merged-mask numpy array (h, w)
+        where 0 is background and each generated mask gets a unique id.
+
+        Tiny masks (`< self.min_area`) are dropped. Earlier-generated (often
+        higher-quality) masks take precedence on overlap.
+        """
+        bc_id = self.curr_idx
+        bc_mask = self.origin_merged_mask
+
+        masks = self.sam.everything_generator.generate(origin_frame)
+        # Sort by area descending so larger components are written first; subsequent
+        # smaller masks then "carve" finer instances on top.
+        masks.sort(key=lambda m: m["area"], reverse=True)
+
+        H, W = origin_frame.shape[:2]
+        merged = np.zeros((H, W), dtype=np.uint8)
+        if self.origin_merged_mask is None:
+            self.origin_merged_mask = np.zeros((H, W), dtype=np.uint8)
+
+        for m in masks:
+            if m["area"] < self.min_area:
+                continue
+            if self.curr_idx > self.max_obj_num:
+                break
+            seg = m["segmentation"].astype(bool)
+            self.origin_merged_mask = merged.copy()
+            merged = self.add_mask(seg.astype(np.uint8))
+            self.curr_idx += 1
+
+        self.reset_origin_merged_mask(bc_mask, bc_id)
+        return merged
+
     def add_mask(self, interactive_mask: np.ndarray):
         """
         Merge interactive mask with self.origin_merged_mask

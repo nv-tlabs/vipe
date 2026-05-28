@@ -129,6 +129,13 @@ def colorize_depth(
     return depth
 
 
+def pad_image_width(img: np.ndarray, target_width: int, fill_value: int = 0) -> np.ndarray:
+    if img.shape[1] >= target_width:
+        return img
+    pad_width = target_width - img.shape[1]
+    return np.pad(img, ((0, 0), (0, pad_width), (0, 0)), mode="constant", constant_values=fill_value)
+
+
 def draw_points_batch(
     canvas: np.ndarray,
     pts: np.ndarray,
@@ -446,6 +453,17 @@ def save_projection_video(
             instance_img = cv2.resize(instance_img, (img_w, img_h))
             yield cv2.addWeighted(rgb_img, 0.5, instance_img, 0.5, 0)
 
+    def get_mask_imgs():
+        for frame_data, rgb_img in zip(video_stream, get_rgb_imgs()):
+            assert isinstance(frame_data, VideoFrame)
+            if frame_data.mask is None:
+                yield na_img
+                continue
+            mask_img = frame_data.mask.cpu().numpy().astype(np.uint8)
+            mask_img = colorize_mask(mask_img)
+            mask_img = cv2.resize(mask_img, (img_w, img_h))
+            yield cv2.addWeighted(rgb_img, 0.5, mask_img, 0.5, 0)
+
     def get_empty_imgs():
         for _ in range(len(video_stream)):
             yield na_img
@@ -457,6 +475,7 @@ def save_projection_video(
                 "depth": get_depth_imgs(),
                 "pcd": get_pcd_imgs(),
                 "instance": get_instance_imgs(),
+                "mask": get_mask_imgs(),
                 "rectified": get_rectified_imgs(),
                 "empty": get_empty_imgs(),
             }[t]
@@ -474,6 +493,8 @@ def save_projection_video(
                 for img in img_iterator:
                     img_row.append(next(img))
                 img_rows.append(np.concatenate(img_row, axis=1))
+            max_row_width = max(img_row.shape[1] for img_row in img_rows)
+            img_rows = [pad_image_width(img_row, max_row_width) for img_row in img_rows]
             img_final = np.concatenate(img_rows, axis=0)
             text_desc = f"Frame {frame_idx:03d}"
             # text_desc += f" | BA {slam_output.ba_residual:.4f}"

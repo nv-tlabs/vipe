@@ -1,0 +1,17 @@
+defaults:
+  - default
+  - _self_
+
+# Replace text-prompted TrackAnything with motion-driven dynamic-mask estimation.
+init:
+  instance:
+    mode: motion
+    sam_points_per_side: 16
+    keep_motion_ratio: 0.15
+    flow_alpha: 0.5
+    flow_beta: 0.5
+    # `phrases`/`add_sky` are kept from default config for compatibility but ignored in motion mode.
+
+output:
+  save_viz: true
+  viz_attributes: [['rgb', 'instance', 'mask'], ['depth', 'pcd']]

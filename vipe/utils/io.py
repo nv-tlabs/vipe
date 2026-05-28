@@ -66,8 +66,16 @@ class ArtifactPath:
         return self.base_path / "flow" / f"{self.artifact_name}.zip"
 
     @property
+    def flow_consistency_path(self) -> Path:
+        return self.base_path / "flow_consistency" / f"{self.artifact_name}.zip"
+
+    @property
     def mask_path(self) -> Path:
         return self.base_path / "mask" / f"{self.artifact_name}.zip"
+
+    @property
+    def static_mask_path(self) -> Path:
+        return self.base_path / "static_mask" / f"{self.artifact_name}.zip"
 
     @property
     def mask_phrase_path(self) -> Path:
@@ -104,7 +112,9 @@ class ArtifactPath:
             self.depth_path,
             self.intrinsics_path,
             self.flow_path,
+            self.flow_consistency_path,
             self.mask_path,
+            self.static_mask_path,
             self.mask_phrase_path,
             self.meta_info_path,
             self.meta_vis_path,
@@ -338,6 +348,112 @@ def read_instance_phrases(instance_phrase_path: Path) -> dict[int, str]:
     return instance_phrases
 
 
+def save_static_mask_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
+    # Save binary static-valid masks as zipped PNG files.
+    mask_list = [
+        (frame_idx, mask_data.cpu().numpy())
+        for frame_idx, mask_data in enumerate(cached_final_stream.get_stream_attribute(FrameAttribute.MASK))
+        if mask_data is not None
+    ]
+    if len(mask_list) > 0:
+        out_path.static_mask_path.parent.mkdir(exist_ok=True, parents=True)
+        with zipfile.ZipFile(out_path.static_mask_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for frame_idx, mask in mask_list:
+                mask_png = (mask.astype(bool).astype(np.uint8) * 255)
+                _, mask_buffer = cv2.imencode(".png", mask_png)
+                z.writestr(f"{frame_idx:05d}.png", mask_buffer.tobytes())
+
+
+def read_static_mask_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
+    """
+    Read static-valid binary masks from zipped PNG files.
+    """
+    with zipfile.ZipFile(zip_file_path, "r") as z:
+        for file_name in sorted(z.namelist()):
+            frame_idx = int(file_name.split(".")[0])
+            with z.open(file_name) as f:
+                mask_buffer = np.frombuffer(f.read(), dtype=np.uint8)
+                mask = cv2.imdecode(mask_buffer, cv2.IMREAD_UNCHANGED)
+                assert mask is not None, f"Failed to decode static mask {file_name}"
+                yield frame_idx, torch.from_numpy(mask.copy() > 0)
+
+
+def save_flow_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
+    # Save optical flow as zipped 16-bit PNG files.
+    flow_list = [
+        (frame_idx, flow_data.cpu().numpy())
+        for frame_idx, flow_data in enumerate(cached_final_stream.get_stream_attribute(FrameAttribute.OPTICAL_FLOW))
+        if flow_data is not None
+    ]
+    if len(flow_list) > 0:
+        out_path.flow_path.parent.mkdir(exist_ok=True, parents=True)
+        with zipfile.ZipFile(out_path.flow_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for frame_idx, flow in flow_list:
+                height, width, channels = flow.shape
+                assert channels == 4, f"Expected optical flow shape (H, W, 4), got {flow.shape}"
+                flow = flow.copy()
+                flow[..., [0, 2]] = flow[..., [0, 2]] / max(width - 1, 1)
+                flow[..., [1, 3]] = flow[..., [1, 3]] / max(height - 1, 1)
+                flow = (flow + 1) * 0.5 * 65535
+                flow = flow.astype(np.uint16)
+                with tempfile.NamedTemporaryFile(suffix=".png") as f:
+                    cv2.imwrite(f.name, flow)
+                    z.write(f.name, f"{frame_idx:05d}.png")
+
+
+def read_flow_artifacts(zip_file_path: Path) -> Iterator[tuple[int, torch.Tensor]]:
+    """
+    Read optical flow from zipped 16-bit PNG files.
+    """
+    with zipfile.ZipFile(zip_file_path, "r") as z:
+        for file_name in sorted(z.namelist()):
+            if not file_name.endswith(".png"):
+                continue
+            frame_idx = int(file_name.split(".")[0])
+            with z.open(file_name) as f:
+                flow_buffer = np.frombuffer(f.read(), dtype=np.uint8)
+                flow = cv2.imdecode(flow_buffer, cv2.IMREAD_UNCHANGED)
+                assert flow is not None, f"Failed to decode optical flow {file_name}"
+                yield frame_idx, torch.from_numpy(flow.copy())
+
+
+def save_flow_consistency_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
+    # Save forward/backward optical-flow consistency masks as zipped PNG files.
+    mask_list = [
+        (frame_idx, mask_data.cpu().numpy())
+        for frame_idx, mask_data in enumerate(
+            cached_final_stream.get_stream_attribute(FrameAttribute.FLOW_CONSISTENCY)
+        )
+        if mask_data is not None
+    ]
+    if len(mask_list) > 0:
+        out_path.flow_consistency_path.parent.mkdir(exist_ok=True, parents=True)
+        with zipfile.ZipFile(out_path.flow_consistency_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for frame_idx, consistency in mask_list:
+                height, width, channels = consistency.shape
+                assert channels == 2, f"Expected flow consistency shape (H, W, 2), got {consistency.shape}"
+                del height, width
+                for suffix, mask in (("fwd", consistency[..., 0]), ("bwd", consistency[..., 1])):
+                    mask_png = (mask.astype(bool).astype(np.uint8) * 255)
+                    _, mask_buffer = cv2.imencode(".png", mask_png)
+                    z.writestr(f"{frame_idx:05d}_{suffix}.png", mask_buffer.tobytes())
+
+
+def read_flow_consistency_artifacts(zip_file_path: Path) -> Iterator[tuple[int, str, torch.Tensor]]:
+    """
+    Read forward/backward optical-flow consistency masks from zipped PNG files.
+    """
+    with zipfile.ZipFile(zip_file_path, "r") as z:
+        for file_name in sorted(z.namelist()):
+            frame_idx = int(file_name.split("_")[0])
+            direction = file_name.split("_")[1].split(".")[0]
+            with z.open(file_name) as f:
+                mask_buffer = np.frombuffer(f.read(), dtype=np.uint8)
+                mask = cv2.imdecode(mask_buffer, cv2.IMREAD_UNCHANGED)
+                assert mask is not None, f"Failed to decode flow consistency mask {file_name}"
+                yield frame_idx, direction, torch.from_numpy(mask.copy() > 0)
+
+
 def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> None:
     """
     Save each attribute independently.
@@ -354,6 +470,15 @@ def save_artifacts(out_path: ArtifactPath, cached_final_stream: VideoStream) -> 
 
     # Save metric depth as zipped exr files.
     save_depth_artifacts(out_path, cached_final_stream)
+
+    # Save static-valid binary masks as zipped PNG files.
+    save_static_mask_artifacts(out_path, cached_final_stream)
+
+    # Save optical flow as zipped 16-bit PNG files.
+    save_flow_artifacts(out_path, cached_final_stream)
+
+    # Save optical-flow consistency masks as zipped PNG files.
+    save_flow_consistency_artifacts(out_path, cached_final_stream)
 
     # Save Instance mask as zipped PNG files.
     instance_list = [
