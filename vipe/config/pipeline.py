@@ -10,12 +10,16 @@ from pydantic import model_validator
 from vipe.config.base_schema import BaseConfigSchema, Field
 from vipe.config.slam import SLAMConfig
 
-FrameAttributeName = Literal["rgb", "instance", "depth", "pcd", "rectified"]
+FrameAttributeName = Literal["rgb", "instance", "mask", "depth", "pcd", "rectified", "empty"]
 
 
 class InstanceInitConfig(BaseConfigSchema):
     """Object and sky-mask initialization used by the segmentation stage."""
 
+    mode: Literal["text", "motion"] = Field(
+        default="text",
+        description="Use text-prompted segmentation or motion-driven dynamic-mask estimation.",
+    )
     kf_gap_sec: float = Field(
         gt=0.0,
         description="Minimum time gap, in seconds, between keyframes used to initialize instance segmentation.",
@@ -38,6 +42,27 @@ class InstanceInitConfig(BaseConfigSchema):
         ge=1,
         description="Track instances only every N-th frame and reuse the previous mask in between. "
         "Values above 1 speed up tracking at the cost of slightly stale masks on in-between frames.",
+    )
+    sam_points_per_side: int = Field(
+        default=16,
+        ge=1,
+        description="SAM grid density used by motion-driven dynamic-mask initialization.",
+    )
+    keep_motion_ratio: float = Field(
+        default=0.15,
+        gt=0.0,
+        le=1.0,
+        description="Fraction of high-motion regions kept for motion-driven mask initialization.",
+    )
+    flow_alpha: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Forward-flow weight used by motion-driven mask initialization.",
+    )
+    flow_beta: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Backward-flow weight used by motion-driven mask initialization.",
     )
 
 

@@ -446,6 +446,17 @@ def save_projection_video(
             instance_img = cv2.resize(instance_img, (img_w, img_h))
             yield cv2.addWeighted(rgb_img, 0.5, instance_img, 0.5, 0)
 
+    def get_mask_imgs():
+        for frame_data, rgb_img in zip(video_stream, get_rgb_imgs()):
+            assert isinstance(frame_data, VideoFrame)
+            if frame_data.mask is None:
+                yield na_img
+                continue
+            mask_img = frame_data.mask.cpu().numpy().astype(np.uint8)
+            mask_img = colorize_mask(mask_img)
+            mask_img = cv2.resize(mask_img, (img_w, img_h))
+            yield cv2.addWeighted(rgb_img, 0.5, mask_img, 0.5, 0)
+
     def get_empty_imgs():
         for _ in range(len(video_stream)):
             yield na_img
@@ -457,6 +468,7 @@ def save_projection_video(
                 "depth": get_depth_imgs(),
                 "pcd": get_pcd_imgs(),
                 "instance": get_instance_imgs(),
+                "mask": get_mask_imgs(),
                 "rectified": get_rectified_imgs(),
                 "empty": get_empty_imgs(),
             }[t]
