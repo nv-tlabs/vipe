@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from vipe.streams.base import VideoFrame
+from vipe.utils.model_cache import ModelCache
 
 from .seg_tracker import SegTracker
 
@@ -19,6 +20,7 @@ class TrackAnythingPipeline:
         mask_phrases: list[str],
         sam_points_per_side: int = 30,
         sam_run_gap: int = 10,
+        model_cache: ModelCache | None = None,
     ) -> None:
         # Prepare checkpoints.
         sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
@@ -74,6 +76,7 @@ class TrackAnythingPipeline:
                 "max_len_long_term": 9999,
                 "gpu_id": 0,
             },
+            model_cache=model_cache,
         )
         self.segtracker.restart_tracker()
         self.instance_phrase = {0: "background"}

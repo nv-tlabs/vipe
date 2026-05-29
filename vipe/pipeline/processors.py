@@ -35,6 +35,7 @@ from vipe.utils.depth import get_camera_rays
 from vipe.utils.geometry import project_points_to_panorama
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
+from vipe.utils.model_cache import get_model_cache
 from vipe.utils.morph import erode
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,9 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
         is_pinhole = camera_type == CameraType.PINHOLE
         weights = "pinhole" if is_pinhole else "distorted"
 
-        model = GeoCalib(weights=weights).cuda()
+        # GeoCalib is used purely for inference; cache the weights so they are
+        # loaded once and reused across streams instead of per video.
+        model = get_model_cache().get(f"geocalib/{weights}", lambda: GeoCalib(weights=weights).cuda())
         indexable_stream = CachedVideoStream(video_stream)
 
         if is_pinhole:
@@ -127,7 +130,12 @@ class TrackAnythingProcessor(StreamProcessor):
         if self.add_sky:
             self.mask_phrases.append(VideoFrame.SKY_PROMPT)
 
-        self.tracker = TrackAnythingPipeline(self.mask_phrases, sam_points_per_side=50, sam_run_gap=self.sam_run_gap)
+        self.tracker = TrackAnythingPipeline(
+            self.mask_phrases,
+            sam_points_per_side=50,
+            sam_run_gap=self.sam_run_gap,
+            model_cache=get_model_cache(),
+        )
         self.mask_expand = mask_expand
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:

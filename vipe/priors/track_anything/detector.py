@@ -7,6 +7,8 @@ import PIL
 import torch
 from torchvision.ops import box_convert
 
+from vipe.utils.model_cache import ModelCache
+
 from .groundingdino.config import config
 from .groundingdino.datasets import transforms as T
 from .groundingdino.models import build_model as build_grounding_dino
@@ -15,18 +17,27 @@ from .groundingdino.util.utils import clean_state_dict
 
 
 class Detector:
-    def __init__(self, device):
+    def __init__(self, device, model_cache: ModelCache | None = None):
         args = config
         args.device = device
         self.deivce = device
-        self.gd = build_grounding_dino(args)
 
-        checkpoint = torch.hub.load_state_dict_from_url(
-            "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
-            map_location="cpu",
-        )
-        self.gd.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-        self.gd.eval()
+        # GroundingDINO is stateless across frames, so its weights are cached
+        # and shared across streams.
+        def _build_gd():
+            gd = build_grounding_dino(args)
+            checkpoint = torch.hub.load_state_dict_from_url(
+                "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
+                map_location="cpu",
+            )
+            gd.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+            gd.eval()
+            return gd
+
+        if model_cache is not None:
+            self.gd = model_cache.get("track_anything/groundingdino_swint", _build_gd)
+        else:
+            self.gd = _build_gd()
 
     def image_transform_grounding(self, init_image):
         transform = T.Compose(

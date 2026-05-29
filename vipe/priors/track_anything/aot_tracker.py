@@ -7,6 +7,8 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 
+from vipe.utils.model_cache import ModelCache
+
 from .aot import config as engine_config
 from .aot.networks.engines import build_engine
 from .aot.networks.engines.aot_engine import AOTEngine, AOTInferEngine
@@ -17,10 +19,24 @@ from .aot.utils.checkpoint import load_network
 
 
 class AOTTracker(object):
-    def __init__(self, cfg, gpu_id=0):
+    def __init__(self, cfg, gpu_id=0, model_cache: ModelCache | None = None):
         self.gpu_id = gpu_id
-        self.model = build_vos_model(cfg.MODEL_VOS, cfg).cuda(gpu_id)
-        self.model, _ = load_network(self.model, cfg.TEST_CKPT_PATH, gpu_id)
+
+        # The VOS network holds only weights and is cached/shared across streams.
+        # The engine below owns the per-video memory bank (reference frames,
+        # masks, object ids), so it is always rebuilt to avoid leaking tracking
+        # state between videos.
+        def _build_aot_model():
+            model = build_vos_model(cfg.MODEL_VOS, cfg).cuda(gpu_id)
+            model, _ = load_network(model, cfg.TEST_CKPT_PATH, gpu_id)
+            model.eval()
+            return model
+
+        if model_cache is not None:
+            self.model = model_cache.get(f"track_anything/aot/{cfg.MODEL_VOS}/{cfg.TEST_CKPT_PATH}", _build_aot_model)
+        else:
+            self.model = _build_aot_model()
+
         self.engine = build_engine(
             cfg.MODEL_ENGINE,
             phase="eval",
@@ -179,11 +195,11 @@ class DeAOTTrackerInferEngine(DeAOTInferEngine):
         self.update_size()
 
 
-def get_aot(args):
+def get_aot(args, model_cache: ModelCache | None = None):
     # build vos engine
     cfg = engine_config.EngineConfig(args["phase"])
     cfg.TEST_CKPT_PATH = args["model_path"]
     cfg.TEST_LONG_TERM_MEM_GAP = args["long_term_mem_gap"]
     cfg.MAX_LEN_LONG_TERM = args["max_len_long_term"]
-    tracker = AOTTracker(cfg, args["gpu_id"])
+    tracker = AOTTracker(cfg, args["gpu_id"], model_cache=model_cache)
     return tracker

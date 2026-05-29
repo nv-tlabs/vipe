@@ -5,11 +5,13 @@
 import numpy as np
 import torch
 
+from vipe.utils.model_cache import ModelCache
+
 from .sam import SamAutomaticMaskGenerator, sam_model_registry
 
 
 class Segmentor:
-    def __init__(self, sam_args):
+    def __init__(self, sam_args, model_cache: ModelCache | None = None):
         """
         sam_args:
             sam_checkpoint: path of SAM checkpoint
@@ -17,8 +19,24 @@ class Segmentor:
             gpu_id: device
         """
         self.device = sam_args["gpu_id"]
-        self.sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
-        self.sam.to(device=self.device)
+
+        # The SAM network holds only weights (inference-only), so it is cached
+        # and shared across streams. The mask generator / predictor below wrap
+        # this network but hold per-frame image embedding state, so they are
+        # always rebuilt per instance.
+        def _build_sam():
+            sam = sam_model_registry[sam_args["model_type"]](checkpoint=sam_args["sam_checkpoint"])
+            sam.to(device=self.device)
+            sam.eval()
+            return sam
+
+        if model_cache is not None:
+            self.sam = model_cache.get(
+                f"track_anything/sam/{sam_args['model_type']}/{sam_args['sam_checkpoint']}", _build_sam
+            )
+        else:
+            self.sam = _build_sam()
+
         self.everything_generator = SamAutomaticMaskGenerator(model=self.sam, **sam_args["generator_args"])
         self.interactive_predictor = self.everything_generator.predictor
         self.have_embedded = False

@@ -29,6 +29,7 @@ from vipe.streams.base import FrameAttribute, ProcessedVideoStream, StreamProces
 from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
+from vipe.utils.model_cache import get_model_cache
 
 from .components.backend import SLAMBackend
 from .components.buffer import GraphBuffer
@@ -118,7 +119,13 @@ class SLAMSystem:
             Adding more views requires adding factors to the graph to keep the null-space. 
             This is currently not supported for now."""
 
-            self.metric_depth = make_depth_model(self.config.keyframe_depth)
+            # The keyframe depth model is inference-only; cache the weights so
+            # they are loaded once and reused across streams. The (cheap)
+            # PinholeDepthAdapter wrapper is still applied per stream.
+            keyframe_depth = self.config.keyframe_depth
+            self.metric_depth = get_model_cache().get(
+                f"depth/{keyframe_depth}", lambda: make_depth_model(keyframe_depth)
+            )
             if self.config.camera_type not in self.metric_depth.supported_camera_types:
                 self.metric_depth = PinholeDepthAdapter(self.metric_depth)
 

@@ -4,19 +4,21 @@
 
 import numpy as np
 
+from vipe.utils.model_cache import ModelCache
+
 from .aot_tracker import get_aot
 from .detector import Detector
 from .segmentor import Segmentor
 
 
 class SegTracker:
-    def __init__(self, segtracker_args, sam_args, aot_args) -> None:
+    def __init__(self, segtracker_args, sam_args, aot_args, model_cache: ModelCache | None = None) -> None:
         """
         Initialize SAM and AOT.
         """
-        self.sam = Segmentor(sam_args)
-        self.tracker = get_aot(aot_args)
-        self.detector = Detector(self.sam.device)
+        self.sam = Segmentor(sam_args, model_cache=model_cache)
+        self.tracker = get_aot(aot_args, model_cache=model_cache)
+        self.detector = Detector(self.sam.device, model_cache=model_cache)
         self.sam_gap = segtracker_args["sam_gap"]
         self.min_area = segtracker_args["min_area"]
         self.max_obj_num = segtracker_args["max_obj_num"]
