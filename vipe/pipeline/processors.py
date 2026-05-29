@@ -35,7 +35,7 @@ from vipe.utils.depth import get_camera_rays
 from vipe.utils.geometry import project_points_to_panorama
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
-from vipe.utils.model_cache import get_model_cache
+from vipe.utils.model_cache import ModelCache
 from vipe.utils.morph import erode
 
 logger = logging.getLogger(__name__)
@@ -73,15 +73,22 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
         video_stream: VideoStream,
         gap_sec: float = 1.0,
         camera_type: CameraType = CameraType.PINHOLE,
+        model_cache: ModelCache | None = None,
     ) -> None:
         super().__init__(video_stream, gap_sec)
 
         is_pinhole = camera_type == CameraType.PINHOLE
         weights = "pinhole" if is_pinhole else "distorted"
 
-        # GeoCalib is used purely for inference; cache the weights so they are
-        # loaded once and reused across streams instead of per video.
-        model = get_model_cache().get(f"geocalib/{weights}", lambda: GeoCalib(weights=weights).cuda())
+        # GeoCalib is used purely for inference; when a cache is provided the
+        # weights are loaded once and reused across streams instead of per video.
+        def _build_geocalib():
+            return GeoCalib(weights=weights).cuda()
+
+        if model_cache is not None:
+            model = model_cache.get(f"geocalib/{weights}", _build_geocalib)
+        else:
+            model = _build_geocalib()
         indexable_stream = CachedVideoStream(video_stream)
 
         if is_pinhole:
@@ -121,6 +128,7 @@ class TrackAnythingProcessor(StreamProcessor):
         add_sky: bool,
         sam_run_gap: int = 30,
         mask_expand: int = 5,
+        model_cache: ModelCache | None = None,
     ) -> None:
         # Defensive copy: prevent mutation of caller's list
         self.mask_phrases = list(mask_phrases)
@@ -134,7 +142,7 @@ class TrackAnythingProcessor(StreamProcessor):
             self.mask_phrases,
             sam_points_per_side=50,
             sam_run_gap=self.sam_run_gap,
-            model_cache=get_model_cache(),
+            model_cache=model_cache,
         )
         self.mask_expand = mask_expand
 

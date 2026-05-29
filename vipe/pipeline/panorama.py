@@ -256,6 +256,7 @@ class PanoramaAnnotationPipeline(Pipeline):
                         self.init_cfg.instance.phrases,
                         add_sky=self.init_cfg.instance.add_sky,
                         sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                        model_cache=self.model_cache,
                     )
                 ],
             )
@@ -276,7 +277,7 @@ class PanoramaAnnotationPipeline(Pipeline):
             slam_streams.append(ProcessedVideoStream(cached_video_stream, projectors).cache(online=True))
         rig_se3 = lt.stack(rig_transforms, dim=0)
 
-        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg)
+        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, model_cache=self.model_cache)
         slam_output = slam_pipeline.run(slam_streams, rig=rig_se3)
 
         # For visualization, we append the visualization of the full panorama.

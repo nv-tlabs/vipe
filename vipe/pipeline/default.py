@@ -66,13 +66,16 @@ class DefaultAnnotationPipeline(Pipeline):
         assert FrameAttribute.METRIC_DEPTH not in video_stream.attributes()
         assert FrameAttribute.INSTANCE not in video_stream.attributes()
 
-        init_processors.append(GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type))
+        init_processors.append(
+            GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type, model_cache=self.model_cache)
+        )
         if self.init_cfg.instance is not None:
             init_processors.append(
                 TrackAnythingProcessor(
                     self.init_cfg.instance.phrases,
                     add_sky=self.init_cfg.instance.add_sky,
                     sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    model_cache=self.model_cache,
                 )
             )
         return ProcessedVideoStream(video_stream, init_processors)
@@ -117,7 +120,7 @@ class DefaultAnnotationPipeline(Pipeline):
             self._add_init_processors(video_stream).cache("process", online=True) for video_stream in video_streams
         ]
 
-        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg)
+        slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, model_cache=self.model_cache)
         slam_output = slam_pipeline.run(slam_streams, rig=slam_rig, camera_type=self.camera_type)
 
         if self.return_payload:

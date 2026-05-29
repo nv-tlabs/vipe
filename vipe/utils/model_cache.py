@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Process-wide cache for heavy, stateless models.
+"""Cache for heavy, stateless models, owned by the pipeline.
 
 The annotation pipeline is run once per video stream, and several large
 networks (the metric depth model, GeoCalib, and the SAM / GroundingDINO / AOT
@@ -23,11 +23,13 @@ dominant cost of the gap between "Processing <name>" and the first progress
 bar tick.
 
 These networks are used strictly for inference (``eval()`` + ``no_grad``), so a
-single instance can be shared across all streams. ``ModelCache`` builds each
-model once, on first request, and hands back the same instance afterwards. Only
-the *weight-holding* networks are cached here; per-video state (SAM image
-embeddings, the AOT memory bank, tracking bookkeeping) is rebuilt per stream by
-the callers so nothing leaks between videos.
+single instance can be shared across all streams. A ``Pipeline`` holds one
+``ModelCache`` and threads it into the processors and the SLAM system it builds;
+the cache builds each model once, on first request, and hands back the same
+instance afterwards. Only the *weight-holding* networks are cached here;
+per-video state (SAM image embeddings, the AOT memory bank, tracking
+bookkeeping) is rebuilt per stream by the callers so nothing leaks between
+videos.
 """
 
 import logging
@@ -59,11 +61,3 @@ class ModelCache:
     def clear(self) -> None:
         """Drop all cached models (e.g. to release GPU memory)."""
         self._models.clear()
-
-
-_GLOBAL_CACHE = ModelCache()
-
-
-def get_model_cache() -> ModelCache:
-    """Return the process-wide model cache shared across all streams."""
-    return _GLOBAL_CACHE

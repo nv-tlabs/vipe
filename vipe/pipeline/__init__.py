@@ -24,6 +24,7 @@ from omegaconf import DictConfig
 
 from vipe.config import BaseConfigSchema
 from vipe.streams.base import MultiviewVideoList, VideoStream
+from vipe.utils.model_cache import ModelCache
 
 
 @dataclass(kw_only=True, slots=True)
@@ -37,6 +38,9 @@ class Pipeline(ABC):
     def __init__(self) -> None:
         self._return_payload = False
         self._return_output_streams = False
+        # Heavy inference models are loaded once into this cache and reused
+        # across every stream this pipeline processes.
+        self.model_cache = ModelCache()
 
     @property
     def return_payload(self) -> bool:

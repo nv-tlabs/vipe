@@ -15,12 +15,15 @@ def run(args: DictConfig) -> None:
     from vipe.pipeline import make_pipeline
     from vipe.utils.logging import configure_logging
 
+    # Build the pipeline once and reuse it across streams so that its cached
+    # models (depth, GeoCalib, TrackAnything networks) are loaded a single time.
+    pipeline = make_pipeline(typed_args.pipeline)
+
     # Process each video stream
     logger = configure_logging()
     for stream_idx in range(len(stream_list)):
         video_stream = stream_list[stream_idx]
         logger.info(f"Processing {video_stream.name()} ({stream_idx + 1} / {len(stream_list)})")
-        pipeline = make_pipeline(typed_args.pipeline)
         pipeline.run(video_stream)
         logger.info(f"Finished processing {video_stream.name()}")
 
