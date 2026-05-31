@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .modeling import Sam
 from .utils.transforms import ResizeLongestSide
@@ -59,6 +60,31 @@ class SamPredictor:
         ]
 
         self.set_torch_image(input_image_torch, image.shape[:2])
+
+    def set_image_tensor(self, image: torch.Tensor) -> None:
+        """
+        GPU-direct equivalent of set_image for an RGB HWC CUDA tensor.
+        Expects values in [0, 1] or [0, 255].
+        """
+        if not isinstance(image, torch.Tensor):
+            raise TypeError("set_image_tensor expects a torch.Tensor")
+        if image.ndim != 3 or image.shape[-1] != 3:
+            raise ValueError(f"expected HWC RGB tensor, got shape {tuple(image.shape)}")
+
+        original_size = tuple(image.shape[:2])
+        input_is_uint8 = image.dtype == torch.uint8
+        input_image = image.to(device=self.device, dtype=torch.float32)
+        if not input_is_uint8:
+            input_image = input_image * 255.0
+        input_image = input_image.permute(2, 0, 1).unsqueeze(0).contiguous()
+        target_size = self.transform.get_preprocess_shape(
+            original_size[0],
+            original_size[1],
+            self.model.image_encoder.img_size,
+        )
+        input_image = F.interpolate(input_image, size=target_size, mode="bilinear", align_corners=False, antialias=True)
+
+        self.set_torch_image(input_image, original_size)
 
     @torch.no_grad()
     def set_torch_image(

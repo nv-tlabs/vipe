@@ -15,6 +15,7 @@
 
 
 import logging
+import os
 import pickle
 from pathlib import Path
 
@@ -67,7 +68,7 @@ class DefaultAnnotationPipeline(Pipeline):
         assert FrameAttribute.INSTANCE not in video_stream.attributes()
 
         init_processors.append(GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type))
-        if self.init_cfg.instance is not None:
+        if self.init_cfg.instance is not None and os.environ.get("VIPE_TRACK_ANYTHING_DISABLE") != "1":
             init_processors.append(
                 TrackAnythingProcessor(
                     self.init_cfg.instance.phrases,

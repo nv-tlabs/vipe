@@ -2,15 +2,30 @@
 # https://github.com/z-x-yang/Segment-and-Track-Anything
 # Licensed under the AGPL-3.0 License. See THIRD_PARTY_LICENSES.md for details.
 
+import os
 from pathlib import Path
 
 import gdown
-import numpy as np
 import torch
+import torch.nn.functional as F
 
 from vipe.streams.base import VideoFrame
 
 from .seg_tracker import SegTracker
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return float(value)
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return int(value)
 
 
 class TrackAnythingPipeline:
@@ -46,6 +61,12 @@ class TrackAnythingPipeline:
         self.frame_idx = 0
         self.caption = "".join([m + "." for m in mask_phrases])
         self.sam_run_gap = sam_run_gap
+        self.input_scale = _env_float("VIPE_TRACK_ANYTHING_INPUT_SCALE", 1.0)
+        if self.input_scale <= 0:
+            raise ValueError("VIPE_TRACK_ANYTHING_INPUT_SCALE must be positive")
+        self.aot_stride = max(1, _env_int("VIPE_TRACK_ANYTHING_AOT_STRIDE", 1))
+        self._last_pred_mask_tensor: torch.Tensor | None = None
+        self._last_pred_phrase: dict[int, str] = {}
         self.segtracker = SegTracker(
             segtracker_args={
                 "sam_gap": sam_run_gap,  # the interval to run sam to segment new objects
@@ -91,11 +112,31 @@ class TrackAnythingPipeline:
             dict[int, str]: The phrases associated with each object id.
         """
 
-        # Convert to RGB numpy images
-        rgb_frame = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
+        should_periodic_sam = self.frame_idx > 0 and self.frame_idx % self.sam_run_gap == 0
+        if self.aot_stride > 1 and not should_periodic_sam and self._last_pred_mask_tensor is not None:
+            if self.frame_idx % self.aot_stride != 0:
+                self.frame_idx += 1
+                return self._last_pred_mask_tensor.clone(), dict(self._last_pred_phrase)
+
+        if not frame_data.rgb.is_cuda:
+            raise RuntimeError("GPU Track Anything path requires frame.rgb to be a CUDA tensor")
+
+        rgb_frame = frame_data.rgb
+        original_shape = tuple(rgb_frame.shape[:2])
+        if self.input_scale != 1.0:
+            scaled_h = max(1, int(round(original_shape[0] * self.input_scale)))
+            scaled_w = max(1, int(round(original_shape[1] * self.input_scale)))
+            rgb_bchw = rgb_frame.permute(2, 0, 1).unsqueeze(0)
+            if self.input_scale < 1.0:
+                rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="area")
+            else:
+                rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="bilinear", align_corners=False)
+            rgb_frame = rgb_bchw.squeeze(0).permute(1, 2, 0).contiguous()
 
         if self.frame_idx == 0:
-            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
+            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
+                rgb_frame, self.caption, **self.threshold_args
+            )
             self.segtracker.add_reference(rgb_frame, pred_mask)
             self.instance_phrase.update(pred_phrase)
 
@@ -103,8 +144,8 @@ class TrackAnythingPipeline:
             seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
             track_mask = self.segtracker.track(rgb_frame)
             new_obj_mask, seg_to_new_mapping = self.segtracker.find_new_objs(track_mask, seg_mask)
-            if np.sum(new_obj_mask > 0) > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
-                new_obj_mask = np.zeros_like(new_obj_mask)
+            if torch.sum(new_obj_mask > 0).item() > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
+                new_obj_mask = torch.zeros_like(new_obj_mask)
                 seg_to_new_mapping = {}
             pred_mask = track_mask + new_obj_mask
             pred_phrase = {seg_to_new_mapping[k]: v for k, v in pred_phrase.items() if k in seg_to_new_mapping}
@@ -116,7 +157,19 @@ class TrackAnythingPipeline:
 
         self.frame_idx += 1
 
-        pred_mask_unique = np.unique(pred_mask)
-        pred_phrase = {k: self.instance_phrase[k] for k in pred_mask_unique}
+        pred_mask_unique = torch.unique(pred_mask).detach().cpu().tolist()
+        pred_phrase = {
+            int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase
+        }
 
-        return torch.from_numpy(pred_mask).cuda(), pred_phrase
+        if self.input_scale != 1.0:
+            pred_mask = F.interpolate(
+                pred_mask[None, None].float(),
+                size=original_shape,
+                mode="nearest",
+            )[0, 0].to(torch.uint8)
+
+        pred_mask = pred_mask.to(dtype=torch.uint8, device=rgb_frame.device)
+        self._last_pred_mask_tensor = pred_mask
+        self._last_pred_phrase = dict(pred_phrase)
+        return pred_mask, pred_phrase

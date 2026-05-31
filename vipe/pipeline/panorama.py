@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+import os
 import pickle
 from pathlib import Path
 
@@ -248,7 +249,7 @@ class PanoramaAnnotationPipeline(Pipeline):
         rig_names = ["left"] * len(rig_transforms)
 
         # Add init processors if necessary
-        if self.init_cfg.instance is not None:
+        if self.init_cfg.instance is not None and os.environ.get("VIPE_TRACK_ANYTHING_DISABLE") != "1":
             video_stream = ProcessedVideoStream(
                 video_stream,
                 [

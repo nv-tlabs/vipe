@@ -15,6 +15,7 @@
 
 
 import logging
+import os
 from typing import Any, Iterable, Iterator, cast
 
 import numpy as np
@@ -120,7 +121,8 @@ class TrackAnythingProcessor(StreamProcessor):
         mask_expand: int = 5,
     ) -> None:
         self.mask_phrases = mask_phrases
-        self.sam_run_gap = sam_run_gap
+        sam_gap_multiplier = float(os.environ.get("VIPE_TRACK_ANYTHING_SAM_GAP_MULTIPLIER", "1.0"))
+        self.sam_run_gap = max(1, int(round(sam_run_gap * sam_gap_multiplier)))
         self.add_sky = add_sky
 
         if self.add_sky:
