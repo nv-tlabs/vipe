@@ -161,8 +161,8 @@ __global__ void altcorr_index_forward_kernel(
     const int W2 = fmap2.size(3);
     const int C = fmap1.size(4);
 
-    __shared__ scalar_t f1[CHANNEL_STRIDE][BLOCK_HW];
-    __shared__ scalar_t f2[CHANNEL_STRIDE][BLOCK_HW];
+    __shared__ scalar_t f1[CHANNEL_STRIDE][BLOCK_HW + 1];
+    __shared__ scalar_t f2[CHANNEL_STRIDE][BLOCK_HW + 1];
 
     __shared__ float x2s[BLOCK_HW];
     __shared__ float y2s[BLOCK_HW];

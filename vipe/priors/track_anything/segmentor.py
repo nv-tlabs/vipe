@@ -49,6 +49,12 @@ class Segmentor:
             self.have_embedded = True
 
     @torch.no_grad()
+    def set_image_tensor(self, image: torch.Tensor):
+        if not self.have_embedded:
+            self.interactive_predictor.set_image_tensor(image)
+            self.have_embedded = True
+
+    @torch.no_grad()
     def interactive_predict(self, prompts, mode, multimask=True):
         assert self.have_embedded, "image embedding for sam need be set before predict."
 
@@ -123,3 +129,52 @@ class Segmentor:
         mask = masks[np.argmax(scores)]
 
         return [mask]
+
+    @torch.no_grad()
+    def segment_with_box_tensor(
+        self,
+        origin_frame: torch.Tensor,
+        boxes: torch.Tensor,
+        reset_image: bool = False,
+    ) -> torch.Tensor:
+        if not isinstance(origin_frame, torch.Tensor):
+            raise TypeError("GPU SAM path requires origin_frame as a torch.Tensor")
+        if not isinstance(boxes, torch.Tensor):
+            raise TypeError("GPU SAM path requires boxes as a torch.Tensor")
+
+        if reset_image:
+            self.interactive_predictor.set_image_tensor(origin_frame)
+            self.have_embedded = True
+        else:
+            self.set_image_tensor(origin_frame)
+
+        boxes = boxes.to(device=self.interactive_predictor.device, dtype=torch.float32)
+        transformed_boxes = self.interactive_predictor.transform.apply_boxes_torch(
+            boxes,
+            self.interactive_predictor.original_size,
+        )
+
+        _masks, scores, logits = self.interactive_predictor.predict_torch(
+            point_coords=None,
+            point_labels=None,
+            boxes=transformed_boxes,
+            mask_input=None,
+            multimask_output=True,
+            return_logits=True,
+        )
+
+        batch_indices = torch.arange(scores.shape[0], device=scores.device)
+        best_indices = scores.argmax(dim=1)
+        best_logits = logits[batch_indices, best_indices].unsqueeze(1)
+
+        masks, scores, _logits = self.interactive_predictor.predict_torch(
+            point_coords=None,
+            point_labels=None,
+            boxes=transformed_boxes,
+            mask_input=best_logits,
+            multimask_output=True,
+            return_logits=False,
+        )
+
+        best_indices = scores.argmax(dim=1)
+        return masks[batch_indices, best_indices].to(torch.uint8)

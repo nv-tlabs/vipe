@@ -5,7 +5,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision import transforms
+
 
 from vipe.utils.model_cache import ModelCache
 
@@ -14,7 +14,6 @@ from .aot.networks.engines import build_engine
 from .aot.networks.engines.aot_engine import AOTEngine, AOTInferEngine
 from .aot.networks.engines.deaot_engine import DeAOTEngine, DeAOTInferEngine
 from .aot.networks.models import build_vos_model
-from .aot.transforms import video_transforms as tr
 from .aot.utils.checkpoint import load_network
 
 
@@ -46,34 +45,80 @@ class AOTTracker(object):
             long_term_mem_gap=cfg.TEST_LONG_TERM_MEM_GAP,
             max_len_long_term=cfg.MAX_LEN_LONG_TERM,
         )
-
-        self.transform = transforms.Compose(
-            [
-                tr.MultiRestrictSize(
-                    cfg.TEST_MAX_SHORT_EDGE,
-                    cfg.TEST_MAX_LONG_EDGE,
-                    cfg.TEST_FLIP,
-                    cfg.TEST_MULTISCALE,
-                    cfg.MODEL_ALIGN_CORNERS,
-                ),
-                tr.MultiToTensor(),
-            ]
-        )
+        self.max_short_edge = cfg.TEST_MAX_SHORT_EDGE
+        self.max_long_edge = cfg.TEST_MAX_LONG_EDGE
+        self.flip = cfg.TEST_FLIP
+        self.multi_scale = cfg.TEST_MULTISCALE
+        self.align_corners = cfg.MODEL_ALIGN_CORNERS
+        self.max_stride = 16
 
         self.model.eval()
 
+    def _restricted_size(self, height: int, width: int) -> tuple[int, int]:
+        if len(self.multi_scale) != 1 or self.multi_scale[0] != 1:
+            raise NotImplementedError("GPU AOT path currently expects a single test scale of 1")
+        if self.flip:
+            raise NotImplementedError("GPU AOT path does not support test-time flip")
+
+        new_h, new_w = float(height), float(width)
+
+        if self.max_short_edge is not None:
+            short_edge = min(height, width)
+            if short_edge > self.max_short_edge:
+                scale = float(self.max_short_edge) / short_edge
+                new_h *= scale
+                new_w *= scale
+
+        if self.max_long_edge is not None:
+            long_edge = max(new_h, new_w)
+            if long_edge > self.max_long_edge:
+                scale = float(self.max_long_edge) / long_edge
+                new_h *= scale
+                new_w *= scale
+
+        new_h = int(new_h)
+        new_w = int(new_w)
+
+        if self.align_corners:
+            if (new_h - 1) % self.max_stride != 0:
+                new_h = int(np.around((new_h - 1) / self.max_stride) * self.max_stride + 1)
+            if (new_w - 1) % self.max_stride != 0:
+                new_w = int(np.around((new_w - 1) / self.max_stride) * self.max_stride + 1)
+        else:
+            if new_h % self.max_stride != 0:
+                new_h = int(np.around(new_h / self.max_stride) * self.max_stride)
+            if new_w % self.max_stride != 0:
+                new_w = int(np.around(new_w / self.max_stride) * self.max_stride)
+
+        return new_h, new_w
+
+    def _prepare_image_tensor(self, image: torch.Tensor) -> torch.Tensor:
+        if not isinstance(image, torch.Tensor):
+            raise TypeError("GPU AOT path requires image as a CUDA torch.Tensor")
+        if image.ndim != 3 or image.shape[-1] != 3:
+            raise ValueError(f"expected HWC RGB image tensor, got shape {tuple(image.shape)}")
+
+        device = torch.device(f"cuda:{self.gpu_id}")
+        input_is_uint8 = image.dtype == torch.uint8
+        image = image.to(device=device, dtype=torch.float32)
+        if input_is_uint8:
+            image = image / 255.0
+
+        image = image.permute(2, 0, 1).unsqueeze(0).contiguous()
+        new_h, new_w = self._restricted_size(image.shape[-2], image.shape[-1])
+        if (new_h, new_w) != tuple(image.shape[-2:]):
+            image = F.interpolate(image, size=(new_h, new_w), mode="bicubic", align_corners=False)
+
+        mean = image.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
+        std = image.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
+        return (image - mean) / std
+
     @torch.no_grad()
     def add_reference_frame(self, frame, mask, obj_nums, frame_step, incremental=False):
-        # mask = cv2.resize(mask, frame.shape[:2][::-1], interpolation = cv2.INTER_NEAREST)
-
-        sample = {
-            "current_img": frame,
-            "current_label": mask,
-        }
-
-        sample = self.transform(sample)
-        frame = sample[0]["current_img"].unsqueeze(0).float().cuda(self.gpu_id)
-        mask = sample[0]["current_label"].unsqueeze(0).float().cuda(self.gpu_id)
+        frame = self._prepare_image_tensor(frame)
+        if not isinstance(mask, torch.Tensor):
+            raise TypeError("GPU AOT path requires mask as a CUDA torch.Tensor")
+        mask = mask.to(device=frame.device, dtype=torch.float32)[None, None]
         _mask = F.interpolate(mask, size=frame.shape[-2:], mode="nearest")
 
         if incremental:
@@ -84,9 +129,7 @@ class AOTTracker(object):
     @torch.no_grad()
     def track(self, image):
         output_height, output_width = image.shape[0], image.shape[1]
-        sample = {"current_img": image}
-        sample = self.transform(sample)
-        image = sample[0]["current_img"].unsqueeze(0).float().cuda(self.gpu_id)
+        image = self._prepare_image_tensor(image)
         self.engine.match_propogate_one_frame(image)
         pred_logit = self.engine.decode_current_logits((output_height, output_width))
 

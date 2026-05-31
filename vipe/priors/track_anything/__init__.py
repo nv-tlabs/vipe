@@ -5,7 +5,6 @@
 from pathlib import Path
 
 import gdown
-import numpy as np
 import torch
 
 from vipe.streams.base import VideoFrame
@@ -94,11 +93,15 @@ class TrackAnythingPipeline:
             dict[int, str]: The phrases associated with each object id.
         """
 
-        # Convert to RGB numpy images
-        rgb_frame = (frame_data.rgb.cpu().numpy() * 255).astype(np.uint8)
+        if not frame_data.rgb.is_cuda:
+            raise RuntimeError("GPU Track Anything path requires frame.rgb to be a CUDA tensor")
+
+        rgb_frame = frame_data.rgb
 
         if self.frame_idx == 0:
-            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
+            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
+                rgb_frame, self.caption, **self.threshold_args
+            )
             self.segtracker.add_reference(rgb_frame, pred_mask)
             self.instance_phrase.update(pred_phrase)
 
@@ -106,8 +109,8 @@ class TrackAnythingPipeline:
             seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
             track_mask = self.segtracker.track(rgb_frame)
             new_obj_mask, seg_to_new_mapping = self.segtracker.find_new_objs(track_mask, seg_mask)
-            if np.sum(new_obj_mask > 0) > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
-                new_obj_mask = np.zeros_like(new_obj_mask)
+            if torch.sum(new_obj_mask > 0).item() > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
+                new_obj_mask = torch.zeros_like(new_obj_mask)
                 seg_to_new_mapping = {}
             pred_mask = track_mask + new_obj_mask
             pred_phrase = {seg_to_new_mapping[k]: v for k, v in pred_phrase.items() if k in seg_to_new_mapping}
@@ -119,7 +122,10 @@ class TrackAnythingPipeline:
 
         self.frame_idx += 1
 
-        pred_mask_unique = np.unique(pred_mask)
-        pred_phrase = {k: self.instance_phrase[k] for k in pred_mask_unique}
+        pred_mask_unique = torch.unique(pred_mask).detach().cpu().tolist()
+        pred_phrase = {
+            int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase
+        }
 
-        return torch.from_numpy(pred_mask).cuda(), pred_phrase
+        pred_mask = pred_mask.to(dtype=torch.uint8, device=rgb_frame.device)
+        return pred_mask, pred_phrase
