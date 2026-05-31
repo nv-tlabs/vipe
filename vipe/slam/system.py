@@ -29,6 +29,7 @@ from vipe.streams.base import FrameAttribute, ProcessedVideoStream, StreamProces
 from vipe.utils.cameras import CameraType
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
+from vipe.utils.nvtx import nvtx_range
 
 from .components.backend import SLAMBackend
 from .components.buffer import GraphBuffer
@@ -142,28 +143,35 @@ class SLAMSystem:
     ):
         assert phase in [1, 2]
         kf_idx = self.buffer.n_frames
-        self.buffer.tstamp[kf_idx] = frame_idx
-        self.buffer.images[kf_idx] = images
-        self.buffer.fmaps[kf_idx] = self.droid_net.encode_features(images)
-        self.buffer.nets[kf_idx], self.buffer.inps[kf_idx] = self.droid_net.encode_context(images)
-        if buffer_masks is not None:
-            self.buffer.masks[kf_idx] = buffer_masks
+        with nvtx_range(f"slam.add_keyframe.phase{phase}.store_inputs"):
+            self.buffer.tstamp[kf_idx] = frame_idx
+            self.buffer.images[kf_idx] = images
+            if buffer_masks is not None:
+                self.buffer.masks[kf_idx] = buffer_masks
 
-        for view_idx, frame_data in enumerate(frame_data_list):
-            if kf_idx == 0:
-                self.buffer.intrinsics[view_idx] = unpack_optional(frame_data.intrinsics)
+        with nvtx_range(f"slam.add_keyframe.phase{phase}.encode_features"):
+            self.buffer.fmaps[kf_idx] = self.droid_net.encode_features(images)
 
-            if frame_data.metric_depth is not None:
-                disp_sens = frame_data.metric_depth[3::8, 3::8]
-                disp_sens = torch.where(disp_sens > 0, disp_sens.reciprocal(), disp_sens)
-                assert not self.config.optimize_intrinsics
-                self.buffer.disps_sens[kf_idx, view_idx] = disp_sens
+        with nvtx_range(f"slam.add_keyframe.phase{phase}.encode_context"):
+            self.buffer.nets[kf_idx], self.buffer.inps[kf_idx] = self.droid_net.encode_context(images)
 
-            if frame_data.pose is not None and phase == 1:
-                self.buffer.poses[kf_idx] = (SE3(self.buffer.rig[view_idx]) * frame_data.pose.inv()).data
+        with nvtx_range(f"slam.add_keyframe.phase{phase}.metadata"):
+            for view_idx, frame_data in enumerate(frame_data_list):
+                if kf_idx == 0:
+                    self.buffer.intrinsics[view_idx] = unpack_optional(frame_data.intrinsics)
+
+                if frame_data.metric_depth is not None:
+                    disp_sens = frame_data.metric_depth[3::8, 3::8]
+                    disp_sens = torch.where(disp_sens > 0, disp_sens.reciprocal(), disp_sens)
+                    assert not self.config.optimize_intrinsics
+                    self.buffer.disps_sens[kf_idx, view_idx] = disp_sens
+
+                if frame_data.pose is not None and phase == 1:
+                    self.buffer.poses[kf_idx] = (SE3(self.buffer.rig[view_idx]) * frame_data.pose.inv()).data
 
         if phase == 1:
-            self.buffer.update_disps_sens(self.metric_depth, frame_idx=kf_idx)
+            with nvtx_range("slam.add_keyframe.phase1.update_disps_sens"):
+                self.buffer.update_disps_sens(self.metric_depth, frame_idx=kf_idx)
         self.buffer.n_frames += 1
 
     def _log_final(self, video_streams: list[VideoStream], filled_return: FilledReturn):
@@ -242,7 +250,8 @@ class SLAMSystem:
             }
         )
 
-        self._build_components()
+        with nvtx_range("slam.build_components"):
+            self._build_components()
 
         if self.visualize:
             rr.init("ViPE Visualization", spawn=True, recording_id=uuid.uuid4())
@@ -251,51 +260,65 @@ class SLAMSystem:
         # Run frontend to get attributes initialization. This will also populate attribute buffers.
         frame_data_list: list[VideoFrame]
         frame_idx: int = 0
-        for frame_idx, frame_data_list in pbar(
-            enumerate(zip(*video_streams)), desc="SLAM Pass (1/2)", total=total_n_frames
-        ):
-            images, buffer_masks = self._precompute_features(frame_data_list)
+        with nvtx_range("slam.pass1"):
+            for frame_idx, frame_data_list in pbar(
+                enumerate(zip(*video_streams)), desc="SLAM Pass (1/2)", total=total_n_frames
+            ):
+                with nvtx_range("slam.pass1.precompute_features"):
+                    images, buffer_masks = self._precompute_features(frame_data_list)
 
-            self.sparse_tracks.track_image(frame_data_list)
+                with nvtx_range("slam.pass1.sparse_tracks"):
+                    self.sparse_tracks.track_image(frame_data_list)
 
-            if self.motion_filter.check(images, buffer_masks) or frame_idx == total_n_frames - 1:
-                is_keyframe = True
-                self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=1)
-            else:
-                is_keyframe = False
+                with nvtx_range("slam.pass1.motion_filter"):
+                    add_keyframe = self.motion_filter.check(images, buffer_masks) or frame_idx == total_n_frames - 1
 
-            self.frontend.run()
+                if add_keyframe:
+                    is_keyframe = True
+                    self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=1)
+                else:
+                    is_keyframe = False
 
-            if self.visualize:
-                self.buffer.log(self.config.map_filter_thresh)
-                self.frontend.graph.log()
+                with nvtx_range("slam.pass1.frontend_run"):
+                    self.frontend.run()
 
-            # Run the backend in between to correct intrinsics and extrinsics in advance
-            # to avoid large errors and local minima.
-            if self.buffer.n_frames in self.config.frontend_backend_iters and is_keyframe:
-                self.backend.run_if_necessary(5, log=self.visualize)
+                if self.visualize:
+                    self.buffer.log(self.config.map_filter_thresh)
+                    self.frontend.graph.log()
+
+                # Run the backend in between to correct intrinsics and extrinsics in advance
+                # to avoid large errors and local minima.
+                if self.buffer.n_frames in self.config.frontend_backend_iters and is_keyframe:
+                    with nvtx_range("slam.pass1.backend_run_if_necessary"):
+                        self.backend.run_if_necessary(5, log=self.visualize)
 
         # Tracks can be determined earlier since it's fixed after frontend.
         if self.visualize:
             self.buffer.log_tracks()
 
         # Run the backend to perform a global BA over the keyframes.
-        self.backend.run(7, log=self.visualize)
+        with nvtx_range("slam.backend_run.initial"):
+            self.backend.run(7, log=self.visualize)
 
         # Run backend again with a new graph and cleared GRU states.
-        self.backend.run(self.config.backend_iters, update_depth=False, log=self.visualize)
+        with nvtx_range("slam.backend_run.final"):
+            self.backend.run(self.config.backend_iters, update_depth=False, log=self.visualize)
 
         # Infill poses and attributes for non-keyframe frames.
-        self.inner_filler.set_start_idx(self.buffer.n_frames)
-        for frame_idx, frame_data_list in pbar(
-            enumerate(zip(*video_streams)), desc="SLAM Pass (2/2)", total=total_n_frames
-        ):
-            images, buffer_masks = self._precompute_features(frame_data_list)
-            self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=2)
-            if self.inner_filler.check() or frame_idx == total_n_frames - 1:
-                self.inner_filler.compute()
+        with nvtx_range("slam.pass2"):
+            self.inner_filler.set_start_idx(self.buffer.n_frames)
+            for frame_idx, frame_data_list in pbar(
+                enumerate(zip(*video_streams)), desc="SLAM Pass (2/2)", total=total_n_frames
+            ):
+                with nvtx_range("slam.pass2.precompute_features"):
+                    images, buffer_masks = self._precompute_features(frame_data_list)
+                self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=2)
+                if self.inner_filler.check() or frame_idx == total_n_frames - 1:
+                    with nvtx_range("slam.pass2.inner_filler_compute"):
+                        self.inner_filler.compute()
 
-        filled_return = self.inner_filler.get_result()
+        with nvtx_range("slam.inner_filler_get_result"):
+            filled_return = self.inner_filler.get_result()
 
         # This means the iterator is exhausted early than expected in the above loop.
         # Warn user to use cached video stream.
@@ -305,13 +328,15 @@ class SLAMSystem:
         if self.visualize:
             self._log_final(video_streams, filled_return)
 
-        slam_map = self.buffer.extract_slam_map(filter_thresh=self.config.map_filter_thresh)
-        slam_map.backend_graph = self.backend.last_graph
+        with nvtx_range("slam.extract_slam_map"):
+            slam_map = self.buffer.extract_slam_map(filter_thresh=self.config.map_filter_thresh)
+            slam_map.backend_graph = self.backend.last_graph
 
         # Scale back the intrinsics to the original size.
-        original_intrinsics = torch.stack(
-            [resizer.recover_intrinsics(self.buffer.intrinsics[v]) for v, resizer in enumerate(resizers)]
-        )
+        with nvtx_range("slam.recover_intrinsics"):
+            original_intrinsics = torch.stack(
+                [resizer.recover_intrinsics(self.buffer.intrinsics[v]) for v, resizer in enumerate(resizers)]
+            )
 
         return SLAMOutput(
             trajectory=filled_return.poses.inv(),

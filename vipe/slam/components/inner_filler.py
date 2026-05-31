@@ -25,6 +25,7 @@ from omegaconf import DictConfig
 
 from vipe.ext import lietorch as lt
 from vipe.ext.lietorch import SE3
+from vipe.utils.nvtx import nvtx_range
 
 from ..networks.droid_net import DroidNet
 from .buffer import GraphBuffer
@@ -63,56 +64,63 @@ class InnerFiller:
         return self.video.n_frames - self.start_idx >= self.args.infill_chunk_size
 
     def compute(self):
-        total_frames = self.video.n_frames
+        with nvtx_range("slam.inner_filler.compute"):
+            total_frames = self.video.n_frames
 
-        # Setup initial value (for pose and disp)
-        m_tstamp = self.video.tstamp[self.start_idx : total_frames]
-        n_tstamp = self.video.tstamp[: self.start_idx]
+            # Setup initial value (for pose and disp)
+            with nvtx_range("slam.inner_filler.compute.init_pose"):
+                m_tstamp = self.video.tstamp[self.start_idx : total_frames]
+                n_tstamp = self.video.tstamp[: self.start_idx]
 
-        # Find left (inclusive) nearest keyframe
-        t0 = torch.searchsorted(n_tstamp, m_tstamp, right=True) - 1
-        t1 = torch.where(t0 < self.start_idx - 1, t0 + 1, t0)
+                # Find left (inclusive) nearest keyframe
+                t0 = torch.searchsorted(n_tstamp, m_tstamp, right=True) - 1
+                t1 = torch.where(t0 < self.start_idx - 1, t0 + 1, t0)
 
-        d_time = n_tstamp[t1] - n_tstamp[t0] + 1e-3  # Avoid if time is out of bound of kfs
-        n_pose = SE3(self.video.poses[: self.start_idx])
-        d_pose = n_pose[t1] * n_pose[t0].inv()
-        vel = d_pose.log() / d_time.unsqueeze(-1)
-        w = vel * (m_tstamp - n_tstamp[t0]).unsqueeze(-1)
-        m_pose = SE3.exp(w) * n_pose[t0]
+                d_time = n_tstamp[t1] - n_tstamp[t0] + 1e-3  # Avoid if time is out of bound of kfs
+                n_pose = SE3(self.video.poses[: self.start_idx])
+                d_pose = n_pose[t1] * n_pose[t0].inv()
+                vel = d_pose.log() / d_time.unsqueeze(-1)
+                w = vel * (m_tstamp - n_tstamp[t0]).unsqueeze(-1)
+                m_pose = SE3.exp(w) * n_pose[t0]
 
-        self.video.poses[self.start_idx : total_frames] = m_pose.data
+                self.video.poses[self.start_idx : total_frames] = m_pose.data
 
-        if self.args.infill_dense_disp:
-            self.video.disps[self.start_idx : total_frames] = self.video.disps[t0].mean(dim=[2, 3], keepdim=True)
-            self.video.disps[self.start_idx : total_frames] = torch.where(
-                self.video.disps_sens[self.start_idx : total_frames] > 0,
-                self.video.disps_sens[self.start_idx : total_frames],
-                self.video.disps[self.start_idx : total_frames],
-            )
+            if self.args.infill_dense_disp:
+                with nvtx_range("slam.inner_filler.compute.init_dense_disp"):
+                    self.video.disps[self.start_idx : total_frames] = self.video.disps[t0].mean(
+                        dim=[2, 3], keepdim=True
+                    )
+                    self.video.disps[self.start_idx : total_frames] = torch.where(
+                        self.video.disps_sens[self.start_idx : total_frames] > 0,
+                        self.video.disps_sens[self.start_idx : total_frames],
+                        self.video.disps[self.start_idx : total_frames],
+                    )
 
-        # Build factor graph and optimize for the interpolated information.
-        graph = FactorGraph(
-            self.net,
-            self.video,
-            self.device,
-            max_factors=-1,
-            incremental=True,
-            cross_view=False,  # No need for interpolation.
-        )
-        infill_inds = torch.arange(self.start_idx, total_frames).to(self.device)
-        graph.add_factors(t0, infill_inds)
-        graph.add_factors(t1, infill_inds)
-        if self.args.infill_dense_disp:
-            graph.add_factors(infill_inds, t0)
-            graph.add_factors(infill_inds, t1)
+            # Build factor graph and optimize for the interpolated information.
+            with nvtx_range("slam.inner_filler.compute.build_graph"):
+                graph = FactorGraph(
+                    self.net,
+                    self.video,
+                    self.device,
+                    max_factors=-1,
+                    incremental=True,
+                    cross_view=False,  # No need for interpolation.
+                )
+                infill_inds = torch.arange(self.start_idx, total_frames).to(self.device)
+                graph.add_factors(t0, infill_inds)
+                graph.add_factors(t1, infill_inds)
+                if self.args.infill_dense_disp:
+                    graph.add_factors(infill_inds, t0)
+                    graph.add_factors(infill_inds, t1)
 
-        for _ in range(10):
-            graph.update(
-                self.start_idx,
-                total_frames,
-                motion_only=not self.args.infill_dense_disp,
-                limited_disp=True,
-            )
+            with nvtx_range("slam.inner_filler.compute.graph_update"):
+                for _ in range(10):
+                    graph.update(
+                        self.start_idx,
+                        total_frames,
+                        motion_only=not self.args.infill_dense_disp,
+                        limited_disp=True,
+                    )
 
         # (Optional) Metric computation of keyframe optimized disp and its original disp.
         # This will reflect the stability of the optimization.
@@ -121,14 +129,15 @@ class InnerFiller:
         # n_kf_disps = self.video.disps[: self.start_idx][t0[m_kf_mask]]
         # print("Disparity diff", torch.mean(torch.abs(m_kf_disps - n_kf_disps)))
 
-        current_poses = SE3(self.video.poses[self.start_idx : total_frames].clone())
-        self.filled_poses.append(current_poses)
+            with nvtx_range("slam.inner_filler.compute.store_result"):
+                current_poses = SE3(self.video.poses[self.start_idx : total_frames].clone())
+                self.filled_poses.append(current_poses)
 
-        if self.args.infill_dense_disp:
-            current_dense_disps = self.video.disps[self.start_idx : total_frames].clone()
-            self.filled_dense_disps.append(current_dense_disps)
+                if self.args.infill_dense_disp:
+                    current_dense_disps = self.video.disps[self.start_idx : total_frames].clone()
+                    self.filled_dense_disps.append(current_dense_disps)
 
-        self.video.n_frames = self.start_idx
+                self.video.n_frames = self.start_idx
 
     def get_result(self) -> FilledReturn:
         return FilledReturn(

@@ -26,6 +26,7 @@ import torch
 from einops import rearrange
 
 from vipe.ext.lietorch import SE3
+from vipe.utils.nvtx import nvtx_range
 
 from ..networks.droid_net import AltCorrBlock, CorrBlock, DroidNet
 from .buffer import GraphBuffer
@@ -125,7 +126,8 @@ class FactorGraph:
             jj = torch.as_tensor(jj, dtype=torch.long, device=self.device)
 
         # remove duplicate edges
-        ii, jj = self.__filter_repeated_edges(ii, jj)
+        with nvtx_range("slam.factor_graph.add_factors.filter_repeated"):
+            ii, jj = self.__filter_repeated_edges(ii, jj)
 
         if ii.shape[0] == 0:
             return
@@ -140,35 +142,40 @@ class FactorGraph:
             ix = torch.arange(len(self.age))[torch.argsort(self.age).cpu()]
             self.rm_factors(ix >= self.max_factors - ii.shape[0], store=True)
 
-        pi, qi, _, pj, qj, _ = self.buffer.expand_edge_multiview(ii, jj)
+        with nvtx_range("slam.factor_graph.add_factors.expand_edge_multiview"):
+            pi, qi, _, pj, qj, _ = self.buffer.expand_edge_multiview(ii, jj)
 
         if self.incremental:
             # correlation volume for new edges (1, |E| V, 128, ht//8, wd//8)
-            fmap1 = self.buffer.fmaps[pi, qi][None]
-            fmap2 = self.buffer.fmaps[pj, qj][None]
-            corr = CorrBlock(fmap1, fmap2)
-            self.corr = corr if self.corr is None else self.corr.cat(corr)
+            with nvtx_range("slam.factor_graph.add_factors.build_corr"):
+                fmap1 = self.buffer.fmaps[pi, qi][None]
+                fmap2 = self.buffer.fmaps[pj, qj][None]
+                corr = CorrBlock(fmap1, fmap2)
+                self.corr = corr if self.corr is None else self.corr.cat(corr)
 
-            inp = self.buffer.inps[pi, qi][None]
-            self.inp = inp if self.inp is None else torch.cat([self.inp, inp], 1)
+            with nvtx_range("slam.factor_graph.add_factors.build_inp"):
+                inp = self.buffer.inps[pi, qi][None]
+                self.inp = inp if self.inp is None else torch.cat([self.inp, inp], 1)
 
-        with torch.cuda.amp.autocast(enabled=False):
-            target, _ = self.buffer.reproject_dense_disp(ii, jj)
-            target = target[None]
-            weight = torch.zeros_like(target)
+        with nvtx_range("slam.factor_graph.add_factors.reproject_initial"):
+            with torch.cuda.amp.autocast(enabled=False):
+                target, _ = self.buffer.reproject_dense_disp(ii, jj)
+                target = target[None]
+                weight = torch.zeros_like(target)
 
         self.ii = torch.cat([self.ii, ii], 0)
         self.jj = torch.cat([self.jj, jj], 0)
         self.age = torch.cat([self.age, torch.zeros_like(ii)], 0)
 
-        # GRU initial hidden state (h_ij) is taken from the source edge.
-        # (1, |E| V, 128, ht//8, wd//8)
-        net = self.buffer.nets[pi, qi][None]
-        self.f_net = net if self.f_net is None else torch.cat([self.f_net, net], 1)
+        with nvtx_range("slam.factor_graph.add_factors.append_state"):
+            # GRU initial hidden state (h_ij) is taken from the source edge.
+            # (1, |E| V, 128, ht//8, wd//8)
+            net = self.buffer.nets[pi, qi][None]
+            self.f_net = net if self.f_net is None else torch.cat([self.f_net, net], 1)
 
-        # reprojection factors initial state
-        self.target = torch.cat([self.target, target], 1)
-        self.weight = torch.cat([self.weight, weight], 1)
+            # reprojection factors initial state
+            self.target = torch.cat([self.target, target], 1)
+            self.weight = torch.cat([self.weight, weight], 1)
 
     @torch.amp.autocast("cuda", enabled=True)
     def rm_factors(self, mask: torch.Tensor, store: bool = False):
@@ -241,73 +248,78 @@ class FactorGraph:
         assert self.corr is not None and self.inp is not None and self.f_net is not None
         assert not (motion_only and fixed_motion)
 
-        if t0 is None:
-            t0 = int(max(1, self.ii.min().item() + 1))
+        with nvtx_range("slam.factor_graph.update.bounds"):
+            if t0 is None:
+                t0 = int(max(1, self.ii.min().item() + 1))
 
-        if t1 is None:
-            t1 = int(max(self.ii.max().item(), self.jj.max().item()) + 1)
+            if t1 is None:
+                t1 = int(max(self.ii.max().item(), self.jj.max().item()) + 1)
 
         # motion features
-        with torch.cuda.amp.autocast(enabled=False):
-            coords1, _ = self.buffer.reproject_dense_disp(self.ii, self.jj)
-            coords1 = coords1[None]  # NV, ht, wd, 2 -> 1, NV, ht, wd, 2
-            # Prepare motion features:
-            # - first 2 dimension is the current rigid flow.
-            # - last 2 dimension residual flow of last update.
-            motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
-            # (edge, view, ht, wd, 4) -> (edge, view, 4, ht, wd)
-            motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
+        with nvtx_range("slam.factor_graph.update.reproject_motion"):
+            with torch.cuda.amp.autocast(enabled=False):
+                coords1, _ = self.buffer.reproject_dense_disp(self.ii, self.jj)
+                coords1 = coords1[None]  # NV, ht, wd, 2 -> 1, NV, ht, wd, 2
+                # Prepare motion features:
+                # - first 2 dimension is the current rigid flow.
+                # - last 2 dimension residual flow of last update.
+                motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
+                # (edge, view, ht, wd, 4) -> (edge, view, 4, ht, wd)
+                motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
 
         # correlation features
-        corr = self.corr(coords1)
+        with nvtx_range("slam.factor_graph.update.corr_index"):
+            corr = self.corr(coords1)
 
         # Apply network
-        pi, qi, di, _, _, _ = self.buffer.expand_edge_multiview(self.ii, self.jj)
-        di, dix = torch.unique(di, return_inverse=True)
-        self.f_net, delta, weight, damping, _ = self.net.update.forward(  # type: ignore
-            self.f_net, self.inp, corr, motn, ix=dix
-        )
-        weight[:, self.buffer.masks[pi, qi]] = 0.0
-
-        with torch.cuda.amp.autocast(enabled=False):
-            self.target = coords1 + delta.to(dtype=torch.float)
-            self.weight = weight.to(dtype=torch.float)
-            # Overwrite damping with newly computed values
-            self.damping[di] = damping
-
-            if use_inactive:
-                m = (self.ii_inac >= t0 - 3) & (self.jj_inac >= t0 - 3)
-                ii = torch.cat([self.ii_inac[m], self.ii], 0)
-                jj = torch.cat([self.jj_inac[m], self.jj], 0)
-                exp_m = m.view(-1, 1).repeat(1, self.buffer.n_views).view(-1)
-                target = torch.cat([self.target_inac[:, exp_m], self.target], 1)
-                weight = torch.cat([self.weight_inac[:, exp_m], self.weight], 1)
-
-            else:
-                ii, jj, target, weight = self.ii, self.jj, self.target, self.weight
-
-            ht, wd = self.coords0.shape[0:2]
-            target = rearrange(target, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
-            weight = rearrange(weight, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
-
-            # dense bundle adjustment
-            self.buffer.bundle_adjustment(
-                target=target,
-                weight=weight,
-                disp_damping=self.damping,
-                ii=ii,
-                jj=jj,
-                t0=t0,
-                t1=t1 if not fixed_motion else t0,
-                n_iters=itrs,
-                pose_damping=1e-3,
-                pose_ep=0.1,
-                motion_only=motion_only,
-                limited_disp=limited_disp,
-                optimize_intrinsics=False,
-                optimize_rig_rotation=False,
-                verbose=False,
+        with nvtx_range("slam.factor_graph.update.net_forward"):
+            pi, qi, di, _, _, _ = self.buffer.expand_edge_multiview(self.ii, self.jj)
+            di, dix = torch.unique(di, return_inverse=True)
+            self.f_net, delta, weight, damping, _ = self.net.update.forward(  # type: ignore
+                self.f_net, self.inp, corr, motn, ix=dix
             )
+            weight[:, self.buffer.masks[pi, qi]] = 0.0
+
+        with nvtx_range("slam.factor_graph.update.bundle_adjustment"):
+            with torch.cuda.amp.autocast(enabled=False):
+                self.target = coords1 + delta.to(dtype=torch.float)
+                self.weight = weight.to(dtype=torch.float)
+                # Overwrite damping with newly computed values
+                self.damping[di] = damping
+
+                if use_inactive:
+                    m = (self.ii_inac >= t0 - 3) & (self.jj_inac >= t0 - 3)
+                    ii = torch.cat([self.ii_inac[m], self.ii], 0)
+                    jj = torch.cat([self.jj_inac[m], self.jj], 0)
+                    exp_m = m.view(-1, 1).repeat(1, self.buffer.n_views).view(-1)
+                    target = torch.cat([self.target_inac[:, exp_m], self.target], 1)
+                    weight = torch.cat([self.weight_inac[:, exp_m], self.weight], 1)
+
+                else:
+                    ii, jj, target, weight = self.ii, self.jj, self.target, self.weight
+
+                ht, wd = self.coords0.shape[0:2]
+                target = rearrange(target, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
+                weight = rearrange(weight, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
+
+                # dense bundle adjustment
+                self.buffer.bundle_adjustment(
+                    target=target,
+                    weight=weight,
+                    disp_damping=self.damping,
+                    ii=ii,
+                    jj=jj,
+                    t0=t0,
+                    t1=t1 if not fixed_motion else t0,
+                    n_iters=itrs,
+                    pose_damping=1e-3,
+                    pose_ep=0.1,
+                    motion_only=motion_only,
+                    limited_disp=limited_disp,
+                    optimize_intrinsics=False,
+                    optimize_rig_rotation=False,
+                    verbose=False,
+                )
 
         self.age += 1
 
@@ -334,62 +346,69 @@ class FactorGraph:
 
         # alternate corr implementation
         t = self.buffer.n_frames
-        corr_op = AltCorrBlock(self.buffer.flattened_fmaps[None])
+        with nvtx_range("slam.factor_graph.update_batch.build_altcorr"):
+            corr_op = AltCorrBlock(self.buffer.flattened_fmaps[None])
 
         for _ in range(steps):
-            with torch.cuda.amp.autocast(enabled=False):
-                coords1, _ = self.buffer.reproject_dense_disp(self.ii, self.jj)
-                coords1 = coords1[None]  # NV, ht, wd, 2 -> 1, NV, ht, wd, 2
-                motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
-                motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
+            with nvtx_range("slam.factor_graph.update_batch.step"):
+                with nvtx_range("slam.factor_graph.update_batch.reproject_motion"):
+                    with torch.cuda.amp.autocast(enabled=False):
+                        coords1, _ = self.buffer.reproject_dense_disp(self.ii, self.jj)
+                        coords1 = coords1[None]  # NV, ht, wd, 2 -> 1, NV, ht, wd, 2
+                        motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
+                        motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
 
-            # Apply the update operator in batches of size s to reduce memory usage.
-            s = 8
-            assert self.jj.max() >= self.ii.max()
-            for i in range(0, self.jj.max() + 1, s):
-                v = (self.ii >= i) & (self.ii < i + s)
-                iis, jjs = self.ii[v], self.jj[v]
-                v_exp = v.view(-1, 1).repeat(1, self.buffer.n_views).view(-1)
-                pis, qis, dis, pjs, qjs, djs = self.buffer.expand_edge_multiview(iis, jjs)
-                corr1 = corr_op(coords1[:, v_exp], dis, djs)
-                dis, dixs = torch.unique(dis, return_inverse=True)
+                # Apply the update operator in batches of size s to reduce memory usage.
+                s = 8
+                with nvtx_range("slam.factor_graph.update_batch.altcorr_batches"):
+                    assert self.jj.max() >= self.ii.max()
+                    for i in range(0, self.jj.max() + 1, s):
+                        v = (self.ii >= i) & (self.ii < i + s)
+                        iis, jjs = self.ii[v], self.jj[v]
+                        v_exp = v.view(-1, 1).repeat(1, self.buffer.n_views).view(-1)
+                        pis, qis, dis, pjs, qjs, djs = self.buffer.expand_edge_multiview(iis, jjs)
+                        with nvtx_range("slam.factor_graph.update_batch.altcorr_index"):
+                            corr1 = corr_op(coords1[:, v_exp], dis, djs)
+                        dis, dixs = torch.unique(dis, return_inverse=True)
 
-                with torch.cuda.amp.autocast(enabled=True):
-                    net, delta, weight, damping, _ = self.net.update.forward(  # type: ignore
-                        self.f_net[:, v_exp],
-                        self.buffer.inps[pis, qis][None],
-                        corr1,
-                        motn[:, v_exp],
-                        ix=dixs,
+                        with nvtx_range("slam.factor_graph.update_batch.net_forward"):
+                            with torch.cuda.amp.autocast(enabled=True):
+                                net, delta, weight, damping, _ = self.net.update.forward(  # type: ignore
+                                    self.f_net[:, v_exp],
+                                    self.buffer.inps[pis, qis][None],
+                                    corr1,
+                                    motn[:, v_exp],
+                                    ix=dixs,
+                                )
+                                weight[:, self.buffer.masks[pis, qis]] = 0.0
+
+                        self.f_net[:, v_exp] = net
+                        self.target[:, v_exp] = coords1[:, v_exp] + delta.float()
+                        self.weight[:, v_exp] = weight.float()
+                        self.damping[dis] = damping
+
+                with nvtx_range("slam.factor_graph.update_batch.bundle_adjustment"):
+                    ht, wd = self.coords0.shape[0:2]
+                    target = rearrange(self.target, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
+                    weight = rearrange(self.weight, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
+
+                    self.buffer.bundle_adjustment(
+                        target=target,
+                        weight=weight,
+                        disp_damping=self.damping,
+                        ii=self.ii,
+                        jj=self.jj,
+                        t0=1,
+                        t1=t,
+                        n_iters=itrs,
+                        pose_damping=1e-5,
+                        pose_ep=1e-2,
+                        motion_only=False,
+                        limited_disp=False,
+                        optimize_intrinsics=optimize_intrinsics,
+                        optimize_rig_rotation=optimize_rig_rotation,
+                        verbose=solver_verbose,
                     )
-                    weight[:, self.buffer.masks[pis, qis]] = 0.0
-
-                self.f_net[:, v_exp] = net
-                self.target[:, v_exp] = coords1[:, v_exp] + delta.float()
-                self.weight[:, v_exp] = weight.float()
-                self.damping[dis] = damping
-
-            ht, wd = self.coords0.shape[0:2]
-            target = rearrange(self.target, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
-            weight = rearrange(self.weight, "1 k h w c -> k (h w) c", c=2, h=ht, w=wd)
-
-            self.buffer.bundle_adjustment(
-                target=target,
-                weight=weight,
-                disp_damping=self.damping,
-                ii=self.ii,
-                jj=self.jj,
-                t0=1,
-                t1=t,
-                n_iters=itrs,
-                pose_damping=1e-5,
-                pose_ep=1e-2,
-                motion_only=False,
-                limited_disp=False,
-                optimize_intrinsics=optimize_intrinsics,
-                optimize_rig_rotation=optimize_rig_rotation,
-                verbose=solver_verbose,
-            )
 
     def add_neighborhood_factors(self, t0, t1, r: int = 3):
         """
@@ -435,8 +454,9 @@ class FactorGraph:
         ii, jj = torch.meshgrid(ix, jx, indexing="ij")
         ii, jj = ii.reshape(-1), jj.reshape(-1)
 
-        d = self.buffer.frame_distance_dense_disp(ii, jj, beta=beta)
-        d = d.mean(-1)
+        with nvtx_range("slam.factor_graph.add_proximity_factors.frame_distance"):
+            d = self.buffer.frame_distance_dense_disp(ii, jj, beta=beta)
+            d = d.mean(-1)
 
         def _suppress(i: int, j: int):
             if (t0 <= i < t) and (t1 <= j < t):
@@ -448,11 +468,12 @@ class FactorGraph:
                     if abs(di) + abs(dj) <= max(min(abs(i - j) - 2, nms), 0):
                         _suppress(i + di, j + dj)
 
-        for i, j in zip(self.ii.cpu().numpy(), self.jj.cpu().numpy()):
-            _suppress_nms(i, j)
+        with nvtx_range("slam.factor_graph.add_proximity_factors.suppress_existing"):
+            for i, j in zip(self.ii.cpu().numpy(), self.jj.cpu().numpy()):
+                _suppress_nms(i, j)
 
-        for i, j in zip(self.ii_inac.cpu().numpy(), self.jj_inac.cpu().numpy()):
-            _suppress_nms(i, j)
+            for i, j in zip(self.ii_inac.cpu().numpy(), self.jj_inac.cpu().numpy()):
+                _suppress_nms(i, j)
 
         d[(ii - rad < jj) | (d > thresh)] = np.inf
 
@@ -467,18 +488,19 @@ class FactorGraph:
                 es.append((j, i))
                 _suppress(i, j)
 
-        ix = torch.argsort(d)
-        for k in ix:
-            if d[k].item() > thresh:
-                continue
+        with nvtx_range("slam.factor_graph.add_proximity_factors.select_edges"):
+            ix = torch.argsort(d)
+            for k in ix:
+                if d[k].item() > thresh:
+                    continue
 
-            if len(es) > self.max_factors:
-                break
+                if len(es) > self.max_factors:
+                    break
 
-            i, j = int(ii[k].item()), int(jj[k].item())
-            es.append((i, j))
-            es.append((j, i))
-            _suppress_nms(i, j)
+                i, j = int(ii[k].item()), int(jj[k].item())
+                es.append((i, j))
+                es.append((j, i))
+                _suppress_nms(i, j)
 
         if len(es) == 0:
             return

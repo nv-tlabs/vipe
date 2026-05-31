@@ -37,6 +37,7 @@ from vipe.utils.geometry import project_points_to_panorama
 from vipe.utils.logging import pbar
 from vipe.utils.misc import unpack_optional
 from vipe.utils.morph import erode
+from vipe.utils.nvtx import nvtx_range
 
 logger = logging.getLogger(__name__)
 
@@ -79,25 +80,30 @@ class GeoCalibIntrinsicsProcessor(IntrinsicEstimationProcessor):
         is_pinhole = camera_type == CameraType.PINHOLE
         weights = "pinhole" if is_pinhole else "distorted"
 
-        model = GeoCalib(weights=weights).cuda()
-        indexable_stream = CachedVideoStream(video_stream)
+        with nvtx_range("init.geocalib.load_model"):
+            model = GeoCalib(weights=weights).cuda()
+        with nvtx_range("init.geocalib.make_cache"):
+            indexable_stream = CachedVideoStream(video_stream)
 
         if is_pinhole:
-            sample_frames = torch.stack([indexable_stream[i].rgb.moveaxis(-1, 0) for i in self.sample_frame_inds])
-            res = model.calibrate(
-                sample_frames,
-                shared_intrinsics=True,
-            )
+            with nvtx_range("init.geocalib.sample_frames"):
+                sample_frames = torch.stack([indexable_stream[i].rgb.moveaxis(-1, 0) for i in self.sample_frame_inds])
+            with nvtx_range("init.geocalib.calibrate"):
+                res = model.calibrate(
+                    sample_frames,
+                    shared_intrinsics=True,
+                )
         else:
             # Use first frame for calibration
             camera_model = {
                 CameraType.PINHOLE: "pinhole",
                 CameraType.MEI: "simple_mei",
             }[camera_type]
-            res = model.calibrate(
-                indexable_stream[self.sample_frame_inds[0]].rgb.moveaxis(-1, 0)[None],
-                camera_model=camera_model,
-            )
+            with nvtx_range("init.geocalib.calibrate"):
+                res = model.calibrate(
+                    indexable_stream[self.sample_frame_inds[0]].rgb.moveaxis(-1, 0)[None],
+                    camera_model=camera_model,
+                )
 
         camera_result = cast(Any, res["camera"])
         self.fov_y = camera_result.vfov[0].item()
@@ -128,22 +134,27 @@ class TrackAnythingProcessor(StreamProcessor):
         if self.add_sky:
             self.mask_phrases.append(VideoFrame.SKY_PROMPT)
 
-        self.tracker = TrackAnythingPipeline(self.mask_phrases, sam_points_per_side=50, sam_run_gap=self.sam_run_gap)
+        with nvtx_range("init.track_anything.load"):
+            self.tracker = TrackAnythingPipeline(
+                self.mask_phrases, sam_points_per_side=50, sam_run_gap=self.sam_run_gap
+            )
         self.mask_expand = mask_expand
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
         return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
 
     def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
-        frame.instance, frame.instance_phrases = self.tracker.track(frame)
+        with nvtx_range("init.track_anything.track"):
+            frame.instance, frame.instance_phrases = self.tracker.track(frame)
         self.last_track_frame = frame.raw_frame_idx
 
-        frame_instance_mask = frame.instance == 0
-        if self.add_sky:
-            # We won't mask out the sky.
-            frame_instance_mask |= frame.sky_mask
+        with nvtx_range("init.track_anything.mask_postprocess"):
+            frame_instance_mask = frame.instance == 0
+            if self.add_sky:
+                # We won't mask out the sky.
+                frame_instance_mask |= frame.sky_mask
 
-        frame.mask = erode(frame_instance_mask, self.mask_expand)
+            frame.mask = erode(frame_instance_mask, self.mask_expand)
         return frame
 
 

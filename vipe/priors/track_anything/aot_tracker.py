@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from vipe.utils.nvtx import nvtx_range
 
 from .aot import config as engine_config
 from .aot.networks.engines import build_engine
@@ -99,36 +100,46 @@ class AOTTracker(object):
 
     @torch.no_grad()
     def add_reference_frame(self, frame, mask, obj_nums, frame_step, incremental=False):
-        frame = self._prepare_image_tensor(frame)
-        if not isinstance(mask, torch.Tensor):
-            raise TypeError("GPU AOT path requires mask as a CUDA torch.Tensor")
-        mask = mask.to(device=frame.device, dtype=torch.float32)[None, None]
-        _mask = F.interpolate(mask, size=frame.shape[-2:], mode="nearest")
+        with nvtx_range("track_anything.aot.add_reference.prepare_image"):
+            frame = self._prepare_image_tensor(frame)
+        with nvtx_range("track_anything.aot.add_reference.prepare_mask"):
+            if not isinstance(mask, torch.Tensor):
+                raise TypeError("GPU AOT path requires mask as a CUDA torch.Tensor")
+            mask = mask.to(device=frame.device, dtype=torch.float32)[None, None]
+            _mask = F.interpolate(mask, size=frame.shape[-2:], mode="nearest")
 
-        if incremental:
-            self.engine.add_reference_frame_incremental(frame, _mask, obj_nums=obj_nums, frame_step=frame_step)
-        else:
-            self.engine.add_reference_frame(frame, _mask, obj_nums=obj_nums, frame_step=frame_step)
+        with nvtx_range("track_anything.aot.add_reference.engine"):
+            if incremental:
+                self.engine.add_reference_frame_incremental(frame, _mask, obj_nums=obj_nums, frame_step=frame_step)
+            else:
+                self.engine.add_reference_frame(frame, _mask, obj_nums=obj_nums, frame_step=frame_step)
 
     @torch.no_grad()
     def track(self, image):
-        output_height, output_width = image.shape[0], image.shape[1]
-        image = self._prepare_image_tensor(image)
-        self.engine.match_propogate_one_frame(image)
-        pred_logit = self.engine.decode_current_logits((output_height, output_width))
+        with nvtx_range("track_anything.aot.track.prepare_sample"):
+            output_height, output_width = image.shape[0], image.shape[1]
+        with nvtx_range("track_anything.aot.track.prepare_image"):
+            image = self._prepare_image_tensor(image)
+        with nvtx_range("track_anything.aot.track.propagate"):
+            self.engine.match_propogate_one_frame(image)
+        with nvtx_range("track_anything.aot.track.decode_logits"):
+            pred_logit = self.engine.decode_current_logits((output_height, output_width))
 
         # pred_prob = torch.softmax(pred_logit, dim=1)
-        pred_label = torch.argmax(pred_logit, dim=1, keepdim=True).float()
+        with nvtx_range("track_anything.aot.track.argmax"):
+            pred_label = torch.argmax(pred_logit, dim=1, keepdim=True).float()
 
         return pred_label
 
     @torch.no_grad()
     def update_memory(self, pred_label):
-        self.engine.update_memory(pred_label)
+        with nvtx_range("track_anything.aot.update_memory"):
+            self.engine.update_memory(pred_label)
 
     @torch.no_grad()
     def restart(self):
-        self.engine.restart_engine()
+        with nvtx_range("track_anything.aot.restart"):
+            self.engine.restart_engine()
 
     @torch.no_grad()
     def build_tracker_engine(self, name, **kwargs):

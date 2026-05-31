@@ -5,6 +5,7 @@
 import numpy as np
 import torch
 
+from vipe.utils.nvtx import nvtx_range
 
 from .sam import SamAutomaticMaskGenerator, sam_model_registry
 
@@ -28,13 +29,15 @@ class Segmentor:
     def set_image(self, image):
         # calculate the embedding only once per frame.
         if not self.have_embedded:
-            self.interactive_predictor.set_image(image)
+            with nvtx_range("track_anything.sam.set_image"):
+                self.interactive_predictor.set_image(image)
             self.have_embedded = True
 
     @torch.no_grad()
     def set_image_tensor(self, image: torch.Tensor):
         if not self.have_embedded:
-            self.interactive_predictor.set_image_tensor(image)
+            with nvtx_range("track_anything.sam.set_image_tensor"):
+                self.interactive_predictor.set_image_tensor(image)
             self.have_embedded = True
 
     @torch.no_grad()
@@ -42,22 +45,25 @@ class Segmentor:
         assert self.have_embedded, "image embedding for sam need be set before predict."
 
         if mode == "point":
-            masks, scores, logits = self.interactive_predictor.predict(
-                point_coords=prompts["point_coords"],
-                point_labels=prompts["point_modes"],
-                multimask_output=multimask,
-            )
+            with nvtx_range("track_anything.sam.predict.point"):
+                masks, scores, logits = self.interactive_predictor.predict(
+                    point_coords=prompts["point_coords"],
+                    point_labels=prompts["point_modes"],
+                    multimask_output=multimask,
+                )
         elif mode == "mask":
-            masks, scores, logits = self.interactive_predictor.predict(
-                mask_input=prompts["mask_prompt"], multimask_output=multimask
-            )
+            with nvtx_range("track_anything.sam.predict.mask"):
+                masks, scores, logits = self.interactive_predictor.predict(
+                    mask_input=prompts["mask_prompt"], multimask_output=multimask
+                )
         elif mode == "point_mask":
-            masks, scores, logits = self.interactive_predictor.predict(
-                point_coords=prompts["point_coords"],
-                point_labels=prompts["point_modes"],
-                mask_input=prompts["mask_prompt"],
-                multimask_output=multimask,
-            )
+            with nvtx_range("track_anything.sam.predict.point_mask"):
+                masks, scores, logits = self.interactive_predictor.predict(
+                    point_coords=prompts["point_coords"],
+                    point_labels=prompts["point_modes"],
+                    mask_input=prompts["mask_prompt"],
+                    multimask_output=multimask,
+                )
 
         return masks, scores, logits
 
@@ -88,27 +94,30 @@ class Segmentor:
 
     def segment_with_box(self, origin_frame, bbox, reset_image=False):
         if reset_image:
-            self.interactive_predictor.set_image(origin_frame)
+            with nvtx_range("track_anything.sam.set_image_reset"):
+                self.interactive_predictor.set_image(origin_frame)
         else:
             self.set_image(origin_frame)
         # coord = np.array([[int((bbox[1][0] - bbox[0][0]) / 2.),  int((bbox[1][1] - bbox[0][1]) / 2)]])
         # point_label = np.array([1])
 
-        masks, scores, logits = self.interactive_predictor.predict(
-            point_coords=None,
-            point_labels=None,
-            box=np.array([bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]]),
-            multimask_output=True,
-        )
+        with nvtx_range("track_anything.sam.predict.box_initial"):
+            masks, scores, logits = self.interactive_predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=np.array([bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]]),
+                multimask_output=True,
+            )
         mask, logit = masks[np.argmax(scores)], logits[np.argmax(scores), :, :]
 
-        masks, scores, logits = self.interactive_predictor.predict(
-            point_coords=None,
-            point_labels=None,
-            box=np.array([[bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]]]),
-            mask_input=logit[None, :, :],
-            multimask_output=True,
-        )
+        with nvtx_range("track_anything.sam.predict.box_refine"):
+            masks, scores, logits = self.interactive_predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=np.array([[bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]]]),
+                mask_input=logit[None, :, :],
+                multimask_output=True,
+            )
         mask = masks[np.argmax(scores)]
 
         return [mask]
@@ -126,7 +135,8 @@ class Segmentor:
             raise TypeError("GPU SAM path requires boxes as a torch.Tensor")
 
         if reset_image:
-            self.interactive_predictor.set_image_tensor(origin_frame)
+            with nvtx_range("track_anything.sam.set_image_tensor_reset"):
+                self.interactive_predictor.set_image_tensor(origin_frame)
             self.have_embedded = True
         else:
             self.set_image_tensor(origin_frame)
@@ -137,27 +147,29 @@ class Segmentor:
             self.interactive_predictor.original_size,
         )
 
-        _masks, scores, logits = self.interactive_predictor.predict_torch(
-            point_coords=None,
-            point_labels=None,
-            boxes=transformed_boxes,
-            mask_input=None,
-            multimask_output=True,
-            return_logits=True,
-        )
+        with nvtx_range("track_anything.sam.predict_torch.box_initial"):
+            _masks, scores, logits = self.interactive_predictor.predict_torch(
+                point_coords=None,
+                point_labels=None,
+                boxes=transformed_boxes,
+                mask_input=None,
+                multimask_output=True,
+                return_logits=True,
+            )
 
         batch_indices = torch.arange(scores.shape[0], device=scores.device)
         best_indices = scores.argmax(dim=1)
         best_logits = logits[batch_indices, best_indices].unsqueeze(1)
 
-        masks, scores, _logits = self.interactive_predictor.predict_torch(
-            point_coords=None,
-            point_labels=None,
-            boxes=transformed_boxes,
-            mask_input=best_logits,
-            multimask_output=True,
-            return_logits=False,
-        )
+        with nvtx_range("track_anything.sam.predict_torch.box_refine"):
+            masks, scores, _logits = self.interactive_predictor.predict_torch(
+                point_coords=None,
+                point_labels=None,
+                boxes=transformed_boxes,
+                mask_input=best_logits,
+                multimask_output=True,
+                return_logits=False,
+            )
 
         best_indices = scores.argmax(dim=1)
         return masks[batch_indices, best_indices].to(torch.uint8)

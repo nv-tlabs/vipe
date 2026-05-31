@@ -22,6 +22,7 @@ import torch
 from omegaconf import DictConfig
 
 from vipe.ext.lietorch import SE3
+from vipe.utils.nvtx import nvtx_range
 
 from ..networks.droid_net import DroidNet
 from .buffer import GraphBuffer
@@ -77,82 +78,99 @@ class SLAMFrontend:
     def __update(self):
         """add edges, perform update"""
 
-        self.t1 += 1
+        with nvtx_range("slam.frontend.update"):
+            self.t1 += 1
 
-        # t1 - 1 is the new-added frame
-        # t1 - 2 is the previous frame
-        # t1 - 3 is the frame before the previous frame
+            # t1 - 1 is the new-added frame
+            # t1 - 2 is the previous frame
+            # t1 - 3 is the frame before the previous frame
 
-        if self.graph.corr is not None:
-            self.graph.rm_factors(self.graph.age > self.max_age, store=True)
+            if self.graph.corr is not None:
+                with nvtx_range("slam.frontend.update.rm_old_factors"):
+                    self.graph.rm_factors(self.graph.age > self.max_age, store=True)
 
-        self.graph.add_proximity_factors(
-            self.t1 - 5,
-            max(self.t1 - self.frontend_window, 0),
-            rad=self.frontend_radius,
-            nms=self.frontend_nms,
-            thresh=self.frontend_thresh,
-            beta=self.beta,
-            remove=True,
-        )
+            with nvtx_range("slam.frontend.update.add_proximity_factors"):
+                self.graph.add_proximity_factors(
+                    self.t1 - 5,
+                    max(self.t1 - self.frontend_window, 0),
+                    rad=self.frontend_radius,
+                    nms=self.frontend_nms,
+                    thresh=self.frontend_thresh,
+                    beta=self.beta,
+                    remove=True,
+                )
 
-        for _ in range(self.iters1):
-            self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
+            with nvtx_range("slam.frontend.update.graph_update_initial"):
+                for _ in range(self.iters1):
+                    self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
 
-        # remove frame t1-2 if it is too close to t1-3, so the new keyframes will be [t1-3, t1-1]
-        d = self.video.frame_distance_dense_disp(
-            torch.tensor([self.t1 - 3]),
-            torch.tensor([self.t1 - 2]),
-            beta=self.beta,
-            bidirectional=True,
-        )
-        if d.max().item() < self.keyframe_thresh:
-            self.graph.rm_second_newest_keyframe(self.t1 - 2)
-            self.t1 -= 1
-        else:
-            for _ in range(self.iters2):
-                self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
+            # remove frame t1-2 if it is too close to t1-3, so the new keyframes will be [t1-3, t1-1]
+            with nvtx_range("slam.frontend.update.keyframe_distance"):
+                d = self.video.frame_distance_dense_disp(
+                    torch.tensor([self.t1 - 3]),
+                    torch.tensor([self.t1 - 2]),
+                    beta=self.beta,
+                    bidirectional=True,
+                )
+                remove_keyframe = d.max().item() < self.keyframe_thresh
+            if remove_keyframe:
+                with nvtx_range("slam.frontend.update.rm_second_newest_keyframe"):
+                    self.graph.rm_second_newest_keyframe(self.t1 - 2)
+                self.t1 -= 1
+            else:
+                with nvtx_range("slam.frontend.update.graph_update_final"):
+                    for _ in range(self.iters2):
+                        self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
 
-        # set pose for next itration
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
+            # set pose for next itration
+            with nvtx_range("slam.frontend.update.prepare_next_pose"):
+                if not self.has_init_pose:
+                    self.__init_pose()
+                for v in range(self.video.n_views):
+                    self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
 
-        # update visualization
-        self.video.dirty[self.graph.ii.min() : self.t1] = True
+            # update visualization
+            self.video.dirty[self.graph.ii.min() : self.t1] = True
 
     def __initialize(self):
         """initialize the SLAM system with keyframes idx [t0, t1)"""
 
-        self.t1 = self.video.n_frames
+        with nvtx_range("slam.frontend.initialize"):
+            self.t1 = self.video.n_frames
 
-        self.graph.add_neighborhood_factors(0, self.t1, r=1 if self.args.seq_init else 3)
-        for _ in range(8):
-            self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
+            with nvtx_range("slam.frontend.initialize.add_neighborhood_factors"):
+                self.graph.add_neighborhood_factors(0, self.t1, r=1 if self.args.seq_init else 3)
+            with nvtx_range("slam.frontend.initialize.graph_update_neighborhood"):
+                for _ in range(8):
+                    self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
 
-        if not self.args.seq_init:
-            self.graph.add_proximity_factors(0, 0, rad=2, nms=2, thresh=self.frontend_thresh, remove=False)
-            for _ in range(8):
-                self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
+            if not self.args.seq_init:
+                with nvtx_range("slam.frontend.initialize.add_proximity_factors"):
+                    self.graph.add_proximity_factors(0, 0, rad=2, nms=2, thresh=self.frontend_thresh, remove=False)
+                with nvtx_range("slam.frontend.initialize.graph_update_proximity"):
+                    for _ in range(8):
+                        self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
 
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
-        self.video.dirty[: self.t1] = True
+            with nvtx_range("slam.frontend.initialize.prepare_next_pose"):
+                if not self.has_init_pose:
+                    self.__init_pose()
+                for v in range(self.video.n_views):
+                    self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
+                self.video.dirty[: self.t1] = True
 
-        # initialization complete
-        self.is_initialized = True
-        self.graph.rm_factors(self.graph.ii < self.warmup - 4, store=True)
+            # initialization complete
+            self.is_initialized = True
+            with nvtx_range("slam.frontend.initialize.rm_old_factors"):
+                self.graph.rm_factors(self.graph.ii < self.warmup - 4, store=True)
 
     def run(self):
         """main update"""
 
-        # do initialization
-        if not self.is_initialized and self.video.n_frames == self.warmup:
-            self.__initialize()
+        with nvtx_range("slam.frontend.run"):
+            # do initialization
+            if not self.is_initialized and self.video.n_frames == self.warmup:
+                self.__initialize()
 
-        # do update if new keyframe is added.
-        elif self.is_initialized and self.t1 < self.video.n_frames:
-            self.__update()
+            # do update if new keyframe is added.
+            elif self.is_initialized and self.t1 < self.video.n_frames:
+                self.__update()

@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 
 from vipe.streams.base import VideoFrame
+from vipe.utils.nvtx import nvtx_range
 
 from .seg_tracker import SegTracker
 
@@ -36,21 +37,23 @@ class TrackAnythingPipeline:
         sam_run_gap: int = 10,
     ) -> None:
         # Prepare checkpoints.
-        sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
-        if not sam_ckpt_path.exists():
-            sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.hub.download_url_to_file(
-                "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
-                dst=str(sam_ckpt_path),
-            )
+        with nvtx_range("track_anything.init.resolve_sam_checkpoint"):
+            sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
+            if not sam_ckpt_path.exists():
+                sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.hub.download_url_to_file(
+                    "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+                    dst=str(sam_ckpt_path),
+                )
 
-        aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
-        if not aot_ckpt_path.exists():
-            aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-            gdown.download(
-                id="1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ",
-                output=str(aot_ckpt_path),
-            )
+        with nvtx_range("track_anything.init.resolve_aot_checkpoint"):
+            aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
+            if not aot_ckpt_path.exists():
+                aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                gdown.download(
+                    id="1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ",
+                    output=str(aot_ckpt_path),
+                )
 
         self.threshold_args = {
             "box_threshold": 0.35,
@@ -67,36 +70,38 @@ class TrackAnythingPipeline:
         self.aot_stride = max(1, _env_int("VIPE_TRACK_ANYTHING_AOT_STRIDE", 1))
         self._last_pred_mask_tensor: torch.Tensor | None = None
         self._last_pred_phrase: dict[int, str] = {}
-        self.segtracker = SegTracker(
-            segtracker_args={
-                "sam_gap": sam_run_gap,  # the interval to run sam to segment new objects
-                "min_area": 200,  # minimal mask area to add a new mask as a new object
-                "max_obj_num": 255,  # maximal object number to track in a video
-                "min_new_obj_iou": 0.8,  # the background area ratio of a new object should > 80%
-            },
-            sam_args={
-                "sam_checkpoint": str(sam_ckpt_path),
-                "model_type": "vit_b",
-                "generator_args": {
-                    "points_per_side": sam_points_per_side,
-                    "pred_iou_thresh": 0.8,
-                    "stability_score_thresh": 0.9,
-                    "crop_n_layers": 1,
-                    "crop_n_points_downscale_factor": 2,
-                    "min_mask_region_area": 200,
+        with nvtx_range("track_anything.init.build_segtracker"):
+            self.segtracker = SegTracker(
+                segtracker_args={
+                    "sam_gap": sam_run_gap,  # the interval to run sam to segment new objects
+                    "min_area": 200,  # minimal mask area to add a new mask as a new object
+                    "max_obj_num": 255,  # maximal object number to track in a video
+                    "min_new_obj_iou": 0.8,  # the background area ratio of a new object should > 80%
                 },
-                "gpu_id": 0,
-            },
-            aot_args={
-                "phase": "PRE_YTB_DAV",
-                "model": "r50_deaotl",
-                "model_path": str(aot_ckpt_path),
-                "long_term_mem_gap": 9999,
-                "max_len_long_term": 9999,
-                "gpu_id": 0,
-            },
-        )
-        self.segtracker.restart_tracker()
+                sam_args={
+                    "sam_checkpoint": str(sam_ckpt_path),
+                    "model_type": "vit_b",
+                    "generator_args": {
+                        "points_per_side": sam_points_per_side,
+                        "pred_iou_thresh": 0.8,
+                        "stability_score_thresh": 0.9,
+                        "crop_n_layers": 1,
+                        "crop_n_points_downscale_factor": 2,
+                        "min_mask_region_area": 200,
+                    },
+                    "gpu_id": 0,
+                },
+                aot_args={
+                    "phase": "PRE_YTB_DAV",
+                    "model": "r50_deaotl",
+                    "model_path": str(aot_ckpt_path),
+                    "long_term_mem_gap": 9999,
+                    "max_len_long_term": 9999,
+                    "gpu_id": 0,
+                },
+            )
+        with nvtx_range("track_anything.init.restart_tracker"):
+            self.segtracker.restart_tracker()
         self.instance_phrase = {0: "background"}
 
     def track(self, frame_data: VideoFrame) -> tuple[torch.Tensor, dict[int, str]]:
@@ -116,60 +121,73 @@ class TrackAnythingPipeline:
         if self.aot_stride > 1 and not should_periodic_sam and self._last_pred_mask_tensor is not None:
             if self.frame_idx % self.aot_stride != 0:
                 self.frame_idx += 1
-                return self._last_pred_mask_tensor.clone(), dict(self._last_pred_phrase)
+                with nvtx_range("track_anything.frame.reuse_previous_mask"):
+                    return self._last_pred_mask_tensor.clone(), dict(self._last_pred_phrase)
 
-        if not frame_data.rgb.is_cuda:
-            raise RuntimeError("GPU Track Anything path requires frame.rgb to be a CUDA tensor")
+        with nvtx_range("track_anything.frame.prepare_gpu"):
+            if not frame_data.rgb.is_cuda:
+                raise RuntimeError("GPU Track Anything path requires frame.rgb to be a CUDA tensor")
 
-        rgb_frame = frame_data.rgb
-        original_shape = tuple(rgb_frame.shape[:2])
-        if self.input_scale != 1.0:
-            scaled_h = max(1, int(round(original_shape[0] * self.input_scale)))
-            scaled_w = max(1, int(round(original_shape[1] * self.input_scale)))
-            rgb_bchw = rgb_frame.permute(2, 0, 1).unsqueeze(0)
-            if self.input_scale < 1.0:
-                rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="area")
-            else:
-                rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="bilinear", align_corners=False)
-            rgb_frame = rgb_bchw.squeeze(0).permute(1, 2, 0).contiguous()
+            rgb_frame = frame_data.rgb
+            original_shape = tuple(rgb_frame.shape[:2])
+            if self.input_scale != 1.0:
+                scaled_h = max(1, int(round(original_shape[0] * self.input_scale)))
+                scaled_w = max(1, int(round(original_shape[1] * self.input_scale)))
+                rgb_bchw = rgb_frame.permute(2, 0, 1).unsqueeze(0)
+                if self.input_scale < 1.0:
+                    rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="area")
+                else:
+                    rgb_bchw = F.interpolate(rgb_bchw, size=(scaled_h, scaled_w), mode="bilinear", align_corners=False)
+                rgb_frame = rgb_bchw.squeeze(0).permute(1, 2, 0).contiguous()
 
         if self.frame_idx == 0:
-            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
-                rgb_frame, self.caption, **self.threshold_args
-            )
-            self.segtracker.add_reference(rgb_frame, pred_mask)
+            with nvtx_range("track_anything.frame.initial_detect_and_seg"):
+                pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
+                    rgb_frame, self.caption, **self.threshold_args
+                )
+            with nvtx_range("track_anything.frame.initial_add_reference"):
+                self.segtracker.add_reference(rgb_frame, pred_mask)
             self.instance_phrase.update(pred_phrase)
 
         elif self.frame_idx % self.sam_run_gap == 0:
-            seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
-            track_mask = self.segtracker.track(rgb_frame)
-            new_obj_mask, seg_to_new_mapping = self.segtracker.find_new_objs(track_mask, seg_mask)
-            if torch.sum(new_obj_mask > 0).item() > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
-                new_obj_mask = torch.zeros_like(new_obj_mask)
-                seg_to_new_mapping = {}
-            pred_mask = track_mask + new_obj_mask
-            pred_phrase = {seg_to_new_mapping[k]: v for k, v in pred_phrase.items() if k in seg_to_new_mapping}
+            with nvtx_range("track_anything.frame.periodic_detect_and_seg"):
+                seg_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
+            with nvtx_range("track_anything.frame.periodic_aot_track"):
+                track_mask = self.segtracker.track(rgb_frame)
+            with nvtx_range("track_anything.frame.find_new_objs"):
+                new_obj_mask, seg_to_new_mapping = self.segtracker.find_new_objs(track_mask, seg_mask)
+            with nvtx_range("track_anything.frame.merge_new_objs"):
+                if torch.sum(new_obj_mask > 0).item() > rgb_frame.shape[0] * rgb_frame.shape[1] * 0.4:
+                    new_obj_mask = torch.zeros_like(new_obj_mask)
+                    seg_to_new_mapping = {}
+                pred_mask = track_mask + new_obj_mask
+                pred_phrase = {seg_to_new_mapping[k]: v for k, v in pred_phrase.items() if k in seg_to_new_mapping}
             self.instance_phrase.update(pred_phrase)
-            self.segtracker.add_reference(rgb_frame, pred_mask)
+            with nvtx_range("track_anything.frame.periodic_add_reference"):
+                self.segtracker.add_reference(rgb_frame, pred_mask)
 
         else:
-            pred_mask = self.segtracker.track(rgb_frame, update_memory=True)
+            with nvtx_range("track_anything.frame.aot_track_update_memory"):
+                pred_mask = self.segtracker.track(rgb_frame, update_memory=True)
 
         self.frame_idx += 1
 
-        pred_mask_unique = torch.unique(pred_mask).detach().cpu().tolist()
-        pred_phrase = {
-            int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase
-        }
+        with nvtx_range("track_anything.frame.phrase_lookup"):
+            pred_mask_unique = torch.unique(pred_mask).detach().cpu().tolist()
+            pred_phrase = {
+                int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase
+            }
 
         if self.input_scale != 1.0:
-            pred_mask = F.interpolate(
-                pred_mask[None, None].float(),
-                size=original_shape,
-                mode="nearest",
-            )[0, 0].to(torch.uint8)
+            with nvtx_range("track_anything.frame.resize_mask_to_input"):
+                pred_mask = F.interpolate(
+                    pred_mask[None, None].float(),
+                    size=original_shape,
+                    mode="nearest",
+                )[0, 0].to(torch.uint8)
 
-        pred_mask = pred_mask.to(dtype=torch.uint8, device=rgb_frame.device)
+        with nvtx_range("track_anything.frame.mask_ready_gpu"):
+            pred_mask = pred_mask.to(dtype=torch.uint8, device=rgb_frame.device)
         self._last_pred_mask_tensor = pred_mask
         self._last_pred_phrase = dict(pred_phrase)
         return pred_mask, pred_phrase

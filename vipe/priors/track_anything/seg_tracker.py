@@ -5,6 +5,7 @@
 import numpy as np
 import torch
 
+from vipe.utils.nvtx import nvtx_range
 
 from .aot_tracker import get_aot
 from .detector import Detector
@@ -16,9 +17,12 @@ class SegTracker:
         """
         Initialize SAM and AOT.
         """
-        self.sam = Segmentor(sam_args)
-        self.tracker = get_aot(aot_args)
-        self.detector = Detector(self.sam.device)
+        with nvtx_range("track_anything.segtracker.init_sam"):
+            self.sam = Segmentor(sam_args)
+        with nvtx_range("track_anything.segtracker.init_aot"):
+            self.tracker = get_aot(aot_args)
+        with nvtx_range("track_anything.segtracker.init_grounding_dino"):
+            self.detector = Detector(self.sam.device)
         self.sam_gap = segtracker_args["sam_gap"]
         self.min_area = segtracker_args["min_area"]
         self.max_obj_num = segtracker_args["max_obj_num"]
@@ -50,11 +54,13 @@ class SegTracker:
             frame: CUDA tensor (h,w,3)
             mask: CUDA tensor (h,w)
         """
-        if not isinstance(mask, torch.Tensor):
-            raise TypeError("GPU Track Anything path requires reference mask as torch.Tensor")
-        self.reference_objs_list.append(torch.unique(mask).detach())
-        self.curr_idx = self.get_obj_num()
-        self.tracker.add_reference_frame(frame, mask, self.curr_idx, frame_step)
+        with nvtx_range("track_anything.segtracker.add_reference.unique_mask"):
+            if not isinstance(mask, torch.Tensor):
+                raise TypeError("GPU Track Anything path requires reference mask as torch.Tensor")
+            self.reference_objs_list.append(torch.unique(mask).detach())
+            self.curr_idx = self.get_obj_num()
+        with nvtx_range("track_anything.segtracker.add_reference.aot"):
+            self.tracker.add_reference_frame(frame, mask, self.curr_idx, frame_step)
         self.curr_idx += 1
 
     def track(self, frame, update_memory=False):
@@ -65,10 +71,13 @@ class SegTracker:
         Return:
             origin_merged_mask: CUDA tensor (h,w)
         """
-        pred_label = self.tracker.track(frame)
+        with nvtx_range("track_anything.segtracker.aot_track"):
+            pred_label = self.tracker.track(frame)
         if update_memory:
-            self.tracker.update_memory(pred_label)
-        return pred_label.squeeze(0).squeeze(0).to(torch.uint8)
+            with nvtx_range("track_anything.segtracker.update_memory"):
+                self.tracker.update_memory(pred_label)
+        with nvtx_range("track_anything.segtracker.mask_to_uint8"):
+            return pred_label.squeeze(0).squeeze(0).to(torch.uint8)
 
     def get_tracking_objs(self):
         objs = set()
@@ -96,29 +105,31 @@ class SegTracker:
         Return:
             new_obj_mask: numpy array (h,w)
         """
-        new_obj_mask = torch.where(track_mask == 0, seg_mask, torch.zeros_like(seg_mask))
-        new_obj_ids = torch.unique(new_obj_mask)
-        new_obj_ids = new_obj_ids[new_obj_ids != 0]
-        seg_to_new_mapping = {}
-        # obj_num = self.get_obj_num() + 1
-        obj_num = self.curr_idx
-        for idx in new_obj_ids:
-            new_obj_area = torch.sum(new_obj_mask == idx)
-            obj_area = torch.sum(seg_mask == idx)
-            if (
-                (new_obj_area.float() / obj_area.float()).item() < self.min_new_obj_iou
-                or new_obj_area.item() < self.min_area
-                or obj_num > self.max_obj_num
-            ):
-                new_obj_mask[new_obj_mask == idx] = 0
-            else:
-                new_obj_mask[new_obj_mask == idx] = obj_num
-                seg_to_new_mapping[int(idx.item())] = obj_num
-                obj_num += 1
+        with nvtx_range("track_anything.segtracker.find_new_objs.compute"):
+            new_obj_mask = torch.where(track_mask == 0, seg_mask, torch.zeros_like(seg_mask))
+            new_obj_ids = torch.unique(new_obj_mask)
+            new_obj_ids = new_obj_ids[new_obj_ids != 0]
+            seg_to_new_mapping = {}
+            # obj_num = self.get_obj_num() + 1
+            obj_num = self.curr_idx
+            for idx in new_obj_ids:
+                new_obj_area = torch.sum(new_obj_mask == idx)
+                obj_area = torch.sum(seg_mask == idx)
+                if (
+                    (new_obj_area.float() / obj_area.float()).item() < self.min_new_obj_iou
+                    or new_obj_area.item() < self.min_area
+                    or obj_num > self.max_obj_num
+                ):
+                    new_obj_mask[new_obj_mask == idx] = 0
+                else:
+                    new_obj_mask[new_obj_mask == idx] = obj_num
+                    seg_to_new_mapping[int(idx.item())] = obj_num
+                    obj_num += 1
         return new_obj_mask, seg_to_new_mapping
 
     def restart_tracker(self):
-        self.tracker.restart()
+        with nvtx_range("track_anything.segtracker.restart"):
+            self.tracker.restart()
 
     def add_mask(self, interactive_mask: np.ndarray):
         """
@@ -168,20 +179,33 @@ class SegTracker:
             raise TypeError("GPU Track Anything path requires origin_frame as torch.Tensor")
 
         # get annotated_frame and boxes
-        annotated_frame_shape, boxes, phrases = self.detector.run_grounding_tensor(
-            origin_frame, grounding_caption, box_threshold, text_threshold
-        )
-        refined_merged_mask = torch.zeros(annotated_frame_shape, dtype=torch.uint8, device=origin_frame.device)
-        if boxes.shape[0] > 0:
-            areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-            max_area = annotated_frame_shape[0] * annotated_frame_shape[1] * box_size_threshold
-            keep = areas <= max_area
-            keep_indices = torch.nonzero(keep, as_tuple=False).flatten()
+        with nvtx_range("track_anything.segtracker.detect_and_seg.grounding_dino"):
+            annotated_frame_shape, boxes, phrases = self.detector.run_grounding_tensor(
+                origin_frame, grounding_caption, box_threshold, text_threshold
+            )
+        with nvtx_range(f"track_anything.segtracker.detect_and_seg.sam_boxes count={boxes.shape[0]}"):
+            refined_merged_mask = torch.zeros(annotated_frame_shape, dtype=torch.uint8, device=origin_frame.device)
+            if boxes.shape[0] > 0:
+                areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+                max_area = annotated_frame_shape[0] * annotated_frame_shape[1] * box_size_threshold
+                keep = areas <= max_area
+                keep_indices = torch.nonzero(keep, as_tuple=False).flatten()
 
-            if keep_indices.numel() > 0:
-                kept_boxes = boxes[keep_indices]
-                kept_phrases = [phrases[int(idx.item())] for idx in keep_indices]
-                interactive_masks = self.sam.segment_with_box_tensor(origin_frame, kept_boxes, reset_image)
+                if keep_indices.numel() > 0:
+                    kept_boxes = boxes[keep_indices]
+                    kept_phrases = [phrases[int(idx.item())] for idx in keep_indices]
+                    with nvtx_range(
+                        f"track_anything.segtracker.detect_and_seg.sam_box_batch count={kept_boxes.shape[0]}"
+                    ):
+                        interactive_masks = self.sam.segment_with_box_tensor(origin_frame, kept_boxes, reset_image)
+                else:
+                    kept_phrases = []
+                    interactive_masks = torch.empty(
+                        (0, annotated_frame_shape[0], annotated_frame_shape[1]),
+                        dtype=torch.uint8,
+                        device=origin_frame.device,
+                    )
+
             else:
                 kept_phrases = []
                 interactive_masks = torch.empty(
@@ -190,19 +214,11 @@ class SegTracker:
                     device=origin_frame.device,
                 )
 
-        else:
-            kept_phrases = []
-            interactive_masks = torch.empty(
-                (0, annotated_frame_shape[0], annotated_frame_shape[1]),
-                dtype=torch.uint8,
-                device=origin_frame.device,
-            )
-
-        for interactive_mask, phrase in zip(interactive_masks, kept_phrases):
-            refined_merged_mask = self.add_mask_torch(interactive_mask)
-            seg_phrase[self.curr_idx] = phrase
-            self.update_origin_merged_mask(refined_merged_mask)
-            self.curr_idx += 1
+            for interactive_mask, phrase in zip(interactive_masks, kept_phrases):
+                refined_merged_mask = self.add_mask_torch(interactive_mask)
+                seg_phrase[self.curr_idx] = phrase
+                self.update_origin_merged_mask(refined_merged_mask)
+                self.curr_idx += 1
 
         # reset origin_mask
         self.reset_origin_merged_mask(bc_mask, bc_id)
