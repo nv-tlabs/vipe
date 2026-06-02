@@ -150,15 +150,23 @@ class SLAMSystem:
         buffer_masks: torch.Tensor | None,
         frame_data_list: list[VideoFrame],
         phase: int,
+        precomputed_fmap: torch.Tensor | None = None,
+        precomputed_context: tuple[torch.Tensor, torch.Tensor] | None = None,
     ):
         assert phase in [1, 2]
         kf_idx = self.buffer.n_frames
         self.buffer.tstamp[kf_idx] = frame_idx
         self.buffer.images[kf_idx] = images
-        self.buffer.fmaps[kf_idx] = self.droid_net.encode_features(images)
-        self.buffer.nets[kf_idx], self.buffer.inps[kf_idx] = self.droid_net.encode_context(images)
         if buffer_masks is not None:
             self.buffer.masks[kf_idx] = buffer_masks
+
+        if precomputed_fmap is None:
+            precomputed_fmap = self.droid_net.encode_features(images)
+        self.buffer.fmaps[kf_idx] = precomputed_fmap
+
+        if precomputed_context is None:
+            precomputed_context = self.droid_net.encode_context(images)
+        self.buffer.nets[kf_idx], self.buffer.inps[kf_idx] = precomputed_context
 
         for view_idx, frame_data in enumerate(frame_data_list):
             if kf_idx == 0:
@@ -269,9 +277,23 @@ class SLAMSystem:
 
             self.sparse_tracks.track_image(frame_data_list)
 
-            if self.motion_filter.check(images, buffer_masks) or frame_idx == total_n_frames - 1:
+            motion_result = self.motion_filter.check(images, buffer_masks)
+            add_keyframe = motion_result.add_keyframe or frame_idx == total_n_frames - 1
+
+            if add_keyframe:
                 is_keyframe = True
-                self._add_keyframe(frame_idx, images, buffer_masks, frame_data_list, phase=1)
+                precomputed_context = None
+                if motion_result.net is not None and motion_result.inp is not None:
+                    precomputed_context = (motion_result.net, motion_result.inp)
+                self._add_keyframe(
+                    frame_idx,
+                    images,
+                    buffer_masks,
+                    frame_data_list,
+                    phase=1,
+                    precomputed_fmap=motion_result.fmap,
+                    precomputed_context=precomputed_context,
+                )
             else:
                 is_keyframe = False
 
