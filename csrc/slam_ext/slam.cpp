@@ -34,7 +34,8 @@ std::vector<torch::Tensor> ba_extended_cuda(torch::Tensor poses, torch::Tensor d
                                             const int iterations, const float lm, const float ep,
                                             const bool motion_only, const float alpha, const bool optimize_intrinsics,
                                             const float intrinsics_lm, const float intrinsics_ep,
-                                            const float intrinsics_scale, const bool compute_energy);
+                                            const float intrinsics_scale, const bool compute_energy,
+                                            const float flow_weight);
 
 }  // namespace slam_ext
 
@@ -48,7 +49,7 @@ void pybind_slam_ext(py::module &m) {
           py::arg("weights"), py::arg("eta"), py::arg("ii"), py::arg("jj"), py::arg("depth_active"), py::arg("t0"),
           py::arg("t1"), py::arg("iterations"), py::arg("lm"), py::arg("ep"), py::arg("motion_only"),
           py::arg("alpha"), py::arg("optimize_intrinsics"), py::arg("intrinsics_lm"), py::arg("intrinsics_ep"),
-          py::arg("intrinsics_scale"), py::arg("compute_energy") = false);
+          py::arg("intrinsics_scale"), py::arg("compute_energy") = false, py::arg("flow_weight") = 0.001f);
     m.def("frame_distance", &slam_ext::frame_distance_cuda, "frame_distance");
     m.def("projmap", &slam_ext::projmap_cuda, "projmap");
     m.def("depth_filter", &slam_ext::depth_filter_cuda, "depth_filter");

@@ -378,7 +378,6 @@ class GraphBuffer:
         optimize_intrinsics: bool,
         optimize_rig_rotation: bool,
         weight_dense_disp: float,
-        weight_tracks: float,
         verbose: bool,
     ) -> None:
         def fail(reason: str) -> None:
@@ -388,13 +387,12 @@ class GraphBuffer:
             fail("it only supports single-view pinhole-camera graph buffers")
         if optimize_rig_rotation:
             fail("it does not support optimizing rig rotation")
+        if self.sparse_tracks.enabled:
+            fail("it does not support sparse-track factors")
         if t0 >= t1:
             fail("the active optimization range is empty")
         if target.shape[0] != ii.shape[0] or weight.shape[0] != ii.shape[0]:
             fail("target/weight edge counts do not match the graph edges")
-        # The DROID CUDA kernel applies the 0.001 dense-flow scale internally.
-        if weight_dense_disp != 0.001 or weight_tracks != 0.001:
-            fail("the configured dense-flow or sparse-track weights are unsupported")
 
         edge_mask = ii != jj
         if not torch.any(edge_mask):
@@ -410,26 +408,6 @@ class GraphBuffer:
             fail("it only supports identity rig extrinsics")
 
         ht, wd = self.height // 8, self.width // 8
-
-        if self.sparse_tracks.enabled:
-            view_inds = torch.zeros_like(ii)
-            sparse_target, sparse_weight = self.sparse_tracks.compute_dense_disp_target_weight(
-                source_view_inds=view_inds,
-                source_frame_inds=self.tstamp[ii],
-                target_view_inds=view_inds,
-                target_frame_inds=self.tstamp[jj],
-                image_size=(self.height, self.width),
-                dense_disp_size=(ht, wd),
-            )
-            sparse_target = sparse_target.flatten(1, 2)
-            sparse_weight = sparse_weight.flatten(1, 2)
-            combined_weight = weight + sparse_weight
-            combined_target = torch.where(
-                combined_weight > 0,
-                (weight * target + sparse_weight * sparse_target) / combined_weight.clamp_min(1e-12),
-                target,
-            )
-            target, weight = combined_target, combined_weight
 
         target = rearrange(target, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
         weight = rearrange(weight, "k (h w) c -> k c h w", h=ht, w=wd, c=2).contiguous()
@@ -475,6 +453,7 @@ class GraphBuffer:
                 1e-6 * intrinsics_damping_scale,
                 intrinsics_scale,
                 verbose,
+                weight_dense_disp,
             )
         except (AttributeError, TypeError) as exc:
             raise RuntimeError(
@@ -560,7 +539,6 @@ class GraphBuffer:
                 optimize_intrinsics,
                 optimize_rig_rotation,
                 weight_dense_disp,
-                weight_tracks,
                 verbose,
             )
             self.disps.clamp_(min=0.001)

@@ -183,7 +183,6 @@ def _run_fused_bundle_adjustment(video, ba_inputs, *, motion_only: bool, limited
         optimize_intrinsics=optimize_intrinsics,
         optimize_rig_rotation=False,
         weight_dense_disp=0.001,
-        weight_tracks=0.001,
         verbose=False,
     )
     video.disps.clamp_(min=0.001)
@@ -200,9 +199,9 @@ class GraphBufferFusedBATest(unittest.TestCase):
         torch.testing.assert_close(actual.disps[:5], expected.disps[:5], atol=2e-4, rtol=2e-4)
         torch.testing.assert_close(actual.intrinsics, expected.intrinsics, atol=2e-4, rtol=2e-4)
 
-    def test_fused_ba_matches_generic_solver_with_intrinsics_limited_disp_and_sparse_tracks(self):
-        generic = _make_video(fused=False, sparse_tracks_enabled=True)
-        fused = _make_video(fused=True, sparse_tracks_enabled=True)
+    def test_fused_ba_matches_generic_solver_with_intrinsics_and_limited_disp(self):
+        generic = _make_video(fused=False, sparse_tracks_enabled=False)
+        fused = _make_video(fused=True, sparse_tracks_enabled=False)
         ba_inputs = _make_real_run_shaped_ba_inputs(generic)
 
         _run_generic_bundle_adjustment(
@@ -222,6 +221,30 @@ class GraphBufferFusedBATest(unittest.TestCase):
 
         self.assertTrue(used_fused_ba)
         self.assert_graph_buffers_close(fused, generic)
+
+    def test_fused_ba_errors_for_sparse_tracks_instead_of_falling_back(self):
+        fused = _make_video(fused=True, sparse_tracks_enabled=True)
+        ba_inputs = _make_real_run_shaped_ba_inputs(fused)
+        target, weight, disp_damping, ii, jj = ba_inputs
+
+        with self.assertRaisesRegex(RuntimeError, "sparse-track"):
+            fused.bundle_adjustment(
+                target=target.clone(),
+                weight=weight.clone(),
+                disp_damping=disp_damping.clone(),
+                ii=ii.clone(),
+                jj=jj.clone(),
+                t0=1,
+                t1=5,
+                n_iters=1,
+                pose_damping=1e-3,
+                pose_ep=0.1,
+                motion_only=False,
+                limited_disp=False,
+                optimize_intrinsics=False,
+                optimize_rig_rotation=False,
+                verbose=False,
+            )
 
     def test_fused_ba_matches_generic_solver_motion_only(self):
         generic = _make_video(fused=False, sparse_tracks_enabled=False)

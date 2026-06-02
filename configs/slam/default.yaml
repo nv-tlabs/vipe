@@ -47,7 +47,10 @@ keyframe_depth: metric3d-small
 
 ba:
   dense_disp_alpha: 0.001
-  fused: false
+  # true | false | auto. auto enables the fused CUDA path when the pipeline layout is
+  # compatible (single-view pinhole, no robust kernel, no rig-rotation optimization,
+  # no sparse tracks).
+  fused: auto
   intrinsics_damping_scale: 1.0
   # robust kernel for dense-flow residual: null (L2) | huber | tukey | gnc_tls
   robust_kernel: null

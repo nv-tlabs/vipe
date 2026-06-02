@@ -134,10 +134,41 @@ def test_parse_typed_config_accepts_fused_ba_override(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ([], True),  # default pipeline: single-view pinhole, no robust kernel / rig rotation
+        (["pipeline.init.camera_type=mei"], False),  # non-pinhole camera
+        (["pipeline.slam.ba.robust_kernel=huber"], False),  # robust kernel
+        (["pipeline.slam.optimize_rig_rotation=true"], False),  # rig-rotation optimization
+        (["pipeline.slam.sparse_tracks.name=cuvslam"], False),  # sparse tracks (unsupported by fused)
+    ],
+)
+def test_auto_fused_ba_resolves_for_default_pipeline(tmp_path: Path, overrides: list[str], expected: bool) -> None:
+    config = parse_typed_config(
+        "default",
+        [*_base_overrides(tmp_path), "pipeline.slam.ba.fused=auto", *overrides],
+    )
+
+    fused = config.pipeline.slam.ba.fused
+    assert fused is expected
+    # "auto" must normalize to a concrete bool that survives the DictConfig round-trip.
+    assert config.pipeline.to_dictconfig().slam.ba.fused is expected
+
+
+def test_default_config_ships_auto_fused_ba(tmp_path: Path) -> None:
+    # The shipped default leaves ba.fused as auto, which resolves to fused for the
+    # default single-view pinhole pipeline.
+    config = parse_typed_config("default", _base_overrides(tmp_path))
+
+    assert config.pipeline.slam.ba.fused is True
+
+
+@pytest.mark.parametrize(
     "override",
     [
         "streams.frame_skip=0",
         "pipeline.slam.sparse_tracks.name=bad",
+        "pipeline.slam.ba.fused=maybe",
         "pipeline.output.viz_downsample=0",
         "+pipeline.output.unexpected=1",
     ],

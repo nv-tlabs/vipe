@@ -17,7 +17,12 @@ class BAConfig(BaseConfigSchema):
         ge=0.0,
         description="Weight for dense-disparity regularization during bundle adjustment.",
     )
-    fused: bool = Field(description="Use the fused CUDA bundle-adjustment path; unsupported layouts raise an error.")
+    fused: bool | Literal["auto"] = Field(
+        description='Use the fused CUDA bundle-adjustment path. "auto" enables it automatically when the '
+        "pipeline layout is compatible (single-view pinhole, no robust kernel, no rig-rotation optimization, "
+        "no sparse tracks) and falls back to the generic solver otherwise; an explicit true forces the fused "
+        "path and raises on unsupported layouts."
+    )
     intrinsics_damping_scale: float = Field(
         gt=0.0,
         description="Multiplier for damping applied to optimized camera intrinsics.",
@@ -115,3 +120,24 @@ class SLAMConfig(BaseConfigSchema):
         if value is not None and any(item < 0 for item in value):
             raise ValueError("cross_view_idx must contain non-negative view indices")
         return value
+
+    def resolve_fused(self, *, single_view: bool, pinhole: bool) -> bool:
+        """Resolve ``ba.fused`` to a concrete bool for the surrounding pipeline layout.
+
+        A plain bool is returned unchanged. ``"auto"`` enables the fused CUDA path only
+        when the layout satisfies every fused-kernel constraint that is knowable from
+        configuration: a single-view, pinhole, identity-rig graph optimized with an L2
+        (no robust kernel) loss, a fixed rig, and no sparse-track factors. Otherwise the
+        generic solver is selected. The pipeline supplies ``single_view`` / ``pinhole``
+        because the view count and camera model live outside the SLAM config.
+        """
+        fused = self.ba.fused
+        if isinstance(fused, bool):
+            return fused
+        return (
+            single_view
+            and pinhole
+            and self.ba.robust_kernel is None
+            and not self.optimize_rig_rotation
+            and self.sparse_tracks.name == "dummy"
+        )

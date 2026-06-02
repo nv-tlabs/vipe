@@ -198,7 +198,8 @@ __global__ void projective_transform_kernel(
     const int itr,
     const bool compute_energy,
     const bool optimize_intrinsics,
-    const float intrinsics_scale) {
+    const float intrinsics_scale,
+    const float flow_weight) {
     const int block_id = blockIdx.x;
     const int thread_id = threadIdx.x;
 
@@ -318,8 +319,8 @@ __global__ void projective_transform_kernel(
         const float d = (Xj[2] < MIN_DEPTH) ? 0.0 : 1.0 / Xj[2];
         const float d2 = d * d;
 
-        float wu = (Xj[2] < MIN_DEPTH) ? 0.0 : .001 * weight[block_id][0][i][j];
-        float wv = (Xj[2] < MIN_DEPTH) ? 0.0 : .001 * weight[block_id][1][i][j];
+        float wu = (Xj[2] < MIN_DEPTH) ? 0.0 : flow_weight * weight[block_id][0][i][j];
+        float wv = (Xj[2] < MIN_DEPTH) ? 0.0 : flow_weight * weight[block_id][1][i][j];
 
         float Jf_u = 0.0f;
         float Jf_v = 0.0f;
@@ -1630,7 +1631,7 @@ std::vector<torch::Tensor> ba_cuda_impl(torch::Tensor poses, torch::Tensor disps
                                         const float lm, const float ep, const bool motion_only, const float alpha,
                                         const bool optimize_intrinsics, const float intrinsics_lm,
                                         const float intrinsics_ep, const float intrinsics_scale,
-                                        const bool compute_energy) {
+                                        const bool compute_energy, const float flow_weight) {
     CHECK_INPUT(targets);
     CHECK_INPUT(weights);
     CHECK_INPUT(poses);
@@ -1698,7 +1699,7 @@ std::vector<torch::Tensor> ba_cuda_impl(torch::Tensor poses, torch::Tensor disps
             Hff.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
             vf.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
             flow_energy.packed_accessor32<float, 2, torch::RestrictPtrTraits>(), itr, compute_energy,
-            optimize_intrinsics, intrinsics_scale);
+            optimize_intrinsics, intrinsics_scale, flow_weight);
 
         // pose x pose block
         SparseBlock A(t1 - t0, 6);
@@ -1830,7 +1831,7 @@ std::vector<torch::Tensor> ba_cuda(torch::Tensor poses, torch::Tensor disps, tor
                                    const float alpha) {
     torch::Tensor depth_active = torch::ones({disps.size(0)}, disps.options());
     return ba_cuda_impl(poses, disps, intrinsics, disps_sens, targets, weights, eta, ii, jj, depth_active, t0, t1,
-                        iterations, lm, ep, motion_only, alpha, false, 1e-6f, 1e-6f, 1.0f, false);
+                        iterations, lm, ep, motion_only, alpha, false, 1e-6f, 1e-6f, 1.0f, false, 0.001f);
 }
 
 std::vector<torch::Tensor> ba_extended_cuda(torch::Tensor poses, torch::Tensor disps, torch::Tensor intrinsics,
@@ -1840,10 +1841,11 @@ std::vector<torch::Tensor> ba_extended_cuda(torch::Tensor poses, torch::Tensor d
                                             const int iterations, const float lm, const float ep,
                                             const bool motion_only, const float alpha, const bool optimize_intrinsics,
                                             const float intrinsics_lm, const float intrinsics_ep,
-                                            const float intrinsics_scale, const bool compute_energy) {
+                                            const float intrinsics_scale, const bool compute_energy,
+                                            const float flow_weight) {
     return ba_cuda_impl(poses, disps, intrinsics, disps_sens, targets, weights, eta, ii, jj, depth_active, t0, t1,
                         iterations, lm, ep, motion_only, alpha, optimize_intrinsics, intrinsics_lm, intrinsics_ep,
-                        intrinsics_scale, compute_energy);
+                        intrinsics_scale, compute_energy, flow_weight);
 }
 
 torch::Tensor frame_distance_cuda(torch::Tensor poses, torch::Tensor disps, torch::Tensor intrinsics, torch::Tensor pi,
