@@ -18,6 +18,8 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
+import logging
+import threading
 from collections import OrderedDict
 from pathlib import Path
 
@@ -27,6 +29,10 @@ import torch.nn.functional as F
 
 from vipe.ext import droid_net_ext
 from vipe.ext.scatter import scatter_mean
+
+logger = logging.getLogger(__name__)
+_DROID_NET_CACHE: dict[str, "DroidNet"] = {}
+_DROID_NET_CACHE_LOCK = threading.Lock()
 
 
 class CorrSampler(torch.autograd.Function):
@@ -525,24 +531,30 @@ class DroidNet(nn.Module):
         self.fnet = BasicEncoder(output_dim=128, norm_fn="instance")
         self.cnet = BasicEncoder(output_dim=256, norm_fn="none")
         self.update = UpdateModule()
+        self.register_buffer(
+            "image_mean",
+            torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "image_std",
+            torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 1, 3, 1, 1),
+            persistent=False,
+        )
         self.load_weights()
 
     @torch.amp.autocast("cuda", enabled=True)
     def encode_features(self, images: torch.Tensor):
         """image (torch.Tensor): BCHW image RGB 0-1"""
-        mean = torch.as_tensor([0.485, 0.456, 0.406], device=images.device)
-        std = torch.as_tensor([0.229, 0.224, 0.225], device=images.device)
         # (1, B, C, H, W) - (x, x, 3, 1, 1)
-        images = (images[None] - mean[:, None, None]) / std[:, None, None]
+        images = (images[None] - self.image_mean) / self.image_std
         return self.fnet(images).squeeze(0)
 
     @torch.amp.autocast("cuda", enabled=True)
     def encode_context(self, images: torch.Tensor):
         """image (torch.Tensor): BCHW image RGB 0-1"""
-        mean = torch.as_tensor([0.485, 0.456, 0.406], device=images.device)
-        std = torch.as_tensor([0.229, 0.224, 0.225], device=images.device)
         # (1, B, C, H, W) - (x, x, 3, 1, 1)
-        images = (images[None] - mean[:, None, None]) / std[:, None, None]
+        images = (images[None] - self.image_mean) / self.image_std
         net, inp = self.cnet(images).split([128, 128], dim=2)
         return net.tanh().squeeze(0), inp.relu().squeeze(0)
 
@@ -570,3 +582,33 @@ class DroidNet(nn.Module):
 
         self.load_state_dict(state_dict)
         self.eval()
+
+
+def _normalize_droid_net_device(device: torch.device) -> torch.device:
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None and torch.cuda.is_available():
+        return torch.device("cuda", torch.cuda.current_device())
+    return device
+
+
+def get_shared_droid_net(device: torch.device) -> DroidNet:
+    """Return the immutable process-local DroidNet for a device."""
+    normalized_device = _normalize_droid_net_device(device)
+    cache_key = str(normalized_device)
+    with _DROID_NET_CACHE_LOCK:
+        net = _DROID_NET_CACHE.get(cache_key)
+        if net is None:
+            logger.info("Loading shared DroidNet on %s", cache_key)
+            net = DroidNet().to(normalized_device)
+            net.eval()
+            net.requires_grad_(False)
+            _DROID_NET_CACHE[cache_key] = net
+        else:
+            logger.info("Reusing shared DroidNet on %s", cache_key)
+    return net
+
+
+def clear_shared_droid_net_cache() -> None:
+    """Clear the process-local DroidNet cache for tests."""
+    with _DROID_NET_CACHE_LOCK:
+        _DROID_NET_CACHE.clear()

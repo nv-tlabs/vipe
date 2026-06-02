@@ -38,7 +38,7 @@ from .components.inner_filler import FilledReturn, InnerFiller
 from .components.motion_filter import MotionFilter
 from .components.sparse_tracks import build_sparse_tracks
 from .interface import SLAMOutput
-from .networks.droid_net import DroidNet
+from .networks.droid_net import get_shared_droid_net
 
 
 class StandardResizeStreamProcessor(StreamProcessor):
@@ -89,7 +89,7 @@ class SLAMSystem:
         OmegaConf.set_struct(self.config, False)
 
     def _build_components(self):
-        self.droid_net = DroidNet().to(self.device)
+        self.droid_net = get_shared_droid_net(self.device)
         self.sparse_tracks = build_sparse_tracks(self.config.sparse_tracks, self.config.n_views)
         self.buffer = GraphBuffer(
             height=self.config.height,
