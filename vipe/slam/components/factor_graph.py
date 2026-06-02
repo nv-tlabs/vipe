@@ -536,17 +536,36 @@ class FactorGraph:
 
         with nvtx_range("slam.factor_graph.add_proximity_factors.select_edges"):
             ix = torch.argsort(d)
-            for k in ix:
-                if d[k].item() > thresh:
-                    break
+            candidate_keys = ix[~(d[ix] > thresh)].detach().cpu().tolist()
+            candidate_width = t - t1
+            suppressed_candidate_keys: set[int] = set()
+
+            def _candidate_key(i: int, j: int) -> int | None:
+                if (t0 <= i < t) and (t1 <= j < t):
+                    return (i - t0) * candidate_width + (j - t1)
+                return None
+
+            def _suppress_selected_nms(i: int, j: int):
+                radius = max(min(abs(i - j) - 2, nms), 0)
+                for di in range(-nms, nms + 1):
+                    for dj in range(-nms, nms + 1):
+                        if abs(di) + abs(dj) <= radius:
+                            key = _candidate_key(i + di, j + dj)
+                            if key is not None:
+                                suppressed_candidate_keys.add(key)
+
+            for k in candidate_keys:
+                if k in suppressed_candidate_keys:
+                    continue
 
                 if len(es) > self.max_factors:
                     break
 
-                i, j = int(ii[k].item()), int(jj[k].item())
+                i = k // candidate_width + t0
+                j = k % candidate_width + t1
                 es.append((i, j))
                 es.append((j, i))
-                _suppress_nms(torch.as_tensor([i], device=self.device), torch.as_tensor([j], device=self.device))
+                _suppress_selected_nms(i, j)
 
         if len(es) == 0:
             return
