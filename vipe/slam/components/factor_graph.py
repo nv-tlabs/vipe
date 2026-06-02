@@ -18,6 +18,7 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
+import logging
 import warnings
 
 import numpy as np
@@ -33,6 +34,146 @@ from .buffer import GraphBuffer
 
 # Disable all future warnings (mainly torch.cuda.amp related)
 warnings.simplefilter(action="ignore", category=FutureWarning)
+
+logger = logging.getLogger(__name__)
+
+
+MOTION_FEATURE_COMPILE_MARKER = "vipe.factor_graph.motion_features.reduce_overhead"
+
+
+def _build_motion_features_eager(
+    coords1: torch.Tensor,
+    coords0: torch.Tensor,
+    target: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    coords1_batched = coords1[None]
+    motn = torch.cat([coords1_batched - coords0, target - coords1_batched], dim=-1)
+    motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
+    return coords1_batched, motn
+
+
+def _motion_feature_signature(
+    coords1: torch.Tensor,
+    coords0: torch.Tensor,
+    target: torch.Tensor,
+) -> tuple[object, ...]:
+    return (
+        tuple(coords1.shape),
+        tuple(coords0.shape),
+        tuple(target.shape),
+        tuple(coords1.stride()),
+        tuple(coords0.stride()),
+        tuple(target.stride()),
+        coords1.dtype,
+        coords0.dtype,
+        target.dtype,
+        coords1.device.type,
+        coords1.device.index,
+    )
+
+
+class _ReduceOverheadMotionFeatureProbe:
+    def __init__(self) -> None:
+        self._compiled = None
+        self._signature: tuple[object, ...] | None = None
+        self._disabled_reason: str | None = None
+        self.stats: dict[str, int] = {
+            "compiled": 0,
+            "eager": 0,
+            "fallback": 0,
+            "unsupported": 0,
+        }
+        self.last_path = "uninitialized"
+        self.last_marker = ""
+
+    @property
+    def disabled_reason(self) -> str | None:
+        return self._disabled_reason
+
+    @property
+    def signature(self) -> tuple[object, ...] | None:
+        return self._signature
+
+    @staticmethod
+    def _unsupported_reason(
+        coords1: torch.Tensor,
+        coords0: torch.Tensor,
+        target: torch.Tensor,
+    ) -> str | None:
+        if not hasattr(torch, "compile"):
+            return "torch_compile_unavailable"
+        if coords1.device.type != "cuda":
+            return "non_cuda_device"
+        if coords0.device != coords1.device or target.device != coords1.device:
+            return "mixed_devices"
+        if coords1.ndim != 4 or coords0.ndim != 3 or target.ndim != 5:
+            return "unsupported_rank"
+        if target.shape[0] != 1:
+            return "unsupported_batch"
+        if coords1.shape[-1] != 2 or coords0.shape[-1] != 2 or target.shape[-1] != 2:
+            return "unsupported_channel_count"
+        if coords0.shape != coords1.shape[-3:] or target.shape[1:] != coords1.shape:
+            return "shape_mismatch"
+        if not (coords1.is_floating_point() and coords0.is_floating_point() and target.is_floating_point()):
+            return "non_floating_dtype"
+        return None
+
+    def _eager(
+        self,
+        coords1: torch.Tensor,
+        coords0: torch.Tensor,
+        target: torch.Tensor,
+        reason: str,
+        *,
+        unsupported: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.stats["eager"] += 1
+        if unsupported:
+            self.stats["unsupported"] += 1
+        self.last_path = f"eager:{reason}"
+        self.last_marker = f"{MOTION_FEATURE_COMPILE_MARKER}:eager:{reason}"
+        return _build_motion_features_eager(coords1, coords0, target)
+
+    def __call__(
+        self,
+        coords1: torch.Tensor,
+        coords0: torch.Tensor,
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        reason = self._unsupported_reason(coords1, coords0, target)
+        if reason is not None:
+            return self._eager(coords1, coords0, target, reason, unsupported=True)
+        if self._disabled_reason is not None:
+            return self._eager(coords1, coords0, target, self._disabled_reason)
+
+        signature = _motion_feature_signature(coords1, coords0, target)
+        if self._compiled is not None and signature != self._signature:
+            return self._eager(coords1, coords0, target, "signature_changed", unsupported=True)
+
+        if self._compiled is None:
+            try:
+                self._compiled = torch.compile(
+                    _build_motion_features_eager,
+                    mode="reduce-overhead",
+                    fullgraph=True,
+                )
+                self._signature = signature
+            except Exception as exc:
+                self._disabled_reason = f"compile_init_failed:{type(exc).__name__}"
+                self.stats["fallback"] += 1
+                return self._eager(coords1, coords0, target, self._disabled_reason)
+
+        try:
+            coords1_batched, motn = self._compiled(coords1, coords0, target)
+        except Exception as exc:
+            self._disabled_reason = f"compile_runtime_failed:{type(exc).__name__}"
+            self.stats["fallback"] += 1
+            return self._eager(coords1, coords0, target, self._disabled_reason)
+
+        self.stats["compiled"] += 1
+        self.last_path = "compiled"
+        self.last_marker = f"{MOTION_FEATURE_COMPILE_MARKER}:compiled"
+        return coords1_batched, motn
 
 
 class FactorGraph:
@@ -83,6 +224,8 @@ class FactorGraph:
         # f_net is the hidden state of the GRU. Since this will be keep updated across update/update_lowmem calls,
         #   we will be storing the updated states no matter incremental is True or False.
         self.corr, self.f_net, self.inp = None, None, None
+        self._motion_feature_probe = _ReduceOverheadMotionFeatureProbe()
+        self._motion_feature_compile_marker_logged = False
 
         # inactive and bad factors
         # - inactive factors are those who are removed by rm_factors(store=True)
@@ -91,6 +234,35 @@ class FactorGraph:
         self.jj_inac = torch.as_tensor([], dtype=torch.long, device=device)
         self.target_inac = torch.zeros([1, 0, ht, wd, 2], device=device, dtype=torch.float)
         self.weight_inac = torch.zeros([1, 0, ht, wd, 2], device=device, dtype=torch.float)
+
+    @property
+    def motion_feature_compile_stats(self) -> dict[str, object]:
+        probe = self._get_motion_feature_probe()
+        return {
+            **probe.stats,
+            "last_path": probe.last_path,
+            "last_marker": probe.last_marker,
+            "disabled_reason": probe.disabled_reason,
+            "signature": probe.signature,
+        }
+
+    def _get_motion_feature_probe(self) -> _ReduceOverheadMotionFeatureProbe:
+        probe = getattr(self, "_motion_feature_probe", None)
+        if probe is None:
+            probe = _ReduceOverheadMotionFeatureProbe()
+            self._motion_feature_probe = probe
+            self._motion_feature_compile_marker_logged = False
+        return probe
+
+    def _prepare_motion_features(self, coords1: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        probe = self._get_motion_feature_probe()
+        coords1_batched, motn = probe(coords1, self.coords0, self.target)
+
+        if probe.last_path == "compiled" and not self._motion_feature_compile_marker_logged:
+            logger.info("%s fired", probe.last_marker)
+            self._motion_feature_compile_marker_logged = True
+
+        return coords1_batched, motn
 
     def __filter_repeated_edges(self, ii, jj):
         """remove duplicate edges"""
@@ -370,9 +542,7 @@ class FactorGraph:
                 with nvtx_range("slam.factor_graph.update_batch.reproject_motion"):
                     with torch.cuda.amp.autocast(enabled=False):
                         coords1, _ = self.buffer.reproject_dense_disp(self.ii, self.jj)
-                        coords1 = coords1[None]  # NV, ht, wd, 2 -> 1, NV, ht, wd, 2
-                        motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
-                        motn = motn.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
+                        coords1, motn = self._prepare_motion_features(coords1)
 
                 # Apply the update operator in batches of size s to reduce memory usage.
                 s = 8
