@@ -101,8 +101,7 @@ class SLAMFrontend:
                 )
 
             with nvtx_range("slam.frontend.update.graph_update_initial"):
-                for _ in range(self.iters1):
-                    self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
+                self.graph.update(steps=self.iters1, use_inactive=True, fixed_motion=self.has_init_pose)
 
             # remove frame t1-2 if it is too close to t1-3, so the new keyframes will be [t1-3, t1-1]
             with nvtx_range("slam.frontend.update.keyframe_distance"):
@@ -119,8 +118,7 @@ class SLAMFrontend:
                 self.t1 -= 1
             else:
                 with nvtx_range("slam.frontend.update.graph_update_final"):
-                    for _ in range(self.iters2):
-                        self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
+                    self.graph.update(steps=self.iters2, use_inactive=True, fixed_motion=self.has_init_pose)
 
             # set pose for next itration
             with nvtx_range("slam.frontend.update.prepare_next_pose"):
@@ -141,15 +139,13 @@ class SLAMFrontend:
             with nvtx_range("slam.frontend.initialize.add_neighborhood_factors"):
                 self.graph.add_neighborhood_factors(0, self.t1, r=1 if self.args.seq_init else 3)
             with nvtx_range("slam.frontend.initialize.graph_update_neighborhood"):
-                for _ in range(8):
-                    self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
+                self.graph.update(t0=1, steps=8, use_inactive=True, fixed_motion=self.has_init_pose)
 
             if not self.args.seq_init:
                 with nvtx_range("slam.frontend.initialize.add_proximity_factors"):
                     self.graph.add_proximity_factors(0, 0, rad=2, nms=2, thresh=self.frontend_thresh, remove=False)
                 with nvtx_range("slam.frontend.initialize.graph_update_proximity"):
-                    for _ in range(8):
-                        self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
+                    self.graph.update(t0=1, steps=8, use_inactive=True, fixed_motion=self.has_init_pose)
 
             with nvtx_range("slam.frontend.initialize.prepare_next_pose"):
                 if not self.has_init_pose:
