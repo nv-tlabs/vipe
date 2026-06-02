@@ -46,6 +46,23 @@ from .sparse_tracks import SparseTracks
 logger = logging.getLogger(__name__)
 
 
+def _should_compute_ba_energy(verbose: bool) -> bool:
+    return verbose and logger.isEnabledFor(logging.INFO)
+
+
+def _ba_energy_value(value):
+    return value.item() if hasattr(value, "item") else value
+
+
+def _log_ba_energy(n_iters: int, ba_energy) -> None:
+    logger.info(
+        "BA iters = %s, energy: %s -> %s",
+        n_iters,
+        _ba_energy_value(ba_energy[0]),
+        _ba_energy_value(ba_energy[-1]),
+    )
+
+
 class GraphBuffer:
     def __init__(
         self,
@@ -451,6 +468,8 @@ class GraphBuffer:
 
         intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
 
+        compute_energy = _should_compute_ba_energy(verbose)
+
         try:
             _, _, ba_energy = slam_ext.ba_extended(
                 self.poses,
@@ -474,7 +493,7 @@ class GraphBuffer:
                 1e-6 * intrinsics_damping_scale,
                 1e-6 * intrinsics_damping_scale,
                 intrinsics_scale,
-                verbose,
+                compute_energy,
             )
         except (AttributeError, TypeError) as exc:
             raise RuntimeError(
@@ -482,8 +501,8 @@ class GraphBuffer:
                 "Rebuild the extension or run with VIPE_EXT_JIT=1."
             ) from exc
 
-        if verbose:
-            logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0].item()} -> {ba_energy[-1].item()}")
+        if compute_energy:
+            _log_ba_energy(n_iters, ba_energy)
 
         if optimize_intrinsics:
             self.intrinsics[0, :4] = intrinsics / intrinsics_scale
@@ -566,7 +585,8 @@ class GraphBuffer:
             self.disps.clamp_(min=0.001)
             return
 
-        solver = Solver(compute_energy=verbose)
+        compute_energy = _should_compute_ba_energy(verbose)
+        solver = Solver(compute_energy=compute_energy)
         solver.add_term(
             DenseDepthFlowTerm(
                 pose_i_inds=pi,
@@ -683,6 +703,12 @@ class GraphBuffer:
         }
 
         ba_energy: list[float] = []
+
+        def run_solver_step() -> None:
+            energy = solver.run_inplace(variables)
+            if compute_energy:
+                ba_energy.append(energy)
+
         if robust_kernel is not None and robust_kernel.is_gnc():
             # GNC: outer mu schedule, inner GN iters at frozen mu.
             n_mu_steps = max(1, int(self.ba_config.get("gnc_n_mu_steps", 4)))
@@ -691,14 +717,14 @@ class GraphBuffer:
             for _ in range(n_mu_steps):
                 robust_kernel.set_mu(current_mu)
                 for _ in range(gn_iters_per_mu):
-                    ba_energy.append(solver.run_inplace(variables))
+                    run_solver_step()
                 current_mu = robust_kernel.update_mu(current_mu)
         else:
             for _ in range(n_iters):
-                ba_energy.append(solver.run_inplace(variables))
+                run_solver_step()
 
-        if verbose:
-            logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0]} -> {ba_energy[-1]}")
+        if compute_energy:
+            _log_ba_energy(n_iters, ba_energy)
 
         self.disps.clamp_(min=0.001)
 
