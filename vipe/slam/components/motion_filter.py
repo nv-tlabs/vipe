@@ -18,12 +18,22 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
+from dataclasses import dataclass
+
 import torch
 
 from vipe.utils.nvtx import nvtx_range
 
 from ..networks.droid_net import CorrBlock, DroidNet
 from .sparse_tracks import SparseTracks
+
+
+@dataclass(slots=True)
+class MotionFilterResult:
+    add_keyframe: bool
+    fmap: torch.Tensor
+    net: torch.Tensor | None = None
+    inp: torch.Tensor | None = None
 
 
 class MotionFilter:
@@ -57,13 +67,16 @@ class MotionFilter:
 
     @torch.amp.autocast("cuda", enabled=True)
     @torch.no_grad()
-    def check(self, images: torch.Tensor, buffer_masks: torch.Tensor | None) -> bool:
+    def check(self, images: torch.Tensor, buffer_masks: torch.Tensor | None) -> MotionFilterResult:
         """
         main update operation - run on every frame in video
 
         Args:
             image (torch.Tensor): VCHW image RGB 0-1
             buffer_masks (torch.Tensor): Vhw mask 1-invalid, 0-valid
+
+        Returns:
+            Motion-filter decision and any DROID tensors already computed for the current frame.
         """
 
         with nvtx_range("slam.motion_filter.check"):
@@ -87,7 +100,7 @@ class MotionFilter:
                 self.last_kf_frame_idx = 0
                 self.last_n_sparse_tracks = 0
                 self.initialized = True
-                return True
+                return MotionFilterResult(add_keyframe=True, fmap=gmap, net=net, inp=inp)
 
             ### only add new frame if there is enough motion ###
             else:
@@ -154,7 +167,7 @@ class MotionFilter:
                     self.f_mask = buffer_masks
                     self.last_kf_frame_idx = self.current_frame_idx
                     self.last_n_sparse_tracks = 0
-                    return True
+                    return MotionFilterResult(add_keyframe=True, fmap=gmap, net=net, inp=inp)
 
                 else:
-                    return False
+                    return MotionFilterResult(add_keyframe=False, fmap=gmap)
