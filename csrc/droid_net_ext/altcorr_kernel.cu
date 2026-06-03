@@ -161,6 +161,12 @@ __global__ void altcorr_index_forward_kernel(
     const int W2 = fmap2.size(3);
     const int C = fmap1.size(4);
 
+    // The +1 is shared-memory padding, not correctness: only columns
+    // 0..BLOCK_HW-1 are indexed. With BLOCK_HW = 32, same-column row
+    // accesses such as f1[tid % CHANNEL_STRIDE][k1] map a warp to one
+    // bank. A stride of 33 shifts each row by one bank, reducing conflicts
+    // in the tile load/store pattern; dot-product reads f1[k][tid] are not
+    // the main reason for the padding.
     __shared__ scalar_t f1[CHANNEL_STRIDE][BLOCK_HW + 1];
     __shared__ scalar_t f2[CHANNEL_STRIDE][BLOCK_HW + 1];
 
