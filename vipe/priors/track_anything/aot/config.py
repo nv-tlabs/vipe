@@ -46,7 +46,36 @@ class DeAOTModelConfig(DefaultModelConfig):
         self.TRAIN_AUG_TYPE = "v2"
 
 
-class MyModelConfig(DeAOTModelConfig):
+class DeAOTTModelConfig(DeAOTModelConfig):
+    def __init__(self):
+        super().__init__()
+        self.MODEL_NAME = "DeAOTT"
+
+
+class DeAOTSModelConfig(DeAOTModelConfig):
+    def __init__(self):
+        super().__init__()
+        self.MODEL_NAME = "DeAOTS"
+        self.MODEL_LSTT_NUM = 2
+
+
+class DeAOTBModelConfig(DeAOTModelConfig):
+    def __init__(self):
+        super().__init__()
+        self.MODEL_NAME = "DeAOTB"
+        self.MODEL_LSTT_NUM = 3
+
+
+class DeAOTLModelConfig(DeAOTModelConfig):
+    def __init__(self):
+        super().__init__()
+        self.MODEL_NAME = "DeAOTL"
+        self.MODEL_LSTT_NUM = 3
+        self.TRAIN_LONG_TERM_MEM_GAP = 2
+        self.TEST_LONG_TERM_MEM_GAP = 5
+
+
+class R50DeAOTLModelConfig(DeAOTLModelConfig):
     def __init__(self):
         super().__init__()
         self.MODEL_NAME = "R50_DeAOTL"
@@ -61,10 +90,26 @@ class MyModelConfig(DeAOTModelConfig):
         self.TEST_LONG_TERM_MEM_GAP = 5
 
 
-class DefaultEngineConfig:
-    def __init__(self, exp_name="default"):
+MyModelConfig = R50DeAOTLModelConfig
 
-        model_cfg = MyModelConfig()
+
+MODEL_CONFIGS = {
+    "deaott": DeAOTTModelConfig,
+    "deaots": DeAOTSModelConfig,
+    "deaotb": DeAOTBModelConfig,
+    "deaotl": DeAOTLModelConfig,
+    "r50_deaotl": R50DeAOTLModelConfig,
+}
+
+
+class DefaultEngineConfig:
+    def __init__(self, exp_name="default", model="r50_deaotl"):
+
+        try:
+            model_cfg = MODEL_CONFIGS[model.lower()]()
+        except KeyError as exc:
+            supported = ", ".join(sorted(MODEL_CONFIGS))
+            raise ValueError(f"unsupported AOT model {model!r}; expected one of: {supported}") from exc
 
         self.__dict__.update(model_cfg.__dict__)  # add model config
 
@@ -190,8 +235,8 @@ class DefaultEngineConfig:
 
 
 class EngineConfig(DefaultEngineConfig):
-    def __init__(self, exp_name):
-        super().__init__(exp_name)
+    def __init__(self, exp_name, model="r50_deaotl"):
+        super().__init__(exp_name, model)
         self.STAGE_NAME = "PRE_YTB_DAV"
 
         self.init_dir()

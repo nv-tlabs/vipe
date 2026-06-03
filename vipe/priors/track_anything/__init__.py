@@ -3,16 +3,20 @@
 # Licensed under the AGPL-3.0 License. See THIRD_PARTY_LICENSES.md for details.
 
 import os
+import logging
 from pathlib import Path
 
 import gdown
 import torch
 import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
 
 from vipe.streams.base import VideoFrame
 from vipe.utils.nvtx import nvtx_range
 
 from .seg_tracker import SegTracker
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -29,6 +33,75 @@ def _env_int(name: str, default: int) -> int:
     return int(value)
 
 
+def _env_str(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip()
+
+
+def _resolve_checkpoint(
+    *,
+    cache_subdir: str,
+    default_filename: str,
+    default_url: str | None = None,
+    default_gdrive_id: str | None = None,
+    env_prefix: str,
+) -> Path:
+    explicit_path = os.environ.get(f"{env_prefix}_CHECKPOINT")
+    if explicit_path:
+        path = Path(explicit_path).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f"{env_prefix}_CHECKPOINT does not exist: {path}")
+        return path
+
+    hf_repo = os.environ.get(f"{env_prefix}_HF_REPO")
+    hf_filename = os.environ.get(f"{env_prefix}_HF_FILENAME")
+    if hf_repo or hf_filename:
+        if not hf_repo or not hf_filename:
+            raise ValueError(f"{env_prefix}_HF_REPO and {env_prefix}_HF_FILENAME must be set together")
+        return Path(
+            hf_hub_download(
+                repo_id=hf_repo,
+                filename=hf_filename,
+                revision=os.environ.get(f"{env_prefix}_HF_REVISION"),
+            )
+        )
+
+    url = os.environ.get(f"{env_prefix}_URL")
+    if url:
+        filename = Path(url.split("?", 1)[0]).name or default_filename
+        path = Path(torch.hub.get_dir()) / cache_subdir / filename
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.hub.download_url_to_file(url, dst=str(path))
+        return path
+
+    path = Path(torch.hub.get_dir()) / cache_subdir / default_filename
+    if path.exists():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if default_url is not None:
+        torch.hub.download_url_to_file(default_url, dst=str(path))
+    elif default_gdrive_id is not None:
+        gdown.download(id=default_gdrive_id, output=str(path))
+    else:
+        raise FileNotFoundError(
+            f"No default checkpoint source is configured for {default_filename}. "
+            f"Set {env_prefix}_CHECKPOINT or {env_prefix}_HF_REPO/{env_prefix}_HF_FILENAME."
+        )
+    return path
+
+
+DEFAULT_AOT_CHECKPOINTS = {
+    "r50_deaotl": ("R50_DeAOTL_PRE_YTB_DAV.pth", "1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ"),
+    "deaotl": ("DeAOTL_PRE_YTB_DAV.pth", "18elNz_wi9JyVBcIUYKhRdL08MA-FqHD5"),
+    "deaotb": ("DeAOTB_PRE_YTB_DAV.pth", "1BHxsonnvJXylqHlZ1zJHHc-ymKyq-CFf"),
+    "deaots": ("DeAOTS_PRE_YTB_DAV.pth", "1YwIAV5tBtn5spSFxKLBQBEQGwPHyQlHi"),
+    "deaott": ("DeAOTT_PRE_YTB_DAV.pth", "1ThWIZQS03cYWx1EKNN8MIMnJS5eRowzr"),
+}
+
+
 class TrackAnythingPipeline:
     def __init__(
         self,
@@ -38,22 +111,47 @@ class TrackAnythingPipeline:
     ) -> None:
         # Prepare checkpoints.
         with nvtx_range("track_anything.init.resolve_sam_checkpoint"):
-            sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
-            if not sam_ckpt_path.exists():
-                sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-                torch.hub.download_url_to_file(
-                    "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
-                    dst=str(sam_ckpt_path),
-                )
+            sam_model_type = _env_str("VIPE_TRACK_ANYTHING_SAM_MODEL_TYPE", "vit_b")
+            default_sam_filename = {
+                "vit_b": "sam_vit_b_01ec64.pth",
+                "vit_l": "sam_vit_l_0b3195.pth",
+                "vit_h": "sam_vit_h_4b8939.pth",
+                "vit_t": "mobile_sam.pt",
+            }.get(sam_model_type)
+            default_sam_url = {
+                "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+                "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+                "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
+                "vit_t": "https://huggingface.co/dhkim2810/MobileSAM/resolve/main/mobile_sam.pt",
+            }.get(sam_model_type)
+            if default_sam_filename is None:
+                default_sam_filename = f"{sam_model_type}.pth"
+            sam_ckpt_path = _resolve_checkpoint(
+                cache_subdir="sam",
+                default_filename=default_sam_filename,
+                default_url=default_sam_url,
+                env_prefix="VIPE_TRACK_ANYTHING_SAM",
+            )
 
         with nvtx_range("track_anything.init.resolve_aot_checkpoint"):
-            aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
-            if not aot_ckpt_path.exists():
-                aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-                gdown.download(
-                    id="1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ",
-                    output=str(aot_ckpt_path),
-                )
+            aot_model = _env_str("VIPE_TRACK_ANYTHING_AOT_MODEL", "r50_deaotl").lower()
+            if aot_model not in DEFAULT_AOT_CHECKPOINTS:
+                supported = ", ".join(sorted(DEFAULT_AOT_CHECKPOINTS))
+                raise ValueError(f"unsupported VIPE_TRACK_ANYTHING_AOT_MODEL={aot_model!r}; expected one of: {supported}")
+            aot_filename, aot_gdrive_id = DEFAULT_AOT_CHECKPOINTS[aot_model]
+            aot_ckpt_path = _resolve_checkpoint(
+                cache_subdir="aot",
+                default_filename=aot_filename,
+                default_gdrive_id=aot_gdrive_id,
+                env_prefix="VIPE_TRACK_ANYTHING_AOT",
+            )
+        LOGGER.info(
+            "Track Anything model selection: SAM model_type=%s checkpoint=%s; AOT model=%s checkpoint=%s",
+            sam_model_type,
+            sam_ckpt_path.name,
+            aot_model,
+            aot_ckpt_path.name,
+        )
 
         self.threshold_args = {
             "box_threshold": 0.35,
@@ -80,7 +178,7 @@ class TrackAnythingPipeline:
                 },
                 sam_args={
                     "sam_checkpoint": str(sam_ckpt_path),
-                    "model_type": "vit_b",
+                    "model_type": sam_model_type,
                     "generator_args": {
                         "points_per_side": sam_points_per_side,
                         "pred_iou_thresh": 0.8,
@@ -93,7 +191,7 @@ class TrackAnythingPipeline:
                 },
                 aot_args={
                     "phase": "PRE_YTB_DAV",
-                    "model": "r50_deaotl",
+                    "model": aot_model,
                     "model_path": str(aot_ckpt_path),
                     "long_term_mem_gap": 9999,
                     "max_len_long_term": 9999,

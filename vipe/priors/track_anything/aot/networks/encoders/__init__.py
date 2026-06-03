@@ -5,6 +5,7 @@
 from torch import nn
 
 from ..layers.normalization import FrozenBatchNorm2d
+from .mobilenetv2 import MobileNetV2
 from .resnet import ResNet50
 
 
@@ -14,7 +15,9 @@ def build_encoder(name, frozen_bn=True, freeze_at=-1):
     else:
         BatchNorm = nn.BatchNorm2d
 
-    if name == "resnet50":
+    if name == "mobilenetv2":
+        return MobileNetV2(16, BatchNorm, freeze_at=freeze_at)
+    elif name == "resnet50":
         return ResNet50(16, BatchNorm, freeze_at=freeze_at)
     else:
         raise NotImplementedError

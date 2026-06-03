@@ -235,7 +235,7 @@ class DeAOTTrackerInferEngine(DeAOTInferEngine):
 
 def get_aot(args):
     # build vos engine
-    cfg = engine_config.EngineConfig(args["phase"])
+    cfg = engine_config.EngineConfig(args["phase"], args.get("model", "r50_deaotl"))
     cfg.TEST_CKPT_PATH = args["model_path"]
     cfg.TEST_LONG_TERM_MEM_GAP = args["long_term_mem_gap"]
     cfg.MAX_LEN_LONG_TERM = args["max_len_long_term"]
