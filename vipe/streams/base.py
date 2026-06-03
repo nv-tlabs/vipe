@@ -16,6 +16,7 @@
 import copy
 import importlib
 import logging
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterable, Iterator, Protocol, cast
@@ -421,6 +422,106 @@ class CachedVideoStream(VideoStream):
         return self._attributes
 
 
+class AsyncCachedVideoStream(VideoStream):
+    """
+    Cache a video stream from a producer thread.
+
+    This preserves the CachedVideoStream external behavior while allowing a
+    pull-driven consumer to overlap downstream work with upstream processors.
+    Frames are still yielded in strict order and cached on CPU for later reuse.
+    """
+
+    DISPLAY_THRESH = CachedVideoStream.DISPLAY_THRESH
+
+    def __init__(self, video_stream: VideoStream, desc: str = "Caching", prefetch_depth: int = 2) -> None:
+        self._frame_size = video_stream.frame_size()
+        self._fps = video_stream.fps()
+        self._name = video_stream.name()
+        self._attributes = video_stream.attributes()
+        self._len = len(video_stream)
+        self.iterator: Iterator[VideoFrame] | None = iter(video_stream)
+        self.data: list[VideoFrame] = []
+        self.desc = desc
+        self.prefetch_depth = max(1, int(prefetch_depth))
+        self._requested_until = -1
+        self._done = False
+        self._error: BaseException | None = None
+        self._condition = threading.Condition()
+        self._producer = threading.Thread(target=self._produce, name=f"{type(self).__name__}:{self._name}", daemon=True)
+        self._producer.start()
+
+    def _produce(self) -> None:
+        try:
+            while True:
+                with self._condition:
+                    while not self._done and len(self.data) - (self._requested_until + 1) >= self.prefetch_depth:
+                        self._condition.wait()
+                    if self._done:
+                        return
+
+                assert self.iterator is not None
+                try:
+                    frame = next(self.iterator).cpu()
+                except StopIteration:
+                    with self._condition:
+                        if len(self.data) != self._len:
+                            logger.warning(
+                                "Iterator is exhausted -- expecting total frames = %d, stopped at %d",
+                                self._len,
+                                len(self.data),
+                            )
+                            self._len = len(self.data)
+                        self.iterator = None
+                        self._done = True
+                        self._condition.notify_all()
+                    torch.cuda.empty_cache()
+                    return
+
+                with self._condition:
+                    self.data.append(frame)
+                    self._condition.notify_all()
+        except BaseException as exc:
+            with self._condition:
+                self._error = exc
+                self._done = True
+                self._condition.notify_all()
+
+    def fps(self) -> float:
+        return self._fps
+
+    def frame_size(self) -> tuple[int, int]:
+        return self._frame_size
+
+    def name(self) -> str:
+        return self._name
+
+    def __len__(self) -> int:
+        return self._len
+
+    def __getitem__(self, index) -> VideoFrame:
+        assert index < len(self)
+        with self._condition:
+            self._requested_until = max(self._requested_until, index)
+            self._condition.notify_all()
+            while len(self.data) <= index and not self._done and self._error is None:
+                self._condition.wait()
+            if self._error is not None:
+                raise RuntimeError(f"Async stream producer failed while caching {self._name}") from self._error
+            if index >= len(self.data):
+                raise IndexError(f"Frame index {index} is unavailable in {self._name}; cached {len(self.data)} frames")
+            frame = self.data[index]
+        return frame.cuda()
+
+    def __iter__(self):
+        for idx in range(len(self)):
+            if idx >= len(self):
+                break
+            yield self[idx]
+
+    def attributes(self) -> set[FrameAttribute]:
+        return self._attributes
+
+
 class StreamProcessor(Protocol):
     """
     Interface of a stream processor that processes each video frame.
@@ -489,8 +590,17 @@ class ProcessedVideoStream(VideoStream):
     def name(self) -> str:
         return self.stream.name()
 
-    def cache(self, desc: str = "Caching", online: bool = False) -> CachedVideoStream:
-        vs = CachedVideoStream(self, desc)
+    def cache(
+        self,
+        desc: str = "Caching",
+        online: bool = False,
+        async_prefetch: bool = False,
+        prefetch_depth: int = 2,
+    ) -> CachedVideoStream | AsyncCachedVideoStream:
+        if async_prefetch:
+            vs = AsyncCachedVideoStream(self, desc, prefetch_depth=prefetch_depth)
+        else:
+            vs = CachedVideoStream(self, desc)
 
         # If not online, we trigger __getitem__ of the last element to force storing all frames.
         if not online:

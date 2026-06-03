@@ -45,6 +45,18 @@ from .processors import (
 logger = logging.getLogger(__name__)
 
 
+def _async_init_prefetch_enabled() -> bool:
+    return os.environ.get("VIPE_ASYNC_INIT_PREFETCH") == "1"
+
+
+def _async_init_prefetch_depth() -> int:
+    value = os.environ.get("VIPE_ASYNC_INIT_PREFETCH_DEPTH", "2")
+    try:
+        return max(1, int(value))
+    except ValueError as exc:
+        raise ValueError(f"VIPE_ASYNC_INIT_PREFETCH_DEPTH must be an integer, got {value!r}") from exc
+
+
 class DefaultAnnotationPipeline(Pipeline):
     def __init__(self, init: DictConfig, slam: DictConfig, post: DictConfig, output: DictConfig) -> None:
         super().__init__()
@@ -116,8 +128,16 @@ class DefaultAnnotationPipeline(Pipeline):
             logger.info(f"{video_data.name()} has been proccessed already, skip it!!")
             return annotate_output
 
+        async_prefetch = _async_init_prefetch_enabled()
+        prefetch_depth = _async_init_prefetch_depth() if async_prefetch else 2
         slam_streams: list[VideoStream] = [
-            self._add_init_processors(video_stream).cache("process", online=True) for video_stream in video_streams
+            self._add_init_processors(video_stream).cache(
+                "process",
+                online=True,
+                async_prefetch=async_prefetch,
+                prefetch_depth=prefetch_depth,
+            )
+            for video_stream in video_streams
         ]
 
         slam_pipeline = SLAMSystem(device=torch.device("cuda"), config=self.slam_cfg, model_cache=self.model_cache)
