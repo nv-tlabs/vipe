@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-
 from vipe.utils.model_cache import ModelCache
 
 from .aot import config as engine_config

@@ -99,9 +99,7 @@ class TrackAnythingPipeline:
         rgb_frame = frame_data.rgb
 
         if self.frame_idx == 0:
-            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(
-                rgb_frame, self.caption, **self.threshold_args
-            )
+            pred_mask, _, pred_phrase = self.segtracker.detect_and_seg(rgb_frame, self.caption, **self.threshold_args)
             self.segtracker.add_reference(rgb_frame, pred_mask)
             self.instance_phrase.update(pred_phrase)
 
@@ -123,9 +121,7 @@ class TrackAnythingPipeline:
         self.frame_idx += 1
 
         pred_mask_unique = torch.unique(pred_mask).detach().cpu().tolist()
-        pred_phrase = {
-            int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase
-        }
+        pred_phrase = {int(k): self.instance_phrase[int(k)] for k in pred_mask_unique if int(k) in self.instance_phrase}
 
         pred_mask = pred_mask.to(dtype=torch.uint8, device=rgb_frame.device)
         return pred_mask, pred_phrase

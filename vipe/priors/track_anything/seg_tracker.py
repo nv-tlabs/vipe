@@ -5,7 +5,6 @@
 import numpy as np
 import torch
 
-
 from vipe.utils.model_cache import ModelCache
 
 from .aot_tracker import get_aot
@@ -140,7 +139,9 @@ class SegTracker:
 
     def add_mask_torch(self, interactive_mask: torch.Tensor) -> torch.Tensor:
         if self.origin_merged_mask is None:
-            self.origin_merged_mask = torch.zeros(interactive_mask.shape, dtype=torch.uint8, device=interactive_mask.device)
+            self.origin_merged_mask = torch.zeros(
+                interactive_mask.shape, dtype=torch.uint8, device=interactive_mask.device
+            )
 
         refined_merged_mask = self.origin_merged_mask.clone()
         refined_merged_mask[interactive_mask > 0] = self.curr_idx
