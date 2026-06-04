@@ -597,6 +597,7 @@ class ProcessedVideoStream(VideoStream):
         async_prefetch: bool = False,
         prefetch_depth: int = 2,
     ) -> CachedVideoStream | AsyncCachedVideoStream:
+        vs: CachedVideoStream | AsyncCachedVideoStream
         if async_prefetch:
             vs = AsyncCachedVideoStream(self, desc, prefetch_depth=prefetch_depth)
         else:
