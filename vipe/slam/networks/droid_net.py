@@ -526,6 +526,9 @@ class UpdateModule(nn.Module):
 
 
 class DroidNet(nn.Module):
+    image_mean: torch.Tensor
+    image_std: torch.Tensor
+
     def __init__(self):
         super(DroidNet, self).__init__()
         self.fnet = BasicEncoder(output_dim=128, norm_fn="instance")
