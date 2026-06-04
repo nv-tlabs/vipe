@@ -582,24 +582,19 @@ class DroidNet(nn.Module):
         self.eval()
 
 
-def _normalize_droid_net_device(device: torch.device) -> torch.device:
-    device = torch.device(device)
-    if device.type == "cuda" and device.index is None and torch.cuda.is_available():
-        return torch.device("cuda", torch.cuda.current_device())
-    return device
-
-
-def _build_cached_droid_net(device: torch.device) -> DroidNet:
-    normalized_device = _normalize_droid_net_device(device)
-    net = DroidNet().to(normalized_device)
-    net.eval()
-    net.requires_grad_(False)
-    return net
-
-
 def get_droid_net(device: torch.device, model_cache: ModelCache | None = None) -> DroidNet:
     """Build DroidNet, optionally reusing the caller-owned model cache."""
-    normalized_device = _normalize_droid_net_device(device)
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None and torch.cuda.is_available():
+        device = torch.device("cuda", torch.cuda.current_device())
+
     if model_cache is None:
-        return DroidNet().to(normalized_device)
-    return model_cache.get(f"slam/droid_net/{normalized_device}", lambda: _build_cached_droid_net(normalized_device))
+        return DroidNet().to(device)
+
+    def build_cached_droid_net() -> DroidNet:
+        net = DroidNet().to(device)
+        net.eval()
+        net.requires_grad_(False)
+        return net
+
+    return model_cache.get(f"slam/droid_net/{device}", build_cached_droid_net)
