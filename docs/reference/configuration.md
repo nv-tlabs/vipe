@@ -108,6 +108,7 @@ Initialization options for the default pinhole and wide-angle pipelines.
 | `intrinsics` | `geocalib` \| `gt` | required | choices `geocalib` \| `gt` | Source of camera intrinsics. geocalib estimates intrinsics; gt expects each frame to provide them. |
 | `instance` | InstanceInitConfig \| null | required | - | Instance-segmentation initialization. Set to null to skip instance masks. |
 | `async_prefetch` | bool | `true` | - | Prefetch initialized frames asynchronously before SLAM. Set false to use serialized caching. |
+| `prefetch_queue_size` | int | `16` | >= 1 | Maximum number of initialized frames the async producer may keep ready ahead of SLAM. |
 
 ### PanoramaInitConfig
 

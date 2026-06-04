@@ -45,6 +45,11 @@ class DefaultInitConfig(BaseConfigSchema):
         default=True,
         description="Prefetch initialized frames asynchronously before SLAM. Set false to use serialized caching.",
     )
+    prefetch_queue_size: int = Field(
+        default=16,
+        ge=1,
+        description="Maximum number of initialized frames the async producer may keep ready ahead of SLAM.",
+    )
 
 
 class PanoramaInitConfig(BaseConfigSchema):

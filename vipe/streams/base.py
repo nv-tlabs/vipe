@@ -429,11 +429,13 @@ class AsyncCachedVideoStream(VideoStream):
     This preserves the CachedVideoStream external behavior while allowing a
     pull-driven consumer to overlap downstream work with upstream processors.
     Frames are still yielded in strict order and cached on CPU for later reuse.
+    The prefetch queue size is the maximum number of frames the producer may
+    keep ready ahead of the next requested consumer frame.
     """
 
     DISPLAY_THRESH = CachedVideoStream.DISPLAY_THRESH
 
-    def __init__(self, video_stream: VideoStream, desc: str = "Caching", prefetch_depth: int = 2) -> None:
+    def __init__(self, video_stream: VideoStream, desc: str = "Caching", prefetch_queue_size: int = 16) -> None:
         self._frame_size = video_stream.frame_size()
         self._fps = video_stream.fps()
         self._name = video_stream.name()
@@ -442,7 +444,7 @@ class AsyncCachedVideoStream(VideoStream):
         self.iterator: Iterator[VideoFrame] | None = iter(video_stream)
         self.data: list[VideoFrame] = []
         self.desc = desc
-        self.prefetch_depth = max(1, int(prefetch_depth))
+        self.prefetch_queue_size = max(1, int(prefetch_queue_size))
         self._requested_until = -1
         self._done = False
         self._error: BaseException | None = None
@@ -454,7 +456,7 @@ class AsyncCachedVideoStream(VideoStream):
         try:
             while True:
                 with self._condition:
-                    while not self._done and len(self.data) - (self._requested_until + 1) >= self.prefetch_depth:
+                    while not self._done and len(self.data) - (self._requested_until + 1) >= self.prefetch_queue_size:
                         self._condition.wait()
                     if self._done:
                         return
@@ -595,11 +597,11 @@ class ProcessedVideoStream(VideoStream):
         desc: str = "Caching",
         online: bool = False,
         async_prefetch: bool = False,
-        prefetch_depth: int = 2,
+        prefetch_queue_size: int = 16,
     ) -> CachedVideoStream | AsyncCachedVideoStream:
         vs: CachedVideoStream | AsyncCachedVideoStream
         if async_prefetch:
-            vs = AsyncCachedVideoStream(self, desc, prefetch_depth=prefetch_depth)
+            vs = AsyncCachedVideoStream(self, desc, prefetch_queue_size=prefetch_queue_size)
         else:
             vs = CachedVideoStream(self, desc)
 

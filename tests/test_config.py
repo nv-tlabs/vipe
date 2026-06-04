@@ -171,7 +171,9 @@ def test_default_init_async_prefetch_can_fall_back_to_serialized_cache(tmp_path:
 
     assert isinstance(config.pipeline, DefaultPipelineConfig)
     assert config.pipeline.init.async_prefetch is False
+    assert config.pipeline.init.prefetch_queue_size == 16
     assert config.pipeline.to_dictconfig().init.async_prefetch is False
+    assert config.pipeline.to_dictconfig().init.prefetch_queue_size == 16
 
 
 @pytest.mark.parametrize(

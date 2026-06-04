@@ -117,12 +117,13 @@ class DefaultAnnotationPipeline(Pipeline):
             return annotate_output
 
         async_prefetch = bool(getattr(self.init_cfg, "async_prefetch", True))
+        prefetch_queue_size = int(getattr(self.init_cfg, "prefetch_queue_size", 16))
         slam_streams: list[VideoStream] = [
             self._add_init_processors(video_stream).cache(
                 "process",
                 online=True,
                 async_prefetch=async_prefetch,
-                prefetch_depth=2,
+                prefetch_queue_size=prefetch_queue_size,
             )
             for video_stream in video_streams
         ]
