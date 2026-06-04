@@ -18,8 +18,6 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
-import logging
-import threading
 from collections import OrderedDict
 from pathlib import Path
 
@@ -29,10 +27,7 @@ import torch.nn.functional as F
 
 from vipe.ext import droid_net_ext
 from vipe.ext.scatter import scatter_mean
-
-logger = logging.getLogger(__name__)
-_DROID_NET_CACHE: dict[str, "DroidNet"] = {}
-_DROID_NET_CACHE_LOCK = threading.Lock()
+from vipe.utils.model_cache import ModelCache
 
 
 class CorrSampler(torch.autograd.Function):
@@ -594,24 +589,17 @@ def _normalize_droid_net_device(device: torch.device) -> torch.device:
     return device
 
 
-def get_shared_droid_net(device: torch.device) -> DroidNet:
-    """Return the immutable process-local DroidNet for a device."""
+def _build_cached_droid_net(device: torch.device) -> DroidNet:
     normalized_device = _normalize_droid_net_device(device)
-    cache_key = str(normalized_device)
-    with _DROID_NET_CACHE_LOCK:
-        net = _DROID_NET_CACHE.get(cache_key)
-        if net is None:
-            logger.info("Loading shared DroidNet on %s", cache_key)
-            net = DroidNet().to(normalized_device)
-            net.eval()
-            net.requires_grad_(False)
-            _DROID_NET_CACHE[cache_key] = net
-        else:
-            logger.info("Reusing shared DroidNet on %s", cache_key)
+    net = DroidNet().to(normalized_device)
+    net.eval()
+    net.requires_grad_(False)
     return net
 
 
-def clear_shared_droid_net_cache() -> None:
-    """Clear the process-local DroidNet cache for tests."""
-    with _DROID_NET_CACHE_LOCK:
-        _DROID_NET_CACHE.clear()
+def get_droid_net(device: torch.device, model_cache: ModelCache | None = None) -> DroidNet:
+    """Build DroidNet, optionally reusing the caller-owned model cache."""
+    normalized_device = _normalize_droid_net_device(device)
+    if model_cache is None:
+        return DroidNet().to(normalized_device)
+    return model_cache.get(f"slam/droid_net/{normalized_device}", lambda: _build_cached_droid_net(normalized_device))

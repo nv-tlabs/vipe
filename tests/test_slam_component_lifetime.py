@@ -6,6 +6,7 @@ from omegaconf import OmegaConf
 from vipe.slam import system
 from vipe.slam.networks import droid_net
 from vipe.utils.cameras import CameraType
+from vipe.utils.model_cache import ModelCache
 
 
 class _FakeRig:
@@ -47,21 +48,21 @@ def _minimal_slam_config():
     )
 
 
-def test_shared_droid_net_reuses_frozen_eval_model(monkeypatch) -> None:
+def test_model_cache_reuses_frozen_eval_droid_net(monkeypatch) -> None:
     load_calls = 0
 
     def fake_load_weights(self) -> None:
         nonlocal load_calls
         load_calls += 1
 
-    droid_net.clear_shared_droid_net_cache()
+    model_cache = ModelCache()
     monkeypatch.setattr(droid_net.DroidNet, "load_weights", fake_load_weights)
 
     try:
-        first = droid_net.get_shared_droid_net(torch.device("cpu"))
-        second = droid_net.get_shared_droid_net(torch.device("cpu"))
+        first = droid_net.get_droid_net(torch.device("cpu"), model_cache)
+        second = droid_net.get_droid_net(torch.device("cpu"), model_cache)
     finally:
-        droid_net.clear_shared_droid_net_cache()
+        model_cache.clear()
 
     assert first is second
     assert load_calls == 1
@@ -71,20 +72,36 @@ def test_shared_droid_net_reuses_frozen_eval_model(monkeypatch) -> None:
     assert first.image_std.data_ptr() == second.image_std.data_ptr()
 
 
+def test_droid_net_without_model_cache_is_not_shared(monkeypatch) -> None:
+    load_calls = 0
+
+    def fake_load_weights(self) -> None:
+        nonlocal load_calls
+        load_calls += 1
+
+    monkeypatch.setattr(droid_net.DroidNet, "load_weights", fake_load_weights)
+
+    first = droid_net.get_droid_net(torch.device("cpu"))
+    second = droid_net.get_droid_net(torch.device("cpu"))
+
+    assert first is not second
+    assert load_calls == 2
+
+
 def test_slam_component_build_reuses_only_droid_net(monkeypatch) -> None:
-    droid_net.clear_shared_droid_net_cache()
+    model_cache = ModelCache()
     monkeypatch.setattr(droid_net.DroidNet, "load_weights", lambda self: None)
 
     try:
-        first = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config())
+        first = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config(), model_cache=model_cache)
         first.rig = _FakeRig()
         first._build_components()
 
-        second = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config())
+        second = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config(), model_cache=model_cache)
         second.rig = _FakeRig()
         second._build_components()
     finally:
-        droid_net.clear_shared_droid_net_cache()
+        model_cache.clear()
 
     assert first.droid_net is second.droid_net
     assert first.sparse_tracks is not second.sparse_tracks
@@ -96,3 +113,17 @@ def test_slam_component_build_reuses_only_droid_net(monkeypatch) -> None:
     assert first.inner_filler is not second.inner_filler
     assert first.buffer.poses.data_ptr() != second.buffer.poses.data_ptr()
     assert first.buffer.cross_view_idx.data_ptr() != second.buffer.cross_view_idx.data_ptr()
+
+
+def test_slam_component_build_without_model_cache_does_not_share_droid_net(monkeypatch) -> None:
+    monkeypatch.setattr(droid_net.DroidNet, "load_weights", lambda self: None)
+
+    first = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config())
+    first.rig = _FakeRig()
+    first._build_components()
+
+    second = system.SLAMSystem(torch.device("cpu"), _minimal_slam_config())
+    second.rig = _FakeRig()
+    second._build_components()
+
+    assert first.droid_net is not second.droid_net
