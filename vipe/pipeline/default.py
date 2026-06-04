@@ -116,8 +116,8 @@ class DefaultAnnotationPipeline(Pipeline):
             logger.info(f"{video_data.name()} has been proccessed already, skip it!!")
             return annotate_output
 
-        async_prefetch = bool(getattr(self.init_cfg, "async_prefetch", True))
-        prefetch_queue_size = int(getattr(self.init_cfg, "prefetch_queue_size", 16))
+        async_prefetch = self.init_cfg.async_prefetch
+        prefetch_queue_size = self.init_cfg.prefetch_queue_size
         slam_streams: list[VideoStream] = [
             self._add_init_processors(video_stream).cache(
                 "process",
