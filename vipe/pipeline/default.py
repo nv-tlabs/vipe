@@ -15,7 +15,6 @@
 
 
 import logging
-import os
 import pickle
 from pathlib import Path
 
@@ -44,18 +43,6 @@ from .processors import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _async_init_prefetch_enabled() -> bool:
-    return os.environ.get("VIPE_ASYNC_INIT_PREFETCH") == "1"
-
-
-def _async_init_prefetch_depth() -> int:
-    value = os.environ.get("VIPE_ASYNC_INIT_PREFETCH_DEPTH", "2")
-    try:
-        return max(1, int(value))
-    except ValueError as exc:
-        raise ValueError(f"VIPE_ASYNC_INIT_PREFETCH_DEPTH must be an integer, got {value!r}") from exc
 
 
 class DefaultAnnotationPipeline(Pipeline):
@@ -129,14 +116,13 @@ class DefaultAnnotationPipeline(Pipeline):
             logger.info(f"{video_data.name()} has been proccessed already, skip it!!")
             return annotate_output
 
-        async_prefetch = _async_init_prefetch_enabled()
-        prefetch_depth = _async_init_prefetch_depth() if async_prefetch else 2
+        async_prefetch = bool(getattr(self.init_cfg, "async_prefetch", True))
         slam_streams: list[VideoStream] = [
             self._add_init_processors(video_stream).cache(
                 "process",
                 online=True,
                 async_prefetch=async_prefetch,
-                prefetch_depth=prefetch_depth,
+                prefetch_depth=2,
             )
             for video_stream in video_streams
         ]

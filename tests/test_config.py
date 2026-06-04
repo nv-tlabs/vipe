@@ -163,6 +163,17 @@ def test_default_config_ships_auto_fused_ba(tmp_path: Path) -> None:
     assert config.pipeline.slam.ba.fused is True
 
 
+def test_default_init_async_prefetch_can_fall_back_to_serialized_cache(tmp_path: Path) -> None:
+    config = parse_typed_config(
+        "default",
+        [*_base_overrides(tmp_path), "pipeline.init.async_prefetch=false"],
+    )
+
+    assert isinstance(config.pipeline, DefaultPipelineConfig)
+    assert config.pipeline.init.async_prefetch is False
+    assert config.pipeline.to_dictconfig().init.async_prefetch is False
+
+
 @pytest.mark.parametrize(
     "override",
     [

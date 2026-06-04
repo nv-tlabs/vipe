@@ -7,6 +7,7 @@ instance: vipe.pipeline.default.DefaultAnnotationPipeline
 init:
   camera_type: "pinhole"
   intrinsics: "geocalib"
+  async_prefetch: true
   instance:
     kf_gap_sec: 2.0
     phrases: 

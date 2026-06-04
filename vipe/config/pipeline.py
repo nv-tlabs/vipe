@@ -41,6 +41,10 @@ class DefaultInitConfig(BaseConfigSchema):
     instance: InstanceInitConfig | None = Field(
         description="Instance-segmentation initialization. Set to null to skip instance masks."
     )
+    async_prefetch: bool = Field(
+        default=True,
+        description="Prefetch initialized frames asynchronously before SLAM. Set false to use serialized caching.",
+    )
 
 
 class PanoramaInitConfig(BaseConfigSchema):
