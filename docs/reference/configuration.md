@@ -107,6 +107,7 @@ Initialization options for the default pinhole and wide-angle pipelines.
 | `camera_type` | `pinhole` \| `panorama` \| `simple_divisional` \| `mei` | required | choices `pinhole` \| `panorama` \| `simple_divisional` \| `mei` | Camera model used by SLAM and projection code. Use mei for wide-angle/fisheye input. |
 | `intrinsics` | `geocalib` \| `gt` | required | choices `geocalib` \| `gt` | Source of camera intrinsics. geocalib estimates intrinsics; gt expects each frame to provide them. |
 | `instance` | InstanceInitConfig \| null | required | - | Instance-segmentation initialization. Set to null to skip instance masks. |
+| `async_prefetch` | bool | `true` | - | Prefetch initialized frames asynchronously before SLAM. Set false to use serialized caching. |
 
 ### PanoramaInitConfig
 
