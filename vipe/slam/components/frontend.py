@@ -101,8 +101,8 @@ class SLAMFrontend:
 
         # remove frame t1-2 if it is too close to t1-3, so the new keyframes will be [t1-3, t1-1]
         d = self.video.frame_distance_dense_disp(
-            torch.tensor([self.t1 - 3]),
-            torch.tensor([self.t1 - 2]),
+            torch.tensor([self.t1 - 3], device=self.video.device),
+            torch.tensor([self.t1 - 2], device=self.video.device),
             beta=self.beta,
             bidirectional=True,
         )

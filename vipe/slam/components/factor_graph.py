@@ -94,14 +94,16 @@ class FactorGraph:
     def __filter_repeated_edges(self, ii, jj):
         """remove duplicate edges"""
 
-        keep = torch.zeros(ii.shape[0], dtype=torch.bool, device=ii.device)
         eset = set(
-            [(i.item(), j.item()) for i, j in zip(self.ii, self.jj)]
-            + [(i.item(), j.item()) for i, j in zip(self.ii_inac, self.jj_inac)]
+            [tuple(edge) for edge in torch.stack([self.ii, self.jj], dim=-1).detach().cpu().tolist()]
+            + [tuple(edge) for edge in torch.stack([self.ii_inac, self.jj_inac], dim=-1).detach().cpu().tolist()]
         )
 
-        for k, (i, j) in enumerate(zip(ii, jj)):
-            keep[k] = (i.item(), j.item()) not in eset
+        keep = torch.as_tensor(
+            [tuple(edge) not in eset for edge in torch.stack([ii, jj], dim=-1).detach().cpu().tolist()],
+            dtype=torch.bool,
+            device=ii.device,
+        )
 
         return ii[keep], jj[keep]
 
@@ -438,9 +440,15 @@ class FactorGraph:
         d = self.buffer.frame_distance_dense_disp(ii, jj, beta=beta)
         d = d.mean(-1)
 
+        d_np = d.detach().cpu().numpy()
+        ii_np = ii.detach().cpu().numpy()
+        jj_np = jj.detach().cpu().numpy()
+        active_edges = torch.stack([self.ii, self.jj], dim=-1).detach().cpu().numpy()
+        inactive_edges = torch.stack([self.ii_inac, self.jj_inac], dim=-1).detach().cpu().numpy()
+
         def _suppress(i: int, j: int):
             if (t0 <= i < t) and (t1 <= j < t):
-                d[(i - t0) * (t - t1) + (j - t1)] = np.inf
+                d_np[(i - t0) * (t - t1) + (j - t1)] = np.inf
 
         def _suppress_nms(i: int, j: int):
             for di in range(-nms, nms + 1):
@@ -448,13 +456,13 @@ class FactorGraph:
                     if abs(di) + abs(dj) <= max(min(abs(i - j) - 2, nms), 0):
                         _suppress(i + di, j + dj)
 
-        for i, j in zip(self.ii.cpu().numpy(), self.jj.cpu().numpy()):
+        for i, j in active_edges:
             _suppress_nms(i, j)
 
-        for i, j in zip(self.ii_inac.cpu().numpy(), self.jj_inac.cpu().numpy()):
+        for i, j in inactive_edges:
             _suppress_nms(i, j)
 
-        d[(ii - rad < jj) | (d > thresh)] = np.inf
+        d_np[(ii_np - rad < jj_np) | (d_np > thresh)] = np.inf
 
         es = []
         for i in range(t0, t):
@@ -467,15 +475,15 @@ class FactorGraph:
                 es.append((j, i))
                 _suppress(i, j)
 
-        ix = torch.argsort(d)
+        ix = np.argsort(d_np)
         for k in ix:
-            if d[k].item() > thresh:
+            if d_np[k] > thresh:
                 continue
 
             if len(es) > self.max_factors:
                 break
 
-            i, j = int(ii[k].item()), int(jj[k].item())
+            i, j = int(ii_np[k]), int(jj_np[k])
             es.append((i, j))
             es.append((j, i))
             _suppress_nms(i, j)
