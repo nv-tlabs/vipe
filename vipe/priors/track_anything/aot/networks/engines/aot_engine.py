@@ -619,12 +619,12 @@ class AOTInferEngine(nn.Module):
 
         self.update_size()
 
-    def match_propogate_one_frame(self, img=None):
-        img_embs = None
+    def match_propogate_one_frame(self, img=None, img_embs=None):
+        shared_img_embs = img_embs
         for aot_engine in self.aot_engines:
-            aot_engine.match_propogate_one_frame(img, img_embs=img_embs)
-            if img_embs is None:  # reuse image embeddings
-                img_embs = aot_engine.curr_enc_embs
+            aot_engine.match_propogate_one_frame(img, img_embs=shared_img_embs)
+            if shared_img_embs is None:  # reuse image embeddings
+                shared_img_embs = aot_engine.curr_enc_embs
 
     def decode_current_logits(self, output_size=None):
         all_logits = []

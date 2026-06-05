@@ -15,6 +15,7 @@
 
 
 import logging
+import os
 from typing import Any, Iterable, Iterator, cast
 
 import numpy as np
@@ -145,12 +146,18 @@ class TrackAnythingProcessor(StreamProcessor):
             model_cache=model_cache,
         )
         self.mask_expand = mask_expand
+        self.aot_encoder_batch_size = max(1, int(os.environ.get("VIPE_TRACK_ANYTHING_AOT_ENCODER_BATCH_SIZE", "1")))
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
         return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
 
-    def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
-        frame.instance, frame.instance_phrases = self.tracker.track(frame)
+    def _process_frame(
+        self,
+        frame_idx: int,
+        frame: VideoFrame,
+        aot_img_embs: tuple[torch.Tensor, ...] | None = None,
+    ) -> VideoFrame:
+        frame.instance, frame.instance_phrases = self.tracker.track(frame, aot_img_embs=aot_img_embs)
         self.last_track_frame = frame.raw_frame_idx
 
         frame_instance_mask = frame.instance == 0
@@ -160,6 +167,41 @@ class TrackAnythingProcessor(StreamProcessor):
 
         frame.mask = erode(frame_instance_mask, self.mask_expand)
         return frame
+
+    def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
+        return self._process_frame(frame_idx, frame)
+
+    def update_iterator(self, previous_iterator: Iterator[VideoFrame], pass_idx: int) -> Iterator[VideoFrame]:
+        if self.aot_encoder_batch_size <= 1:
+            for frame_idx, frame in enumerate(previous_iterator):
+                yield self._process_frame(frame_idx, frame)
+            return
+
+        pending_indices: list[int] = []
+        pending_frames: list[VideoFrame] = []
+
+        def flush_pending() -> Iterator[VideoFrame]:
+            nonlocal pending_indices, pending_frames
+            if not pending_frames:
+                return
+            embeddings = self.tracker.encode_aot_frames(pending_frames)
+            for pending_idx, pending_frame, aot_img_embs in zip(pending_indices, pending_frames, embeddings):
+                yield self._process_frame(pending_idx, pending_frame, aot_img_embs=aot_img_embs)
+            pending_indices = []
+            pending_frames = []
+
+        for frame_idx, frame in enumerate(previous_iterator):
+            if self.tracker.should_batch_aot_frame():
+                pending_indices.append(frame_idx)
+                pending_frames.append(frame)
+                if len(pending_frames) >= self.aot_encoder_batch_size:
+                    yield from flush_pending()
+                continue
+
+            yield from flush_pending()
+            yield self._process_frame(frame_idx, frame)
+
+        yield from flush_pending()
 
 
 class AdaptiveDepthProcessor(StreamProcessor):

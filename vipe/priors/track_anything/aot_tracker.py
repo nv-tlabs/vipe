@@ -97,20 +97,45 @@ class AOTTracker(object):
         if image.ndim != 3 or image.shape[-1] != 3:
             raise ValueError(f"expected HWC RGB image tensor, got shape {tuple(image.shape)}")
 
+        return self._prepare_image_batch([image])
+
+    def _prepare_image_batch(self, images: list[torch.Tensor]) -> torch.Tensor:
+        if not images:
+            raise ValueError("expected at least one image")
+
         device = torch.device(f"cuda:{self.gpu_id}")
-        input_is_uint8 = image.dtype == torch.uint8
-        image = image.to(device=device, dtype=torch.float32)
-        if input_is_uint8:
-            image = image / 255.0
+        first_shape = tuple(images[0].shape)
+        if len(first_shape) != 3 or first_shape[-1] != 3:
+            raise ValueError(f"expected HWC RGB image tensor, got shape {first_shape}")
 
-        image = image.permute(2, 0, 1).unsqueeze(0).contiguous()
-        new_h, new_w = self._restricted_size(image.shape[-2], image.shape[-1])
-        if (new_h, new_w) != tuple(image.shape[-2:]):
-            image = F.interpolate(image, size=(new_h, new_w), mode="bicubic", align_corners=False)
+        batched_images: list[torch.Tensor] = []
+        for image in images:
+            if not isinstance(image, torch.Tensor):
+                raise TypeError("GPU AOT path requires image as a CUDA torch.Tensor")
+            if tuple(image.shape) != first_shape:
+                raise ValueError(
+                    f"AOT encoder batching requires same-sized frames; got {tuple(image.shape)} and {first_shape}"
+                )
+            input_is_uint8 = image.dtype == torch.uint8
+            image = image.to(device=device, dtype=torch.float32)
+            if input_is_uint8:
+                image = image / 255.0
+            batched_images.append(image.permute(2, 0, 1))
 
-        mean = image.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
-        std = image.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
-        return (image - mean) / std
+        image_batch = torch.stack(batched_images, dim=0).contiguous()
+        new_h, new_w = self._restricted_size(image_batch.shape[-2], image_batch.shape[-1])
+        if (new_h, new_w) != tuple(image_batch.shape[-2:]):
+            image_batch = F.interpolate(image_batch, size=(new_h, new_w), mode="bicubic", align_corners=False)
+
+        mean = image_batch.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
+        std = image_batch.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
+        return (image_batch - mean) / std
+
+    @torch.no_grad()
+    def encode_frames(self, images: list[torch.Tensor]) -> list[tuple[torch.Tensor, ...]]:
+        image_batch = self._prepare_image_batch(images)
+        encoded_batch = self.model.encode_image(image_batch)
+        return [tuple(feature[idx : idx + 1] for feature in encoded_batch) for idx in range(image_batch.shape[0])]
 
     @torch.no_grad()
     def add_reference_frame(self, frame, mask, obj_nums, frame_step, incremental=False):
@@ -126,10 +151,11 @@ class AOTTracker(object):
             self.engine.add_reference_frame(frame, _mask, obj_nums=obj_nums, frame_step=frame_step)
 
     @torch.no_grad()
-    def track(self, image):
+    def track(self, image, img_embs=None):
         output_height, output_width = image.shape[0], image.shape[1]
-        image = self._prepare_image_tensor(image)
-        self.engine.match_propogate_one_frame(image)
+        if img_embs is None:
+            image = self._prepare_image_tensor(image)
+        self.engine.match_propogate_one_frame(image, img_embs=img_embs)
         pred_logit = self.engine.decode_current_logits((output_height, output_width))
 
         # pred_prob = torch.softmax(pred_logit, dim=1)

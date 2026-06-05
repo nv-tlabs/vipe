@@ -80,7 +80,17 @@ class TrackAnythingPipeline:
         self.segtracker.restart_tracker()
         self.instance_phrase = {0: "background"}
 
-    def track(self, frame_data: VideoFrame) -> tuple[torch.Tensor, dict[int, str]]:
+    def should_batch_aot_frame(self) -> bool:
+        return self.frame_idx > 0 and self.frame_idx % self.sam_run_gap != 0
+
+    def encode_aot_frames(self, frame_data_list: list[VideoFrame]) -> list[tuple[torch.Tensor, ...]]:
+        return self.segtracker.encode_aot_frames([frame_data.rgb for frame_data in frame_data_list])
+
+    def track(
+        self,
+        frame_data: VideoFrame,
+        aot_img_embs: tuple[torch.Tensor, ...] | None = None,
+    ) -> tuple[torch.Tensor, dict[int, str]]:
         """
         Detect new and track existing objects in the frame.
 
@@ -116,7 +126,7 @@ class TrackAnythingPipeline:
             self.segtracker.add_reference(rgb_frame, pred_mask)
 
         else:
-            pred_mask = self.segtracker.track(rgb_frame, update_memory=True)
+            pred_mask = self.segtracker.track(rgb_frame, update_memory=True, img_embs=aot_img_embs)
 
         self.frame_idx += 1
 

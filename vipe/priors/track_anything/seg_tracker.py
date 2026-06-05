@@ -58,7 +58,10 @@ class SegTracker:
         self.tracker.add_reference_frame(frame, mask, self.curr_idx, frame_step)
         self.curr_idx += 1
 
-    def track(self, frame, update_memory=False):
+    def encode_aot_frames(self, frames: list[torch.Tensor]) -> list[tuple[torch.Tensor, ...]]:
+        return self.tracker.encode_frames(frames)
+
+    def track(self, frame, update_memory=False, img_embs=None):
         """
         Track all known objects.
         Arguments:
@@ -66,7 +69,7 @@ class SegTracker:
         Return:
             origin_merged_mask: CUDA tensor (h,w)
         """
-        pred_label = self.tracker.track(frame)
+        pred_label = self.tracker.track(frame, img_embs=img_embs)
         if update_memory:
             self.tracker.update_memory(pred_label)
         return pred_label.squeeze(0).squeeze(0).to(torch.uint8)
