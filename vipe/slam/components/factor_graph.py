@@ -475,8 +475,8 @@ class FactorGraph:
                 es.append((j, i))
                 _suppress(i, j)
 
-        ix = np.argsort(d_np)
-        for k in ix:
+        edge_order = np.argsort(d_np)
+        for k in edge_order:
             if d_np[k] > thresh:
                 continue
 
