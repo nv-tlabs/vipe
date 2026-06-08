@@ -146,7 +146,7 @@ class TrackAnythingProcessor(StreamProcessor):
             model_cache=model_cache,
         )
         self.mask_expand = mask_expand
-        self.aot_encoder_batch_size = max(1, int(os.environ.get("VIPE_TRACK_ANYTHING_AOT_ENCODER_BATCH_SIZE", "1")))
+        self.aot_encoder_batch_size = max(1, int(os.environ.get("VIPE_TRACK_ANYTHING_AOT_ENCODER_BATCH_SIZE", "4")))
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
         return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
