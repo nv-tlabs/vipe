@@ -191,7 +191,7 @@ class TrackAnythingProcessor(StreamProcessor):
             pending_frames = []
 
         for frame_idx, frame in enumerate(previous_iterator):
-            if self.tracker.should_batch_aot_frame():
+            if self.tracker.should_batch_aot_frame(len(pending_frames)):
                 pending_indices.append(frame_idx)
                 pending_frames.append(frame)
                 if len(pending_frames) >= self.aot_encoder_batch_size:

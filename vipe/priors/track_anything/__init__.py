@@ -80,8 +80,9 @@ class TrackAnythingPipeline:
         self.segtracker.restart_tracker()
         self.instance_phrase = {0: "background"}
 
-    def should_batch_aot_frame(self) -> bool:
-        return self.frame_idx > 0 and self.frame_idx % self.sam_run_gap != 0
+    def should_batch_aot_frame(self, pending_frame_count: int = 0) -> bool:
+        frame_idx = self.frame_idx + pending_frame_count
+        return frame_idx > 0 and frame_idx % self.sam_run_gap != 0
 
     def encode_aot_frames(self, frame_data_list: list[VideoFrame]) -> list[tuple[torch.Tensor, ...]]:
         return self.segtracker.encode_aot_frames([frame_data.rgb for frame_data in frame_data_list])
