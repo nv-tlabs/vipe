@@ -60,7 +60,7 @@ ignore_missing_imports = true
 
 [project]
 name = "nvidia-vipe"
-version = "1.1.0"
+version = "1.2.0"
 description = "NVIDIA Video Pose Engine"
 authors = [
     {name = "The ViPE Authors", email = "jiahuih@nvidia.com"},

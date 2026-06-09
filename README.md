@@ -18,6 +18,7 @@ ViPE estimates camera intrinsics, camera motion, and dense near-metric depth map
 
 ## News
 
+- **2026/06**: Released ViPE 1.2.0 with CUDA fused kernels, model and pipeline caching, prefetching, and other optimizations, achieving a 2.7x speed-up with no loss of accuracy.
 - **2026/05**: Merged Panorama estimation pipeline & bump release version to 1.0.0.
 - **2026/01**: Integration with [Depth-Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) for depth estimation (use `dav3` pipeline).
 - **2025/10**: Add support to run on wide-angle videos.
