@@ -129,13 +129,17 @@ class VideoFrame:
         else:
             raise ValueError(f"Attribute {attribute} is not available in the frame.")
 
-    def cpu(self) -> "VideoFrame":
+    def cpu(self, compact_rgb: bool = False) -> "VideoFrame":
         def map_cpu(x):
             return x.cpu() if x is not None else None
 
+        rgb = self.rgb.cpu()
+        if compact_rgb and rgb.is_floating_point():
+            rgb = (rgb.clamp(0, 1) * 255).round().to(torch.uint8)
+
         return VideoFrame(
             raw_frame_idx=self.raw_frame_idx,
-            rgb=self.rgb.cpu(),
+            rgb=rgb,
             mask=map_cpu(self.mask),
             instance=map_cpu(self.instance),
             instance_phrases=self.instance_phrases,
@@ -150,9 +154,13 @@ class VideoFrame:
         def map_cuda(x):
             return x.cuda() if x is not None else None
 
+        rgb = self.rgb.cuda()
+        if rgb.dtype == torch.uint8:
+            rgb = rgb.float().div_(255.0)
+
         return VideoFrame(
             raw_frame_idx=self.raw_frame_idx,
-            rgb=self.rgb.cuda(),
+            rgb=rgb,
             mask=map_cuda(self.mask),
             instance=map_cuda(self.instance),
             instance_phrases=self.instance_phrases,
@@ -357,7 +365,7 @@ class CachedVideoStream(VideoStream):
 
     DISPLAY_THRESH = 20
 
-    def __init__(self, video_stream: VideoStream, desc: str = "Caching") -> None:
+    def __init__(self, video_stream: VideoStream, desc: str = "Caching", compact_rgb: bool = True) -> None:
         self._frame_size = video_stream.frame_size()
         self._fps = video_stream.fps()
         self._name = video_stream.name()
@@ -366,6 +374,7 @@ class CachedVideoStream(VideoStream):
         self.iterator: Iterator[VideoFrame] | None = iter(video_stream)
         self.data: list[VideoFrame] = []
         self.desc = desc
+        self.compact_rgb = compact_rgb
 
     def fps(self) -> float:
         return self._fps
@@ -392,7 +401,7 @@ class CachedVideoStream(VideoStream):
         for _ in itr:
             assert self.iterator is not None
             try:
-                self.data.append(next(self.iterator).cpu())
+                self.data.append(next(self.iterator).cpu(compact_rgb=self.compact_rgb))
             except StopIteration:
                 logger.warning(
                     "Iterator is exhausted -- expecting total frames = %d, stopped at %d",

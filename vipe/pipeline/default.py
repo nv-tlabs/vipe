@@ -135,10 +135,14 @@ class DefaultAnnotationPipeline(Pipeline):
             annotate_output.payload = slam_output
             return annotate_output
 
-        output_streams = [
-            self._add_post_processors(view_idx, slam_stream, slam_output).cache("depth", online=True)
-            for view_idx, slam_stream in enumerate(slam_streams)
-        ]
+        output_streams: list[VideoStream] = []
+        cache_output_streams = self.out_cfg.save_viz or self.return_output_streams
+        for view_idx, slam_stream in enumerate(slam_streams):
+            processed_output_stream = self._add_post_processors(view_idx, slam_stream, slam_output)
+            output_stream: VideoStream = processed_output_stream
+            if cache_output_streams:
+                output_stream = processed_output_stream.cache("depth", online=True)
+            output_streams.append(output_stream)
 
         # Dumping artifacts for all views in the streams
         for output_stream, artifact_path in zip(output_streams, artifact_paths):

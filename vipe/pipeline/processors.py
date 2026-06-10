@@ -262,8 +262,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
         frame_list: list[np.ndarray] = []
         frame_data_list: list[VideoFrame] = []
         for frame in frame_iterator:
-            frame_data_list.append(frame.cpu())
-            frame_list.append(frame.rgb.cpu().numpy())
+            frame_data_list.append(frame.cpu(compact_rgb=True))
+            frame_list.append((frame.rgb.cpu().numpy().clip(0, 1) * 255).round().astype(np.uint8))
 
         video_depth_model = unpack_optional(self.video_depth_model)
         video_depth_result: torch.Tensor = unpack_optional(

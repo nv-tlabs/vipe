@@ -19,7 +19,7 @@ import click
 
 from vipe import make_pipeline
 from vipe.config import parse_typed_config
-from vipe.streams.base import ProcessedVideoStream
+from vipe.streams.base import ProcessedVideoStream, VideoStream
 from vipe.streams.frame_dir_stream import FrameDirStream
 from vipe.streams.raw_mp4_stream import RawMp4Stream
 from vipe.utils.logging import configure_logging
@@ -42,7 +42,12 @@ from vipe.utils.viser import run_viser
 )
 @click.option("--pipeline", "-p", default="default", help="Pipeline configuration to use (default: 'default')")
 @click.option("--visualize", "-v", is_flag=True, help="Enable visualization of intermediate results")
-def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: str, visualize: bool):
+@click.option(
+    "--cache-input",
+    is_flag=True,
+    help="Preload decoded input frames before running. Use only for malformed videos that cannot be streamed twice.",
+)
+def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: str, visualize: bool, cache_input: bool):
     """Run inference on a video file or directory of images."""
 
     logger = configure_logging()
@@ -77,11 +82,15 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
 
     if image_dir:
         # Use frame directory stream
-        video_stream = ProcessedVideoStream(FrameDirStream(image_dir), []).cache(desc="Reading image frames")
+        video_stream: VideoStream = FrameDirStream(image_dir)
+        if cache_input:
+            video_stream = ProcessedVideoStream(video_stream, []).cache(desc="Reading image frames")
     else:
         assert video is not None
-        # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
-        video_stream = ProcessedVideoStream(RawMp4Stream(video), []).cache(desc="Reading video stream")
+        video_stream = RawMp4Stream(video)
+        if cache_input:
+            # Some input videos can be malformed, so users may opt into caching to obtain the exact decoded frame count.
+            video_stream = ProcessedVideoStream(video_stream, []).cache(desc="Reading video stream")
 
     vipe_pipeline.run(video_stream)
     logger.info("Finished")
