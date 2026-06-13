@@ -13,16 +13,50 @@ from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAtte
 class BertModelWarper(nn.Module):
     def __init__(self, bert_model):
         super().__init__()
-        # self.bert = bert_modelc
-
         self.config = bert_model.config
         self.embeddings = bert_model.embeddings
         self.encoder = bert_model.encoder
         self.pooler = bert_model.pooler
 
-        self.get_extended_attention_mask = bert_model.get_extended_attention_mask
-        self.invert_attention_mask = bert_model.invert_attention_mask
-        self.get_head_mask = bert_model.get_head_mask
+    def _get_dtype(self):
+        return next(self.embeddings.parameters()).dtype
+
+    def get_extended_attention_mask(self, attention_mask, input_shape, device=None, dtype=None):
+        if dtype is None:
+            dtype = self._get_dtype()
+        if attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended_attention_mask = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong shape for attention_mask: {attention_mask.shape}")
+        extended_attention_mask = extended_attention_mask.to(dtype=dtype)
+        extended_attention_mask = (1.0 - extended_attention_mask) * torch.finfo(dtype).min
+        return extended_attention_mask
+
+    def invert_attention_mask(self, encoder_attention_mask):
+        dtype = self._get_dtype()
+        if encoder_attention_mask.dim() == 3:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, :, :]
+        elif encoder_attention_mask.dim() == 2:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong shape for encoder_attention_mask: {encoder_attention_mask.shape}")
+        encoder_extended_attention_mask = encoder_extended_attention_mask.to(dtype=dtype)
+        encoder_extended_attention_mask = (1.0 - encoder_extended_attention_mask) * torch.finfo(dtype).min
+        return encoder_extended_attention_mask
+
+    def get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
+        if head_mask is None:
+            return [None] * num_hidden_layers
+        if head_mask.dim() == 1:
+            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+        elif head_mask.dim() == 2:
+            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+        if is_attention_chunked:
+            head_mask = head_mask.unsqueeze(-1)
+        return head_mask
 
     def forward(
         self,
