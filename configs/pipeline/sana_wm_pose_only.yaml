@@ -1,0 +1,24 @@
+# SANA-WM pose-annotation pipeline config (App. B.1).
+# Minimal: no instance segmentation, no visualization.
+# Use:  vipe infer <video> -o <out> --pipeline sana_wm_pose_only
+#
+# Depth backend precedence:
+#   pi3x_moge2  — paper-aligned (requires SANA_WM_PI3X_WEIGHTS + SANA_WM_MOGE2_WEIGHTS)
+#   unidepth-l  — fallback smoke/debug mode (no extra weights needed beyond VIPE)
+defaults:
+  - default
+
+init:
+  instance: null        # skip segmentation (not needed for pose annotation)
+
+slam:
+  keyframe_depth: unidepth-l   # changed to pi3x_moge2 once weights registered
+
+post:
+  depth_align_model: "adaptive_unidepth-l"   # changed to pi3x_moge2 for full pipeline
+
+output:
+  save_viz: false       # no visualization videos
+  save_artifacts: true  # write pose/intrinsics/depth npz
+  viz_downsample: 2
+  viz_attributes: [['rgb']]

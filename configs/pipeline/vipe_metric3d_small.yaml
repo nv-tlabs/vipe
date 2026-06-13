@@ -1,0 +1,38 @@
+defaults:
+  - /slam: default
+  - _self_
+
+instance: vipe.pipeline.default.DefaultAnnotationPipeline
+
+init:
+  camera_type: "pinhole"
+  intrinsics: "geocalib"
+  instance:
+    kf_gap_sec: 2.0
+    phrases:
+      - person
+      - animal
+      - vehicle
+      - ball
+      - balloon
+      - gun
+      - pet
+      - car
+      - bus
+    add_sky: true
+
+slam:
+  keyframe_depth: metric3d-small
+  optimize_intrinsics: ${neq:${..init.intrinsics},"gt"}
+
+post:
+  depth_align_model: null
+
+output:
+  path: vipe_results/
+  skip_exists: false
+  save_artifacts: true
+  save_slam_map: false
+  save_viz: false
+  viz_downsample: 2
+  viz_attributes: [['rgb', 'instance'], ['depth', 'pcd']]

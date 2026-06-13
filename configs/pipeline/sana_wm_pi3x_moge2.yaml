@@ -1,0 +1,19 @@
+# SANA-WM 增强版 pipeline（pi3x_moge2 后端）
+# 与 sana_wm_pose_only.yaml 的唯一区别：两处深度后端改为 pi3x_moge2
+defaults:
+  - default
+
+init:
+  instance: null
+
+slam:
+  keyframe_depth: pi3x_moge2
+
+post:
+  depth_align_model: adaptive_pi3x-moge2
+
+output:
+  save_viz: false
+  save_artifacts: true
+  viz_downsample: 2
+  viz_attributes: [['rgb']]

@@ -260,6 +260,7 @@ class GraphBuffer:
                 rgb=self.images[frame_idx].moveaxis(1, -1).float(),
                 intrinsics=intrinsics[0],
                 camera_type=self.camera_type,
+                frame_idx=int(self.tstamp[frame_idx].item()),
             )
             disp_sens = unpack_optional(depth_model.estimate(depth_input).metric_depth)
             disp_sens = disp_sens[:, 3::8, 3::8]

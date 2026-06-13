@@ -42,5 +42,18 @@ def make_depth_model(model: str):
 
         return DepthAnything3Model()
 
+
+    elif model_name == "pi3x_moge2" or (model_name == "pi3x" and model_sub == "moge2"):
+        from .pi3x_moge2 import Pi3XMoGe2DepthModel
+        return Pi3XMoGe2DepthModel()
+
+    elif model_name == "cached":
+        import os
+        from .cached import CachedDepthModel
+        cache_path = os.environ.get("SANA_WM_CACHED_DEPTH_PATH", "")
+        if not cache_path:
+            raise ValueError("cached depth model requires SANA_WM_CACHED_DEPTH_PATH env var")
+        return CachedDepthModel(cache_path=cache_path)
+
     else:
         raise ValueError(f"Unknown depth model: {model}")

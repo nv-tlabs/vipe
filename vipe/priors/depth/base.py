@@ -77,6 +77,7 @@ class DepthEstimationInput:
     prompt_metric_depth: torch.Tensor | None = None
     intrinsics: torch.Tensor | None = None
     camera_type: CameraType = CameraType.PINHOLE
+    frame_idx: int | None = None
 
 
 class DepthEstimationModel(ABC):

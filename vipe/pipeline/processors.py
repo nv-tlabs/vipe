@@ -623,3 +623,144 @@ class EquirectProjectionProcessor(StreamProcessor):
             instance=new_instance,
             mask=new_mask,
         )
+
+
+class VideoPi3XDepthProcessor(StreamProcessor):
+    """
+    Full-video Pi3X + MoGe-2 depth alignment (SANA-WM Plan A).
+
+    Unlike AdaptiveDepthProcessor (per-frame streaming), this processor:
+      1. Collects ALL frames of the video into memory.
+      2. Runs Pi3X in 16-frame chunks for sequence-consistent relative depth.
+      3. Runs MoGe-2 per-frame for metric scale anchoring.
+      4. Fuses with EMA (momentum=0.99) to produce final metric depth.
+      5. Yields each frame with metric_depth set.
+
+    Env vars required:
+      SANA_WM_PI3X_WEIGHTS  — path to Pi3X weights dir
+      SANA_WM_MOGE2_WEIGHTS — path to MoGe-2 weights dir (or model.pt file)
+    """
+
+    n_passes_required = 1
+    require_cache = True
+
+    def __init__(self, device: str = "cuda", ema_momentum: float = 0.99,
+                 chunk: int = 16, stride: int = 8) -> None:
+        self.device = device
+        self.ema_momentum = ema_momentum
+        self.chunk = chunk
+        self.stride = stride
+        self._pi3x = None
+        self._moge2 = None
+
+    def _lazy_load(self) -> None:
+        import os, pathlib
+        if self._pi3x is not None:
+            return
+        pi3x_w = os.environ.get("SANA_WM_PI3X_WEIGHTS")
+        moge2_w = os.environ.get("SANA_WM_MOGE2_WEIGHTS")
+        if pi3x_w is None or moge2_w is None:
+            raise RuntimeError("Set SANA_WM_PI3X_WEIGHTS and SANA_WM_MOGE2_WEIGHTS before using VideoPi3XDepthProcessor.")
+        from pi3 import Pi3X  # type: ignore
+        self._pi3x = Pi3X.from_pretrained(pi3x_w).to(self.device).eval()
+        from moge.model.v2 import MoGeModel  # type: ignore
+        moge2_path = pathlib.Path(moge2_w)
+        moge2_ckpt = moge2_path / "model.pt" if moge2_path.is_dir() else moge2_path
+        self._moge2 = MoGeModel.from_pretrained(str(moge2_ckpt)).to(self.device).eval()
+
+    def update_attributes(self, previous_attributes: set) -> set:
+        return previous_attributes | {FrameAttribute.METRIC_DEPTH}
+
+    @torch.no_grad()
+    def _run_pi3x(self, frames_t: torch.Tensor) -> np.ndarray:
+        """frames_t: (T, 3, H, W) float32 [0,1] on device. Returns (T, H_orig, W_orig)."""
+        import torch.nn.functional as F_nn
+        T, _, H, W = frames_t.shape
+        H_r = (H // 14) * 14
+        W_r = (W // 14) * 14
+        src = F_nn.interpolate(frames_t, size=(H_r, W_r), mode="bilinear", align_corners=False) if (H_r != H or W_r != W) else frames_t
+
+        accum = np.zeros((T, H_r, W_r), dtype=np.float32)
+        count = np.zeros(T, dtype=np.float32)
+        starts = list(range(0, max(T - self.chunk + 1, 1), self.stride))
+        if not starts or starts[-1] + self.chunk < T:
+            starts.append(max(0, T - self.chunk))
+        for s in starts:
+            e = min(s + self.chunk, T)
+            out = self._pi3x(src[s:e].unsqueeze(0))  # type: ignore
+            d = out["local_points"][0, :e - s, :, :, 2].cpu().numpy()
+            accum[s:e] += d
+            count[s:e] += 1
+        d_r = accum / np.maximum(count[:, None, None], 1.0)
+
+        if H_r != H or W_r != W:
+            d_r = F_nn.interpolate(
+                torch.from_numpy(d_r).unsqueeze(1).to(self.device),
+                size=(H, W), mode="bilinear", align_corners=False
+            ).squeeze(1).cpu().numpy()
+        return d_r  # (T, H, W)
+
+    @torch.no_grad()
+    def _run_moge2(self, frames_t: torch.Tensor, fov_x: float | None) -> np.ndarray:
+        """frames_t: (T, 3, H, W). Returns (T, H, W) metric depth."""
+        results = []
+        for i in range(len(frames_t)):
+            out = self._moge2.infer(frames_t[i:i+1], fov_x=fov_x)  # type: ignore
+            results.append(out["depth"].squeeze(0).cpu().numpy())
+        return np.stack(results, axis=0)  # (T, H, W)
+
+    @staticmethod
+    def _ema_fuse(d_pi3x: np.ndarray, d_moge: np.ndarray, momentum: float) -> np.ndarray:
+        T = len(d_pi3x)
+        scales = np.zeros(T, dtype=np.float32)
+        ema = None
+        for t in range(T):
+            mask = (d_pi3x[t] > 0) & (d_moge[t] > 0)
+            ratio = float(d_moge[t][mask].mean() / (d_pi3x[t][mask].mean() + 1e-8)) if mask.sum() > 10 else 1.0
+            ema = ratio if ema is None else ema * momentum + ratio * (1 - momentum)
+            scales[t] = ema
+        return scales  # (T,)
+
+    def update_iterator(self, previous_iterator: Iterator["VideoFrame"], pass_idx: int) -> Iterator["VideoFrame"]:
+        import math
+        # --- 1. Collect all frames ---
+        frames_cpu, rgb_np, intrinsics_0 = [], [], None
+        for frame in pbar(previous_iterator, desc="Collecting frames for Pi3X"):
+            frames_cpu.append(frame.cpu())
+            rgb_np.append(frame.rgb.cpu().numpy().astype(np.float32))  # (H, W, 3)
+            if intrinsics_0 is None and frame.intrinsics is not None:
+                intrinsics_0 = frame.intrinsics.cpu()
+        T = len(frames_cpu)
+        if T == 0:
+            return
+
+        # --- 2. Load models ---
+        self._lazy_load()
+
+        H, W = rgb_np[0].shape[:2]
+        frames_t = torch.from_numpy(np.stack(rgb_np, 0)).permute(0, 3, 1, 2).to(self.device)  # (T,3,H,W)
+
+        # fov_x from intrinsics
+        fov_x = None
+        if intrinsics_0 is not None:
+            fx = intrinsics_0[0].item()
+            fov_x = math.degrees(2 * math.atan(W / (2 * fx)))
+
+        # --- 3. Pi3X chunked (sequence-consistent relative depth) ---
+        logging.getLogger(__name__).info(f"[VideoPi3X] Running Pi3X on {T} frames ({self.chunk}-frame chunks)...")
+        d_pi3x = self._run_pi3x(frames_t)   # (T, H, W)
+
+        # --- 4. MoGe-2 per-frame (metric scale) ---
+        logging.getLogger(__name__).info(f"[VideoPi3X] Running MoGe-2 on {T} frames...")
+        d_moge = self._run_moge2(frames_t, fov_x)  # (T, H, W)
+
+        # --- 5. EMA scale fusion ---
+        scale = self._ema_fuse(d_pi3x, d_moge, self.ema_momentum)  # (T,)
+        metric = (d_pi3x * scale[:, None, None]).astype(np.float32)  # (T, H, W)
+        logging.getLogger(__name__).info(f"[VideoPi3X] Depth fusion done. Scale range: {scale.min():.3f}~{scale.max():.3f}")
+
+        # --- 6. Yield frames with metric_depth ---
+        for i, frame in enumerate(frames_cpu):
+            frame = frame.cuda()
+            frame.metric_depth = torch.from_numpy(metric[i]).to(self.device)
+            yield frame
