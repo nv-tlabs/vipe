@@ -165,6 +165,8 @@ playground.py
 TODO.md
 vipe_results/
 vipe_results*/
+bench_results/
+assets/examples/test.mp4
 ci_outputs/
 /try_*.py
 /external/

@@ -19,6 +19,7 @@ These are the pipeline values accepted by `pipeline=...` in Hydra overrides and 
 | Preset | Purpose | Pipeline Class | Camera | Keyframe Depth | Depth Post-Processing |
 | --- | --- | --- | --- | --- | --- |
 | `default` | Default pipeline for pinhole videos. | `DefaultAnnotationPipeline` | `pinhole` | `unidepth-l` | `adaptive_unidepth-l_svda` |
+| `pose_only` | Fast pose-only pipeline that skips all per-frame dense depth estimation. | `PoseOnlyAnnotationPipeline` | `pinhole` | `unidepth-l` | `null` |
 | `dav3` | Default pipeline using Depth Anything 3 for keyframe and multiview depth. | `DefaultAnnotationPipeline` | `pinhole` | `dav3` | `mvd_dav3` |
 | `lyra` | Configuration used for Lyra-style results, with MoGe keyframe depth and VDA alignment. | `DefaultAnnotationPipeline` | `pinhole` | `moge` | `adaptive_moge_vda` |
 | `no_vda` | Default pipeline without Video Depth Anything alignment. | `DefaultAnnotationPipeline` | `pinhole` | `unidepth-l` | `adaptive_unidepth-l` |
@@ -44,7 +45,7 @@ Top-level ViPE runtime configuration.
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `streams` | RawMP4StreamListConfig \| FrameDirStreamListConfig | required | - | Input stream list that supplies videos or frame directories to process. |
-| `pipeline` | DefaultPipelineConfig \| PanoramaPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
+| `pipeline` | DefaultPipelineConfig \| PoseOnlyPipelineConfig \| PanoramaPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
 
 ## Input Streams
 
@@ -97,6 +98,8 @@ Object and sky-mask initialization used by the segmentation stage.
 | `kf_gap_sec` | float | required | > 0.0 | Minimum time gap, in seconds, between keyframes used to initialize instance segmentation. |
 | `phrases` | list[str] | required | min items 1 | Text prompts passed to the open-vocabulary detector for objects that should be segmented. |
 | `add_sky` | bool | required | - | Add a sky mask to the instance segmentation output when the detector supports it. |
+| `track_downscale` | int | `1` | >= 1 | Downscale factor applied to frames before instance tracking. Values above 1 speed up tracking considerably; masks are upsampled back to full resolution. |
+| `track_stride` | int | `1` | >= 1 | Track instances only every N-th frame and reuse the previous mask in between. Values above 1 speed up tracking at the cost of slightly stale masks on in-between frames. |
 
 ### DefaultInitConfig
 
@@ -164,6 +167,17 @@ Default annotation pipeline for pinhole and wide-angle videos.
 | `slam` | SLAMConfig | required | - | SLAM and bundle-adjustment configuration. |
 | `post` | PostConfig | required | - | Depth alignment and post-processing configuration. |
 | `output` | OutputConfig | required | - | Output artifact and visualization configuration. |
+
+### PoseOnlyPipelineConfig
+
+Fast pose-only pipeline: per-frame camera poses and intrinsics without dense depth.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `instance` | `vipe.pipeline.pose_only.PoseOnlyAnnotationPipeline` | required | fixed `vipe.pipeline.pose_only.PoseOnlyAnnotationPipeline` | Implementation class for the pose-only annotation pipeline. |
+| `init` | DefaultInitConfig | required | - | Initial camera and instance-mask setup. |
+| `slam` | SLAMConfig | required | - | SLAM and bundle-adjustment configuration. |
+| `output` | OutputConfig | required | - | Output artifact configuration (visualization options are ignored). |
 
 ### PanoramaPipelineConfig
 

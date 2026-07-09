@@ -22,6 +22,8 @@ init:
       - car
       - bus
     add_sky: true
+    track_downscale: 1
+    track_stride: 1
 
 slam:
   keyframe_depth: unidepth-l

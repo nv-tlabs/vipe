@@ -30,6 +30,7 @@ ViPE currently supports these pipeline presets:
 | Preset | Use case |
 | --- | --- |
 | `default` | Default pipeline for pinhole cameras. |
+| `pose_only` | Fast pose-only estimation for pinhole cameras (~4x faster than `default`). Skips all per-frame dense depth work, tracks instance masks at half resolution, and only writes pose and intrinsics artifacts; the recovered trajectory matches the `default` pipeline. For further speed set `pipeline.init.instance.track_stride=2` (strided mask tracking) or `pipeline.init.instance=null` (no masks; static scenes only). |
 | `lyra` | Configuration for results in the [Lyra](https://github.com/nv-tlabs/lyra) paper. |
 | `dav3` | Uses Depth Anything 3 for depth estimation. |
 | `no_vda` | Skips Video Depth Anything alignment when it is too memory-consuming. |

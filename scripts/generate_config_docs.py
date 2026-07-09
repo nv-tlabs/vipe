@@ -24,6 +24,7 @@ from vipe.config.pipeline import (
     OutputConfig,
     PanoramaInitConfig,
     PanoramaPipelineConfig,
+    PoseOnlyPipelineConfig,
     PostConfig,
     VirtualCameraConfig,
 )
@@ -47,6 +48,7 @@ MODEL_SECTIONS: list[tuple[str, list[type[BaseConfigSchema]]]] = [
             PostConfig,
             OutputConfig,
             DefaultPipelineConfig,
+            PoseOnlyPipelineConfig,
             PanoramaPipelineConfig,
         ],
     ),
@@ -55,6 +57,7 @@ MODEL_SECTIONS: list[tuple[str, list[type[BaseConfigSchema]]]] = [
 
 PIPELINE_PURPOSES = {
     "default": "Default pipeline for pinhole videos.",
+    "pose_only": "Fast pose-only pipeline that skips all per-frame dense depth estimation.",
     "dav3": "Default pipeline using Depth Anything 3 for keyframe and multiview depth.",
     "lyra": "Configuration used for Lyra-style results, with MoGe keyframe depth and VDA alignment.",
     "no_vda": "Default pipeline without Video Depth Anything alignment.",
@@ -62,7 +65,7 @@ PIPELINE_PURPOSES = {
     "wide_angle": "Default pipeline configured for wide-angle or fisheye input.",
     "panorama": "Panorama pipeline that projects 360-degree frames into virtual perspective views.",
 }
-PIPELINE_PRESET_ORDER = ["default", "dav3", "lyra", "no_vda", "static_vda", "wide_angle", "panorama"]
+PIPELINE_PRESET_ORDER = ["default", "pose_only", "dav3", "lyra", "no_vda", "static_vda", "wide_angle", "panorama"]
 
 
 def _escape_table_cell(value: str) -> str:

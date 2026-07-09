@@ -75,6 +75,8 @@ class DefaultAnnotationPipeline(Pipeline):
                     self.init_cfg.instance.phrases,
                     add_sky=self.init_cfg.instance.add_sky,
                     sam_run_gap=int(video_stream.fps() * self.init_cfg.instance.kf_gap_sec),
+                    track_downscale=self.init_cfg.instance.get("track_downscale", 1),
+                    track_stride=self.init_cfg.instance.get("track_stride", 1),
                     model_cache=self.model_cache,
                 )
             )

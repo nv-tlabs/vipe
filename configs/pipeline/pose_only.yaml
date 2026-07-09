@@ -1,0 +1,46 @@
+defaults:
+  - /slam: default
+
+instance: vipe.pipeline.pose_only.PoseOnlyAnnotationPipeline
+
+# Init configs (same as the default pipeline: instance masks are kept because
+# they reject dynamic objects during SLAM and hence affect pose accuracy).
+init:
+  camera_type: "pinhole"
+  intrinsics: "geocalib"
+  async_prefetch: true
+  prefetch_queue_size: 16
+  instance:
+    kf_gap_sec: 2.0
+    phrases:
+      - person
+      - animal
+      - vehicle
+      - ball
+      - balloon
+      - gun
+      - pet
+      - car
+      - bus
+    add_sky: true
+    # Track at half resolution: SLAM only consumes masks at 1/8 resolution, so
+    # this is nearly free in accuracy but much faster. Set track_stride: 2 for
+    # additional speed, or instance: null for the fastest (static scenes only).
+    track_downscale: 2
+    track_stride: 1
+
+slam:
+  # Keyframe-only metric depth prior. This anchors the metric scale of the
+  # trajectory and is much cheaper than per-frame dense depth.
+  keyframe_depth: unidepth-l
+  optimize_intrinsics: ${neq:${..init.intrinsics},"gt"}
+
+# Output configs: poses/intrinsics only, no depth or visualization work.
+output:
+  path: vipe_results/
+  skip_exists: false
+  save_artifacts: true
+  save_slam_map: false
+  save_viz: false
+  viz_downsample: 2
+  viz_attributes: [['rgb']]

@@ -12,9 +12,10 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+# OSError covers wheels compiled against a different torch ABI failing to load.
 try:
     import torch_cluster
-except ImportError:
+except (ImportError, OSError):
     torch_cluster = None
 
 

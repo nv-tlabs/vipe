@@ -27,6 +27,18 @@ class InstanceInitConfig(BaseConfigSchema):
     add_sky: bool = Field(
         description="Add a sky mask to the instance segmentation output when the detector supports it."
     )
+    track_downscale: int = Field(
+        default=1,
+        ge=1,
+        description="Downscale factor applied to frames before instance tracking. Values above 1 speed up "
+        "tracking considerably; masks are upsampled back to full resolution.",
+    )
+    track_stride: int = Field(
+        default=1,
+        ge=1,
+        description="Track instances only every N-th frame and reuse the previous mask in between. "
+        "Values above 1 speed up tracking at the cost of slightly stale masks on in-between frames.",
+    )
 
 
 class DefaultInitConfig(BaseConfigSchema):
@@ -124,6 +136,27 @@ class DefaultPipelineConfig(BaseConfigSchema):
         return self
 
 
+class PoseOnlyPipelineConfig(BaseConfigSchema):
+    """Fast pose-only pipeline: per-frame camera poses and intrinsics without dense depth."""
+
+    instance: Literal["vipe.pipeline.pose_only.PoseOnlyAnnotationPipeline"] = Field(
+        description="Implementation class for the pose-only annotation pipeline."
+    )
+    init: DefaultInitConfig = Field(description="Initial camera and instance-mask setup.")
+    slam: SLAMConfig = Field(description="SLAM and bundle-adjustment configuration.")
+    output: OutputConfig = Field(description="Output artifact configuration (visualization options are ignored).")
+
+    @model_validator(mode="after")
+    def normalize_fused_ba(self) -> PoseOnlyPipelineConfig:
+        # Same layout as the default monocular pipeline: always single-view; the fused
+        # kernel additionally needs a pinhole camera model.
+        self.slam.ba.fused = self.slam.resolve_fused(
+            single_view=True,
+            pinhole=self.init.camera_type == "pinhole",
+        )
+        return self
+
+
 class PanoramaPipelineConfig(BaseConfigSchema):
     """Annotation pipeline for 360-degree panorama videos."""
 
@@ -149,4 +182,6 @@ class PanoramaPipelineConfig(BaseConfigSchema):
         return self
 
 
-PipelineConfig = Annotated[DefaultPipelineConfig | PanoramaPipelineConfig, Field(discriminator="instance")]
+PipelineConfig = Annotated[
+    DefaultPipelineConfig | PoseOnlyPipelineConfig | PanoramaPipelineConfig, Field(discriminator="instance")
+]

@@ -129,12 +129,18 @@ class TrackAnythingProcessor(StreamProcessor):
         add_sky: bool,
         sam_run_gap: int = 30,
         mask_expand: int = 5,
+        track_downscale: int = 1,
+        track_stride: int = 1,
         model_cache: ModelCache | None = None,
     ) -> None:
         # Defensive copy: prevent mutation of caller's list
         self.mask_phrases = list(mask_phrases)
-        self.sam_run_gap = sam_run_gap
         self.add_sky = add_sky
+        self.track_downscale = max(1, int(track_downscale))
+        self.track_stride = max(1, int(track_stride))
+        # The tracker only sees every track_stride-th frame, so divide the gap
+        # to keep the SAM re-detection cadence constant in wall-clock frames.
+        self.sam_run_gap = max(1, sam_run_gap // self.track_stride)
 
         if self.add_sky:
             self.mask_phrases.append(VideoFrame.SKY_PROMPT)
@@ -147,17 +153,40 @@ class TrackAnythingProcessor(StreamProcessor):
         )
         self.mask_expand = mask_expand
         self.aot_encoder_batch_size = max(1, int(os.environ.get("VIPE_TRACK_ANYTHING_AOT_ENCODER_BATCH_SIZE", "4")))
+        self._last_instance: torch.Tensor | None = None
+        self._last_phrases: dict[int, str] | None = None
+        self._last_mask: torch.Tensor | None = None
 
     def update_attributes(self, previous_attributes: set[FrameAttribute]) -> set[FrameAttribute]:
         return previous_attributes | {FrameAttribute.INSTANCE, FrameAttribute.MASK}
+
+    def _make_track_frame(self, frame: VideoFrame) -> VideoFrame:
+        """Downscaled copy of the frame used for tracking only."""
+        if self.track_downscale == 1:
+            return frame
+        height, width = frame.size()
+        track_size = (height // self.track_downscale, width // self.track_downscale)
+        track_rgb = torch.nn.functional.interpolate(frame.rgb.moveaxis(-1, 0)[None], track_size, mode="area")[
+            0
+        ].moveaxis(0, -1)
+        return VideoFrame(raw_frame_idx=frame.raw_frame_idx, rgb=track_rgb)
 
     def _process_frame(
         self,
         frame_idx: int,
         frame: VideoFrame,
+        track_frame: VideoFrame | None = None,
         aot_img_embs: tuple[torch.Tensor, ...] | None = None,
     ) -> VideoFrame:
-        frame.instance, frame.instance_phrases = self.tracker.track(frame, aot_img_embs=aot_img_embs)
+        if track_frame is None:
+            track_frame = self._make_track_frame(frame)
+        instance, phrases = self.tracker.track(track_frame, aot_img_embs=aot_img_embs)
+        if track_frame is not frame:
+            instance = (
+                torch.nn.functional.interpolate(instance[None, None].float(), frame.size(), mode="nearest")[0, 0]
+                .to(torch.uint8)
+            )
+        frame.instance, frame.instance_phrases = instance, phrases
         self.last_track_frame = frame.raw_frame_idx
 
         frame_instance_mask = frame.instance == 0
@@ -166,40 +195,56 @@ class TrackAnythingProcessor(StreamProcessor):
             frame_instance_mask |= frame.sky_mask
 
         frame.mask = erode(frame_instance_mask, self.mask_expand)
+        self._last_instance = frame.instance
+        self._last_phrases = frame.instance_phrases
+        self._last_mask = frame.mask
+        return frame
+
+    def _copy_last_result(self, frame: VideoFrame) -> VideoFrame:
+        """Reuse the most recent tracking result for an in-between (strided) frame."""
+        assert self._last_instance is not None, "Strided frame encountered before any tracked frame"
+        frame.instance = self._last_instance
+        frame.instance_phrases = self._last_phrases
+        frame.mask = self._last_mask
         return frame
 
     def __call__(self, frame_idx: int, frame: VideoFrame) -> VideoFrame:
+        if frame_idx % self.track_stride != 0 and self._last_instance is not None:
+            return self._copy_last_result(frame)
         return self._process_frame(frame_idx, frame)
 
     def update_iterator(self, previous_iterator: Iterator[VideoFrame], pass_idx: int) -> Iterator[VideoFrame]:
-        if self.aot_encoder_batch_size <= 1:
-            for frame_idx, frame in enumerate(previous_iterator):
-                yield self._process_frame(frame_idx, frame)
-            return
-
-        pending_indices: list[int] = []
-        pending_frames: list[VideoFrame] = []
+        # Tracked frames pending batched AOT encoding, each carrying the
+        # strided frames that follow it (which reuse its result).
+        pending: list[tuple[int, VideoFrame, VideoFrame, list[VideoFrame]]] = []
 
         def flush_pending() -> Iterator[VideoFrame]:
-            nonlocal pending_indices, pending_frames
-            if not pending_frames:
+            if not pending:
                 return
-            embeddings = self.tracker.encode_aot_frames(pending_frames)
-            for pending_idx, pending_frame, aot_img_embs in zip(pending_indices, pending_frames, embeddings):
-                yield self._process_frame(pending_idx, pending_frame, aot_img_embs=aot_img_embs)
-            pending_indices = []
-            pending_frames = []
+            embeddings = self.tracker.encode_aot_frames([track_frame for _, _, track_frame, _ in pending])
+            for (frame_idx, frame, track_frame, skipped), aot_img_embs in zip(pending, embeddings):
+                yield self._process_frame(frame_idx, frame, track_frame, aot_img_embs=aot_img_embs)
+                for skipped_frame in skipped:
+                    yield self._copy_last_result(skipped_frame)
+            pending.clear()
 
         for frame_idx, frame in enumerate(previous_iterator):
-            if self.tracker.should_batch_aot_frame(len(pending_frames)):
-                pending_indices.append(frame_idx)
-                pending_frames.append(frame)
-                if len(pending_frames) >= self.aot_encoder_batch_size:
+            if frame_idx % self.track_stride != 0:
+                if pending:
+                    pending[-1][3].append(frame)
+                else:
+                    yield self._copy_last_result(frame)
+                continue
+
+            track_frame = self._make_track_frame(frame)
+            if self.aot_encoder_batch_size > 1 and self.tracker.should_batch_aot_frame(len(pending)):
+                pending.append((frame_idx, frame, track_frame, []))
+                if len(pending) >= self.aot_encoder_batch_size:
                     yield from flush_pending()
                 continue
 
             yield from flush_pending()
-            yield self._process_frame(frame_idx, frame)
+            yield self._process_frame(frame_idx, frame, track_frame)
 
         yield from flush_pending()
 
