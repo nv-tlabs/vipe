@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import cuvslam as vslam
+import cuvslam
 import numpy as np
 import torch
 
@@ -41,25 +41,25 @@ class CuVSLAMSparseTracks(SparseTracks):
             frame_height, frame_width = frame_data.size()
             fx, fy, cx, cy = unpack_optional(frame_data.intrinsics)
 
-            cam = vslam.Camera()
-            cam.distortion = vslam.Distortion()
-            cam.distortion.model = vslam.Distortion.Model.Pinhole
+            cam = cuvslam.Camera()
+            cam.distortion = cuvslam.Distortion()
+            cam.distortion.model = cuvslam.Distortion.Model.Pinhole
             cam.focal = [float(fx), float(fy)]
             cam.principal = [float(cx), float(cy)]
             cam.size = [int(frame_width), int(frame_height)]
-            cam.rig_from_camera = vslam.Pose()
+            cam.rig_from_camera = cuvslam.Pose()
             cam.rig_from_camera.rotation = np.array([0, 0, 0, 1])
             cam.rig_from_camera.translation = np.array([0, 0, 0])
             vslam_cameras.append(cam)
 
-        rig = vslam.Rig()
+        rig = cuvslam.Rig()
         rig.cameras = vslam_cameras
         rig.imus = []
 
-        cfg = vslam.Tracker.OdometryConfig()
-        cfg.odometry_mode = vslam.Tracker.OdometryMode.Mono
+        cfg = cuvslam.Tracker.OdometryConfig()
+        cfg.odometry_mode = cuvslam.Tracker.OdometryMode.Mono
         cfg.enable_observations_export = True
-        tracker = vslam.Tracker(rig, cfg)
+        tracker = cuvslam.Tracker(rig, cfg)
 
         self.tracker = tracker
         self.frame_idx = 0
