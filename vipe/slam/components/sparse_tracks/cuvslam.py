@@ -28,15 +28,15 @@ class CuVSLAMSparseTracks(SparseTracks):
 
     def __init__(self, n_views: int) -> None:
         super().__init__(n_views)
-        self.tracker = None
-        self.frame_idx = 0
+        self.tracker: cuvslam.Tracker | None = None
+        self.frame_idx: int = 0
 
     def _build_tracker(self, frame_data_list: list[VideoFrame]) -> None:
         assert len(frame_data_list) == 1, (
             "Only single-camera supported for now. Mainly due to rig transformations not properly set."
         )
 
-        vslam_cameras = []
+        vslam_cameras: list[cuvslam.Camera] = []
         for frame_data in frame_data_list:
             frame_height, frame_width = frame_data.size()
             fx, fy, cx, cy = unpack_optional(frame_data.intrinsics)
