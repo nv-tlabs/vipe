@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import cuvslam as vslam
 import numpy as np
 import torch
-import vslam
 
 from vipe.streams.base import VideoFrame
 from vipe.utils.misc import unpack_optional
@@ -43,7 +43,7 @@ class CuVSLAMSparseTracks(SparseTracks):
 
             cam = vslam.Camera()
             cam.distortion = vslam.Distortion()
-            cam.distortion.model = vslam.DistortionModel.Pinhole
+            cam.distortion.model = vslam.Distortion.Model.Pinhole
             cam.focal = [float(fx), float(fy)]
             cam.principal = [float(cx), float(cy)]
             cam.size = [int(frame_width), int(frame_height)]
@@ -56,8 +56,8 @@ class CuVSLAMSparseTracks(SparseTracks):
         rig.cameras = vslam_cameras
         rig.imus = []
 
-        cfg = vslam.TrackerConfig()
-        cfg.odometry_mode = vslam.TrackerOdometryMode.Mono
+        cfg = vslam.Tracker.OdometryConfig()
+        cfg.odometry_mode = vslam.Tracker.OdometryMode.Mono
         cfg.enable_observations_export = True
         tracker = vslam.Tracker(rig, cfg)
 
