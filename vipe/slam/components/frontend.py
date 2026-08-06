@@ -34,6 +34,7 @@ from .factor_graph import FactorGraph
 class InitState(Enum):
     Uninitialized = auto()
     Initialized = auto()
+    Updated = auto()
 
 
 class SLAMFrontend:
@@ -85,6 +86,18 @@ class SLAMFrontend:
     def __update(self):
         """add edges, perform update"""
 
+        if not self.has_init_pose:
+            self.__init_pose()
+
+        assert self.init_state is not InitState.Uninitialized
+        if self.init_state is InitState.Initialized:
+            for v in range(self.video.n_views):
+                self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
+        elif self.init_state is InitState.Updated:
+            for v in range(self.video.n_views):
+                self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
+        self.init_state = InitState.Updated
+
         self.t1 += 1
 
         # t1 - 1 is the new-added frame
@@ -121,12 +134,6 @@ class SLAMFrontend:
             for _ in range(self.iters2):
                 self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
 
-        # set pose for next itration
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
-
         # update visualization
         self.video.dirty[self.graph.ii.min() : self.t1] = True
 
@@ -144,10 +151,6 @@ class SLAMFrontend:
             for _ in range(8):
                 self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
 
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
         self.video.dirty[: self.t1] = True
 
         # initialization complete
