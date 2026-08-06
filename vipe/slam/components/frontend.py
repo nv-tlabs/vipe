@@ -18,6 +18,8 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
+from enum import Enum, auto, unique
+
 import torch
 from omegaconf import DictConfig
 
@@ -26,6 +28,12 @@ from vipe.ext.lietorch import SE3
 from ..networks.droid_net import DroidNet
 from .buffer import GraphBuffer
 from .factor_graph import FactorGraph
+
+
+@unique
+class InitState(Enum):
+    Uninitialized = auto()
+    Initialized = auto()
 
 
 class SLAMFrontend:
@@ -49,7 +57,7 @@ class SLAMFrontend:
         self.t1 = 0
 
         # frontend variables
-        self.is_initialized = False
+        self.init_state = InitState.Uninitialized
 
         self.max_age = 25
         self.iters1 = 4
@@ -143,16 +151,17 @@ class SLAMFrontend:
         self.video.dirty[: self.t1] = True
 
         # initialization complete
-        self.is_initialized = True
+        self.init_state = InitState.Initialized
+
         self.graph.rm_factors(self.graph.ii < self.warmup - 4, store=True)
 
     def run(self):
         """main update"""
 
         # do initialization
-        if not self.is_initialized and self.video.n_frames == self.warmup:
+        if self.init_state is InitState.Uninitialized and self.video.n_frames == self.warmup:
             self.__initialize()
 
         # do update if new keyframe is added.
-        elif self.is_initialized and self.t1 < self.video.n_frames:
+        elif self.init_state is not InitState.Uninitialized and self.t1 < self.video.n_frames:
             self.__update()
