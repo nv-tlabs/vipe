@@ -24,6 +24,10 @@ from vipe.ext.lietorch import SE3
 from vipe.utils.cameras import CameraType
 
 from ..maths import geom
+from ..maths.intrinsics import (
+    IntrinsicsParameterization,
+    validate_intrinsics_parameterization,
+)
 from ..maths.matrix import SparseBlockMatrix, SparseDenseBlockMatrix, SparseMDiagonalBlockMatrix
 from ..maths.vector import SparseBlockVector
 from .kernel import RobustKernel
@@ -44,6 +48,38 @@ class TermEvalReturn(ABC):
 
     def apply_robust_kernel(self, kernel: RobustKernel):
         raise NotImplementedError
+
+    def freeze_objective(self) -> "FrozenTermObjective":
+        """Capture the objective used by the current linearization.
+
+        Most terms have fixed weights, so evaluating their normal residual is
+        sufficient.  Terms whose support or robust weights can change should
+        override this method and retain the linearization-time weights.
+        """
+
+        return RecomputedTermObjective()
+
+
+class FrozenTermObjective(ABC):
+    @abstractmethod
+    def evaluate(self, candidate: TermEvalReturn) -> torch.Tensor: ...
+
+
+@dataclass(kw_only=True)
+class RecomputedTermObjective(FrozenTermObjective):
+    def evaluate(self, candidate: TermEvalReturn) -> torch.Tensor:
+        return candidate.residual().sum()
+
+
+@dataclass(kw_only=True)
+class FrozenWeightedSquaredResidual(FrozenTermObjective):
+    weight: torch.Tensor
+
+    def evaluate(self, candidate: TermEvalReturn) -> torch.Tensor:
+        if not isinstance(candidate, ConcreteTermEvalReturn):
+            raise TypeError("Frozen weighted objective requires a ConcreteTermEvalReturn candidate")
+        weighted_residual = candidate.r * candidate.r * self.weight
+        return torch.sum(torch.where(self.weight > 0, weighted_residual, torch.zeros_like(weighted_residual)))
 
 
 @dataclass(kw_only=True)
@@ -75,7 +111,12 @@ class ConcreteTermEvalReturn(TermEvalReturn):
         self.w = self.w * robust_weight
 
     def residual(self) -> torch.Tensor:
-        return torch.sum(self.r * self.r * self.w, dim=1)
+        weighted_residual = self.r * self.r * self.w
+        return torch.sum(torch.where(self.w > 0, weighted_residual, torch.zeros_like(weighted_residual)), dim=1)
+
+    def freeze_objective(self) -> FrozenTermObjective:
+        # Clone because robust kernels mutate ``w`` in place at each linearization.
+        return FrozenWeightedSquaredResidual(weight=self.w.detach().clone())
 
 
 class SolverTerm(ABC):
@@ -120,6 +161,7 @@ class DenseDepthFlowTerm(SolverTerm):
         rig: SE3 | None,
         image_size: tuple[int, int],
         camera_type: CameraType,
+        intrinsics_parameterization: IntrinsicsParameterization = "additive",
     ) -> None:
         super().__init__()
 
@@ -137,6 +179,8 @@ class DenseDepthFlowTerm(SolverTerm):
         self.dense_disp_i_inds = dense_disp_i_inds
         self.image_size = image_size
         self.camera_type = camera_type
+        self.intrinsics_parameterization = intrinsics_parameterization
+        validate_intrinsics_parameterization(intrinsics_parameterization, camera_type)
 
         n_pixels = image_size[0] * image_size[1]
 
@@ -205,6 +249,7 @@ class DenseDepthFlowTerm(SolverTerm):
             jacobian_p_d=jacobian and optimize_pose_disp,
             jacobian_f=jacobian and optimize_intrinsics,
             jacobian_r=jacobian and optimize_rig,
+            intrinsics_parameterization=self.intrinsics_parameterization,
         )
         coords = rearrange(coords, "n h w c -> n (h w) c", c=2)
         weight = rearrange(valid, "n h w 1 -> n (h w) 1") * self.weight  # (n_terms, H*W, 2)
@@ -237,13 +282,17 @@ class DenseDepthFlowTerm(SolverTerm):
                 assert Jfi is not None and Jfj is not None
                 Jfi = rearrange(Jfi, "n h w c d -> n (h w c) d", c=2)
                 Jfj = rearrange(Jfj, "n h w c d -> n (h w c) d", c=2)
+                intrinsics_camera_inds = torch.cat([self.rig_i_inds, self.rig_j_inds])
+                intrinsics_jacobian = torch.cat([Jfi, Jfj], dim=0)
+                if self.intrinsics_parameterization == "additive":
+                    intrinsics_jacobian = camera_model_cls.J_scale(
+                        1.0 / self.intrinsics_factor,
+                        intrinsics_jacobian,
+                    )
                 J_dict["intrinsics"] = SparseDenseBlockMatrix(
                     i_inds=torch.cat([term_inds, term_inds]),
-                    j_inds=torch.cat([self.rig_i_inds, self.rig_j_inds]),
-                    data=camera_model_cls.J_scale(
-                        1.0 / self.intrinsics_factor,
-                        torch.cat([Jfi, Jfj], dim=0),
-                    ),
+                    j_inds=intrinsics_camera_inds,
+                    data=intrinsics_jacobian,
                 )
             if optimize_rig:
                 assert Jri is not None and Jrj is not None
@@ -351,6 +400,7 @@ class TracksFlowTerm(SolverTerm):
         intrinsics: torch.Tensor | None,
         rig: SE3,
         camera_type: CameraType,
+        intrinsics_parameterization: IntrinsicsParameterization = "additive",
     ) -> None:
         super().__init__()
 
@@ -367,6 +417,8 @@ class TracksFlowTerm(SolverTerm):
         self.rig_j_inds = rig_j_inds
         self.tracks_i_inds = tracks_i_inds
         self.camera_type = camera_type
+        self.intrinsics_parameterization = intrinsics_parameterization
+        validate_intrinsics_parameterization(intrinsics_parameterization, camera_type)
 
         self.target = target.reshape(self.n_terms, -1, 2)  # (n_terms, n_tracks, 2)
         self.weight = weight.reshape(self.n_terms, -1, 2)  # (n_terms, n_tracks, 2)
@@ -428,6 +480,7 @@ class TracksFlowTerm(SolverTerm):
             jacobian_p_d=jacobian and optimize_pose_disp,
             jacobian_f=jacobian and optimize_intrinsics,
             jacobian_r=False,
+            intrinsics_parameterization=self.intrinsics_parameterization,
         )
         weight = self.weight * valid
 
@@ -458,10 +511,12 @@ class TracksFlowTerm(SolverTerm):
                 assert Jfi is not None and Jfj is not None
                 Jfi = rearrange(Jfi, "n t c d -> n (t c) d", c=2)
                 Jfj = rearrange(Jfj, "n t c d -> n (t c) d", c=2)
+                intrinsics_camera_inds = torch.cat([self.rig_i_inds, self.rig_j_inds])
+                intrinsics_jacobian = torch.cat([Jfi, Jfj], dim=0)
                 J_dict["intrinsics"] = SparseDenseBlockMatrix(
                     i_inds=torch.cat([term_inds, term_inds]),
-                    j_inds=torch.cat([self.rig_i_inds, self.rig_j_inds]),
-                    data=torch.cat([Jfi, Jfj], dim=0),
+                    j_inds=intrinsics_camera_inds,
+                    data=intrinsics_jacobian,
                 )
 
         return ConcreteTermEvalReturn(

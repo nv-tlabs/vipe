@@ -349,9 +349,10 @@ class MeiCameraModel(BaseCameraModel):
 
     @classmethod
     def J_scale(cls, scale: float, J: torch.Tensor) -> torch.Tensor:
-        scale_factor = J.new_ones(5)
-        scale_factor[:-1] = scale
-        return J * scale
+        # The shared focal parameter scales with image resolution, while MEI xi is dimensionless.
+        scale_factor = J.new_ones(J.shape[-1])
+        scale_factor[0] = scale
+        return J * scale_factor
 
 
 class PanoramaCameraModel(BaseCameraModel):

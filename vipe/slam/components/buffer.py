@@ -36,11 +36,14 @@ from vipe.utils.misc import unpack_optional
 from vipe.utils.visualization import POINTS_STENCIL, draw_lines_batch, draw_points_batch
 
 from ..ba.kernel import build_robust_kernel
-from ..ba.solver import Solver, SparseBlockVector
+from ..ba.solver import AdaptiveStepResult, Solver
 from ..ba.terms import DenseDepthFlowTerm, DispSensRegularizationTerm
 from ..interface import SLAMMap
 from ..maths import geom
+from ..maths.intrinsics import validate_intrinsics_parameterization
+from ..maths.matrix import RelativeBlockDamping
 from ..maths.retractor import DenseDispRetractor, IntrinsicsRetractor, PoseRetractor, RigRotationOnlyRetractor
+from ..maths.vector import SparseBlockVector
 from .sparse_tracks import SparseTracks
 
 logger = logging.getLogger(__name__)
@@ -515,8 +518,24 @@ class GraphBuffer:
             gnc_mu_step=float(self.ba_config.get("gnc_mu_step", 1.4)),
             gnc_mu_max=float(self.ba_config.get("gnc_mu_max", 1.0e6)),
         )
+        intrinsics_parameterization = self.ba_config.get("intrinsics_parameterization", "additive")
+        validate_intrinsics_parameterization(intrinsics_parameterization, self.camera_type)
+        distortion_damping_scale = float(self.ba_config.get("intrinsics_distortion_damping_scale", 1.0))
+        adaptive_intrinsics = bool(self.ba_config.get("adaptive_intrinsics", False))
+        adaptive_all_groups = bool(self.ba_config.get("adaptive_all_groups", False))
+
+        if adaptive_all_groups and not adaptive_intrinsics:
+            raise ValueError("adaptive_all_groups requires adaptive_intrinsics=true")
+
+        if self.camera_type != CameraType.MEI and distortion_damping_scale != 1.0:
+            raise ValueError("Distortion-specific damping requires the MEI camera model")
 
         if self.ba_config.fused:
+            if intrinsics_parameterization != "additive" or distortion_damping_scale != 1.0 or adaptive_intrinsics:
+                raise RuntimeError(
+                    "Fused BA does not support alternate intrinsics parameterizations, per-coordinate damping, "
+                    "or adaptive intrinsics steps. Set ba.fused=false."
+                )
             if robust_kernel is not None:
                 raise RuntimeError(
                     "Fused BA is enabled, but robust kernels are not supported. "
@@ -559,6 +578,7 @@ class GraphBuffer:
                 rig=None,
                 image_size=(self.height // 8, self.width // 8),
                 camera_type=self.camera_type,
+                intrinsics_parameterization=intrinsics_parameterization,
             ),
             kernel=robust_kernel,
         )
@@ -589,6 +609,7 @@ class GraphBuffer:
                     rig=None,
                     image_size=(self.height // 8, self.width // 8),
                     camera_type=self.camera_type,
+                    intrinsics_parameterization=intrinsics_parameterization,
                 ),
                 kernel=robust_kernel,
             )
@@ -638,9 +659,27 @@ class GraphBuffer:
             solver.set_fixed("dense_disp")
         solver.set_marginilized("dense_disp")
 
-        solver.set_retractor("intrinsics", IntrinsicsRetractor(self.camera_type))
+        distortion_update_scale = self.ba_config.get("distortion_update_scale", 0.01)
+        solver.set_retractor(
+            "intrinsics",
+            IntrinsicsRetractor(
+                self.camera_type,
+                distortion_update_scale=distortion_update_scale,
+                parameterization=intrinsics_parameterization,
+            ),
+        )
         intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
-        solver.set_damping("intrinsics", damping=1e-6 * intrinsics_damping_scale, ep=1e-6 * intrinsics_damping_scale)
+        intrinsics_damping = 1e-6 * intrinsics_damping_scale
+        if self.camera_type == CameraType.MEI:
+            damping: RelativeBlockDamping | float = RelativeBlockDamping(
+                (intrinsics_damping, intrinsics_damping * distortion_damping_scale)
+            )
+        else:
+            damping = intrinsics_damping
+        # Adaptive LM changes the relative damping but keeps this numerical
+        # diagonal floor fixed across retries.  The configured global scale
+        # applies to both terms, matching the ordinary BA path.
+        solver.set_damping("intrinsics", damping=damping, ep=intrinsics_damping)
         if not optimize_intrinsics:
             solver.set_fixed("intrinsics")
 
@@ -661,6 +700,27 @@ class GraphBuffer:
         }
 
         ba_energy: list[float] = []
+        adaptive_results: list[AdaptiveStepResult] = []
+
+        def run_solver_iteration() -> float:
+            if optimize_intrinsics and adaptive_intrinsics:
+                damping_groups = None
+                if adaptive_all_groups:
+                    damping_groups = tuple(
+                        name
+                        for name in solver.group_damping
+                        if not (name in solver.group_fixed_inds and solver.group_fixed_inds[name] is None)
+                    )
+                result = solver.run_adaptive_inplace(
+                    variables,
+                    damping_group=None if damping_groups is not None else "intrinsics",
+                    damping_groups=damping_groups,
+                    max_trials=int(self.ba_config.get("adaptive_intrinsics_max_trials", 8)),
+                )
+                adaptive_results.append(result)
+                return result.post_energy
+            return solver.run_inplace(variables)
+
         if robust_kernel is not None and robust_kernel.is_gnc():
             # GNC: outer mu schedule, inner GN iters at frozen mu.
             n_mu_steps = max(1, int(self.ba_config.get("gnc_n_mu_steps", 4)))
@@ -669,14 +729,23 @@ class GraphBuffer:
             for _ in range(n_mu_steps):
                 robust_kernel.set_mu(current_mu)
                 for _ in range(gn_iters_per_mu):
-                    ba_energy.append(solver.run_inplace(variables))
+                    ba_energy.append(run_solver_iteration())
                 current_mu = robust_kernel.update_mu(current_mu)
         else:
             for _ in range(n_iters):
-                ba_energy.append(solver.run_inplace(variables))
+                ba_energy.append(run_solver_iteration())
 
         if verbose:
             logger.info(f"BA iters = {n_iters}, energy: {ba_energy[0]} -> {ba_energy[-1]}")
+            if adaptive_results:
+                accepted = sum(result.accepted for result in adaptive_results)
+                total_trials = sum(result.attempts for result in adaptive_results)
+                logger.info(
+                    "Adaptive intrinsics steps: %d/%d accepted, %d total damping trials",
+                    accepted,
+                    len(adaptive_results),
+                    total_trials,
+                )
 
         self.disps.clamp_(min=0.001)
 

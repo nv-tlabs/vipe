@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from vipe.config.base_schema import BaseConfigSchema, Field
 
@@ -27,6 +27,33 @@ class BAConfig(BaseConfigSchema):
         gt=0.0,
         description="Multiplier for damping applied to optimized camera intrinsics.",
     )
+    distortion_update_scale: float = Field(
+        default=0.01,
+        gt=0.0,
+        description="Step multiplier applied to distortion-parameter updates during bundle adjustment.",
+    )
+    intrinsics_parameterization: Literal["additive", "mei_center_log"] = Field(
+        default="additive",
+        description="Local parameterization used for camera-intrinsics updates. mei_center_log is MEI-only.",
+    )
+    intrinsics_distortion_damping_scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Experimental relative damping multiplier for the distortion coordinate within the intrinsics block.",
+    )
+    adaptive_intrinsics: bool = Field(
+        default=False,
+        description="Experimental monotone-step gate with adaptive damping retries.",
+    )
+    adaptive_all_groups: bool = Field(
+        default=False,
+        description="Scale damping for every active BA variable group during adaptive retries.",
+    )
+    adaptive_intrinsics_max_trials: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum damping retries for each adaptive intrinsics BA step.",
+    )
     robust_kernel: Literal["huber", "tukey", "gnc_tls"] | None = Field(
         description="Robust loss for dense-flow residuals. Set to null for L2 residuals."
     )
@@ -42,6 +69,12 @@ class BAConfig(BaseConfigSchema):
         ge=1,
         description="Number of Gauss-Newton iterations to run for each GNC-TLS mu value.",
     )
+
+    @model_validator(mode="after")
+    def validate_adaptive_options(self) -> BAConfig:
+        if self.adaptive_all_groups and not self.adaptive_intrinsics:
+            raise ValueError("adaptive_all_groups requires adaptive_intrinsics=true")
+        return self
 
 
 class SparseTracksConfig(BaseConfigSchema):
@@ -121,6 +154,18 @@ class SLAMConfig(BaseConfigSchema):
             raise ValueError("cross_view_idx must contain non-negative view indices")
         return value
 
+    @model_validator(mode="after")
+    def validate_adaptive_intrinsics(self) -> SLAMConfig:
+        if self.ba.adaptive_intrinsics and not self.optimize_intrinsics:
+            raise ValueError("adaptive_intrinsics requires optimize_intrinsics=true")
+        return self
+
+    def validate_camera_specific_ba(self, *, mei: bool) -> None:
+        if self.ba.intrinsics_parameterization != "additive" and not mei:
+            raise ValueError("mei_center_log intrinsics parameterization requires camera_type=mei")
+        if self.ba.intrinsics_distortion_damping_scale != 1.0 and not mei:
+            raise ValueError("Distortion-specific damping requires camera_type=mei")
+
     def resolve_fused(self, *, single_view: bool, pinhole: bool) -> bool:
         """Resolve ``ba.fused`` to a concrete bool for the surrounding pipeline layout.
 
@@ -140,4 +185,7 @@ class SLAMConfig(BaseConfigSchema):
             and self.ba.robust_kernel is None
             and not self.optimize_rig_rotation
             and self.sparse_tracks.name == "dummy"
+            and self.ba.intrinsics_parameterization == "additive"
+            and self.ba.intrinsics_distortion_damping_scale == 1.0
+            and not self.ba.adaptive_intrinsics
         )

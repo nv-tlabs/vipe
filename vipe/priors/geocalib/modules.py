@@ -1,4 +1,4 @@
-"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic 
+"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic
 Segmentation (NeurIPS 2022) adapted from
 
 https://github.com/Visual-Attention-Network/SegNeXt/blob/main/mmseg/models/backbones/mscan.py
@@ -43,9 +43,7 @@ class ConvModule(nn.Module):
             bias (bool, optional): Whether to use bias. Defaults to True.
         """
         super().__init__()
-        self.conv = nn.Conv2d(
-            in_channels, out_channels, kernel_size, padding=padding, bias=bias
-        )
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding, bias=bias)
         self.bn = nn.BatchNorm2d(out_channels) if use_norm else nn.Identity()
         self.activate = nn.ReLU(inplace=True)
 
@@ -67,12 +65,8 @@ class ResidualConvUnit(nn.Module):
         """
         super().__init__()
 
-        self.conv1 = nn.Conv2d(
-            features, features, kernel_size=3, stride=1, padding=1, bias=True
-        )
-        self.conv2 = nn.Conv2d(
-            features, features, kernel_size=3, stride=1, padding=1, bias=True
-        )
+        self.conv1 = nn.Conv2d(features, features, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv2 = nn.Conv2d(features, features, kernel_size=3, stride=1, padding=1, bias=True)
 
         self.relu = torch.nn.ReLU(inplace=True)
 
@@ -113,9 +107,7 @@ class FeatureFusionBlock(nn.Module):
         output = self.resConfUnit2(output)
 
         if self.upsample:
-            output = F.interpolate(
-                output, scale_factor=2, mode="bilinear", align_corners=False
-            )
+            output = F.interpolate(output, scale_factor=2, mode="bilinear", align_corners=False)
 
         return output
 
@@ -136,15 +128,22 @@ class NMF2D(nn.Module):
         self.eval_steps = 7
         self.inv_t = 1
 
-    def _build_bases(
-        self, B: int, S: int, D: int, R: int, device: str = "cpu"
-    ) -> torch.Tensor:
-        bases = torch.rand((B * S, D, R)).to(device)
+    def _build_bases(self, B: int, S: int, D: int, R: int, device: str = "cpu") -> torch.Tensor:
+        if self.training or not torch.are_deterministic_algorithms_enabled():
+            # Preserve GeoCalib's original RNG stream and values: sample on
+            # CPU first, then transfer to the requested device.
+            bases = torch.rand((B * S, D, R)).to(device)
+        else:
+            # GeoCalib's NMF decoder otherwise samples a different basis on
+            # every inference call, making the estimated intrinsics depend on
+            # unrelated global RNG state.  Use a private fixed generator in
+            # eval mode without consuming the caller's RNG stream.
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(0)
+            bases = torch.rand((B * S, D, R), generator=generator).to(device)
         return F.normalize(bases, dim=1)
 
-    def local_step(
-        self, x: torch.Tensor, bases: torch.Tensor, coef: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def local_step(self, x: torch.Tensor, bases: torch.Tensor, coef: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Update bases and coefficient."""
         # (B * S, D, N)^T @ (B * S, D, R) -> (B * S, N, R)
         numerator = torch.bmm(x.transpose(1, 2), bases)
@@ -160,9 +159,7 @@ class NMF2D(nn.Module):
         bases = bases * numerator / (denominator + 1e-6)
         return bases, coef
 
-    def compute_coef(
-        self, x: torch.Tensor, bases: torch.Tensor, coef: torch.Tensor
-    ) -> torch.Tensor:
+    def compute_coef(self, x: torch.Tensor, bases: torch.Tensor, coef: torch.Tensor) -> torch.Tensor:
         """Compute coefficient."""
         # (B * S, D, N)^T @ (B * S, D, R) -> (B * S, N, R)
         numerator = torch.bmm(x.transpose(1, 2), bases)
@@ -171,9 +168,7 @@ class NMF2D(nn.Module):
         # multiplication update
         return coef * numerator / (denominator + 1e-6)
 
-    def local_inference(
-        self, x: torch.Tensor, bases: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def local_inference(self, x: torch.Tensor, bases: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Local inference."""
         # (B * S, D, N)^T @ (B * S, D, R) -> (B * S, N, R)
         coef = torch.bmm(x.transpose(1, 2), bases)
@@ -266,14 +261,10 @@ class LightHamHead(nn.Module):
             nn.Conv2d(in_channels=self.out_channels, out_channels=1, kernel_size=1),
         )
 
-        self.out_conv = ConvModule(
-            self.out_channels, self.out_channels, 3, padding=1, bias=False
-        )
+        self.out_conv = ConvModule(self.out_channels, self.out_channels, 3, padding=1, bias=False)
         self.ll_fusion = FeatureFusionBlock(self.out_channels, upsample=False)
 
-    def forward(
-        self, features: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, features: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass."""
         inputs = [features["hl"][i] for i in self.in_index]
 
@@ -295,13 +286,9 @@ class LightHamHead(nn.Module):
         feats = self.align(x)
 
         assert "ll" in features, "Low-level features are required for this model"
-        feats = F.interpolate(
-            feats, scale_factor=2, mode="bilinear", align_corners=False
-        )
+        feats = F.interpolate(feats, scale_factor=2, mode="bilinear", align_corners=False)
         feats = self.out_conv(feats)
-        feats = F.interpolate(
-            feats, scale_factor=2, mode="bilinear", align_corners=False
-        )
+        feats = F.interpolate(feats, scale_factor=2, mode="bilinear", align_corners=False)
         feats = self.ll_fusion(feats, features["ll"].clone())
 
         uncertainty = self.linear_pred_uncertainty(feats).squeeze(1)
@@ -503,23 +490,15 @@ class Block(nn.Module):
             drop=drop,
         )
         layer_scale_init_value = 1e-2
-        self.layer_scale_1 = nn.Parameter(
-            layer_scale_init_value * torch.ones((dim)), requires_grad=True
-        )
-        self.layer_scale_2 = nn.Parameter(
-            layer_scale_init_value * torch.ones((dim)), requires_grad=True
-        )
+        self.layer_scale_1 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True)
+        self.layer_scale_2 = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True)
 
     def forward(self, x: torch.Tensor, H: int, W: int) -> torch.Tensor:
         """Forward pass."""
         B, N, C = x.shape
         x = x.permute(0, 2, 1).view(B, C, H, W)
-        x = x + self.drop_path(
-            self.layer_scale_1[..., None, None] * self.attn(self.norm1(x))
-        )
-        x = x + self.drop_path(
-            self.layer_scale_2[..., None, None] * self.mlp(self.norm2(x))
-        )
+        x = x + self.drop_path(self.layer_scale_1[..., None, None] * self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.layer_scale_2[..., None, None] * self.mlp(self.norm2(x)))
         return x.view(B, C, N).permute(0, 2, 1)
 
 
