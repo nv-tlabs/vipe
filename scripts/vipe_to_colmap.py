@@ -216,6 +216,9 @@ def extract_frames(artifact: ArtifactPath, output_dir: Path) -> Tuple[int, int]:
 
     logger.info(f"Extracting frames from {video_path}")
 
+    frame_idx = 0
+    frame_width = 0
+    frame_height = 0
     for frame_idx, rgb in read_rgb_artifacts(video_path):
         frame_path = images_dir / f"frame_{frame_idx:06d}.jpg"
         frame_height, frame_width = rgb.shape[:2]
