@@ -1,4 +1,4 @@
-"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic 
+"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic
 Segmentation (NeurIPS 2022) adapted from
 
 https://github.com/Visual-Attention-Network/SegNeXt/blob/main/mmseg/models/backbones/mscan.py
@@ -139,7 +139,18 @@ class NMF2D(nn.Module):
     def _build_bases(
         self, B: int, S: int, D: int, R: int, device: str = "cpu"
     ) -> torch.Tensor:
-        bases = torch.rand((B * S, D, R)).to(device)
+        if self.training or not torch.are_deterministic_algorithms_enabled():
+            # Preserve GeoCalib's original RNG stream and values: sample on
+            # CPU first, then transfer to the requested device.
+            bases = torch.rand((B * S, D, R)).to(device)
+        else:
+            # GeoCalib's NMF decoder otherwise samples a different basis on
+            # every inference call, making the estimated intrinsics depend on
+            # unrelated global RNG state.  Use a private fixed generator in
+            # eval mode without consuming the caller's RNG stream.
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(0)
+            bases = torch.rand((B * S, D, R), generator=generator).to(device)
         return F.normalize(bases, dim=1)
 
     def local_step(

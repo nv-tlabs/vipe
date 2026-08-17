@@ -19,6 +19,12 @@ from vipe.ext import slam_ext
 from vipe.ext.lietorch import SE3, Sim3
 from vipe.utils.cameras import BaseCameraModel, CameraType
 
+from .intrinsics import (
+    IntrinsicsParameterization,
+    raw_intrinsics_jacobian_to_local,
+    validate_intrinsics_parameterization,
+)
+
 
 def iproj_disp(
     disps: torch.Tensor,
@@ -199,6 +205,7 @@ def iproj_i_proj_j_disp(
     jacobian_p_d: bool,
     jacobian_f: bool,
     jacobian_r: bool,
+    intrinsics_parameterization: IntrinsicsParameterization = "additive",
 ):
     """
     Compute proj[rig_qj.inv() * pose_j * pose_i.inv() * rig_qi * iproj(disp_i, intr_qi), intr_qj]
@@ -226,6 +233,7 @@ def iproj_i_proj_j_disp(
         (Jfi, Jfj): tuple of jacobian of the intrinsics (M, ..., 2, 1+D), (M, ..., 2, 1+D)
         (Jri, Jrj): tuple of jacobian of the rig    (M, ..., 2, 6), (M, ..., 2, 6)
     """
+    validate_intrinsics_parameterization(intrinsics_parameterization, camera_type)
     jacobian_p_d = jacobian_p_d or jacobian_f or jacobian_r
 
     # Convert leading dimension from M to NV.
@@ -246,6 +254,15 @@ def iproj_i_proj_j_disp(
         compute_jz=jacobian_p_d,
         compute_jf=jacobian_f,
     )
+    if jacobian_f:
+        assert Jfi is not None
+        Jfi = raw_intrinsics_jacobian_to_local(
+            Jfi,
+            intrinsics[qi],
+            camera_type,
+            intrinsics_parameterization,
+            source_inverse_projection=True,
+        )
 
     # transform
     Gij = poses[pj] * poses[pi].inv()
@@ -258,6 +275,15 @@ def iproj_i_proj_j_disp(
     # Jp = d(proj)/d(T*iproj_z) = (n_terms, ..., 2, 4)
     # Jfj = d(proj)/dfj = (n_terms, ..., 2, 1+D)
     x1, Jp, Jfj = proj_points(X1, intrinsics[qj], camera_type, compute_jp=jacobian_p_d, compute_jf=jacobian_f)
+    if jacobian_f:
+        assert Jfj is not None
+        Jfj = raw_intrinsics_jacobian_to_local(
+            Jfj,
+            intrinsics[qj],
+            camera_type,
+            intrinsics_parameterization,
+            source_inverse_projection=False,
+        )
 
     # exclude points too close to camera
     valid = ((X1[..., 2] > BaseCameraModel.MIN_DEPTH) & (X0[..., 2] > BaseCameraModel.MIN_DEPTH)).float()

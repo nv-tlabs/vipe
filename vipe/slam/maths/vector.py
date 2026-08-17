@@ -20,6 +20,13 @@ import torch
 from vipe.ext.scatter import scatter_add
 
 
+def _segment_sum_sorted(data: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+    """Sum consecutive, already-sorted segments without CUDA atomics."""
+    if data.numel() == 0:
+        return data.new_empty((lengths.numel(), *data.shape[1:]))
+    return torch.segment_reduce(data, "sum", lengths=lengths)
+
+
 @dataclass(kw_only=True)
 class RavelMapping:
     mapping: torch.Tensor  # From i/j_inds to ravel index
@@ -41,8 +48,15 @@ class SparseBlockVector:
         return self.data.shape[1]
 
     def coalesce(self):
-        inds, inverse = torch.unique(self.inds, return_inverse=True)
-        data = scatter_add(self.data, inverse, dim=0)
+        if not torch.are_deterministic_algorithms_enabled():
+            inds, inverse = torch.unique(self.inds, return_inverse=True)
+            data = scatter_add(self.data, inverse, dim=0)
+            return SparseBlockVector(inds=inds, data=data)
+
+        order = torch.argsort(self.inds, stable=True)
+        sorted_inds = self.inds[order]
+        inds, lengths = torch.unique_consecutive(sorted_inds, return_counts=True)
+        data = _segment_sum_sorted(self.data[order], lengths)
         return SparseBlockVector(inds=inds, data=data)
 
     def __sub__(self, other: "SparseBlockVector") -> "SparseBlockVector":
@@ -113,20 +127,28 @@ class SparseVectorSubview:
         assert len(ravel_mapping) == len(self.group_names)
 
         data = []
+        deterministic = torch.are_deterministic_algorithms_enabled()
         for group_idx in range(len(self.group_names)):
             mapping = ravel_mapping[group_idx]
             vector = self.vectors[self.group_names[group_idx]]
+            if deterministic:
+                vector = vector.coalesce()
             element_shape = vector.element_shape()
             full_inds = mapping.mapping[vector.inds].reshape(-1, 1) * element_shape + torch.arange(
                 element_shape, device=vector.inds.device
             ).reshape(1, -1)
-            data.append(
-                scatter_add(
-                    vector.data.reshape(-1),
-                    full_inds.reshape(-1),
-                    dim_size=mapping.n_variables,
+            if deterministic:
+                group_data = vector.data.new_zeros(mapping.n_variables)
+                group_data.index_copy_(0, full_inds.reshape(-1), vector.data.reshape(-1))
+                data.append(group_data)
+            else:
+                data.append(
+                    scatter_add(
+                        vector.data.reshape(-1),
+                        full_inds.reshape(-1),
+                        dim_size=mapping.n_variables,
+                    )
                 )
-            )
         return torch.cat(data)
 
     def __sub__(self, other: "SparseVectorSubview") -> "SparseVectorSubview":

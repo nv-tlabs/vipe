@@ -224,6 +224,12 @@ Bundle-adjustment solver and robust loss options.
 | `dense_disp_alpha` | float | required | >= 0.0 | Weight for dense-disparity regularization during bundle adjustment. |
 | `fused` | bool \| `auto` | required | - | Use the fused CUDA bundle-adjustment path. "auto" enables it automatically when the pipeline layout is compatible (single-view pinhole, no robust kernel, no rig-rotation optimization, no sparse tracks) and falls back to the generic solver otherwise; an explicit true forces the fused path and raises on unsupported layouts. |
 | `intrinsics_damping_scale` | float | required | > 0.0 | Multiplier for damping applied to optimized camera intrinsics. |
+| `distortion_update_scale` | float | `0.01` | > 0.0 | Step multiplier applied to distortion-parameter updates during bundle adjustment. |
+| `intrinsics_parameterization` | `additive` \| `mei_center_log` | `additive` | choices `additive` \| `mei_center_log` | Local tangent for intrinsics optimization. The experimental MEI-only center-log mode uses eta=log(f/(1+xi)) and beta=log(1+xi), updates fx/fy proportionally, and ignores distortion_update_scale. |
+| `intrinsics_distortion_damping_scale` | float | `1.0` | > 0.0 | Experimental relative damping multiplier for the distortion coordinate within the intrinsics block. |
+| `adaptive_intrinsics` | bool | `false` | - | Experimental monotone-step gate: reject energy-increasing joint BA steps, atomically restore all coupled variables, and retry with stronger intrinsics damping. |
+| `adaptive_all_groups` | bool | `false` | - | Experimental option that increases damping for every active BA variable group together instead of only intrinsics during adaptive retries. |
+| `adaptive_intrinsics_max_trials` | int | `8` | >= 1 | Maximum damping retries for each adaptive intrinsics BA step. |
 | `robust_kernel` | `huber` \| `tukey` \| `gnc_tls` \| null | required | - | Robust loss for dense-flow residuals. Set to null for L2 residuals. |
 | `robust_kernel_threshold` | float | required | > 0.0 | Robust-kernel threshold in 1/8-resolution feature-map pixels. |
 | `gnc_mu_init` | float | required | > 0.0 | Initial mu value for the GNC-TLS robust-kernel schedule. |

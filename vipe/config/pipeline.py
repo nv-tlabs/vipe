@@ -115,6 +115,7 @@ class DefaultPipelineConfig(BaseConfigSchema):
 
     @model_validator(mode="after")
     def normalize_fused_ba(self) -> DefaultPipelineConfig:
+        self.slam.validate_camera_specific_ba(mei=self.init.camera_type == "mei")
         # Monocular pipeline: always single-view; the fused kernel additionally needs a
         # pinhole camera model.
         self.slam.ba.fused = self.slam.resolve_fused(
@@ -138,6 +139,7 @@ class PanoramaPipelineConfig(BaseConfigSchema):
 
     @model_validator(mode="after")
     def normalize_fused_ba(self) -> PanoramaPipelineConfig:
+        self.slam.validate_camera_specific_ba(mei=False)
         # Virtual views are pinhole, but multiple oriented views form a non-identity rig
         # that the fused kernel cannot handle; only the degenerate single-view panorama
         # (one centered, identity-rig view) is fused-eligible.
