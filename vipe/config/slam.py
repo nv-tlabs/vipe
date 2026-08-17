@@ -34,7 +34,11 @@ class BAConfig(BaseConfigSchema):
     )
     intrinsics_parameterization: Literal["additive", "mei_center_log"] = Field(
         default="additive",
-        description="Local parameterization used for camera-intrinsics updates. mei_center_log is MEI-only.",
+        description=(
+            "Local tangent for intrinsics optimization. The experimental MEI-only center-log mode uses "
+            "eta=log(f/(1+xi)) and beta=log(1+xi), updates fx/fy proportionally, and ignores "
+            "distortion_update_scale."
+        ),
     )
     intrinsics_distortion_damping_scale: float = Field(
         default=1.0,
@@ -43,11 +47,17 @@ class BAConfig(BaseConfigSchema):
     )
     adaptive_intrinsics: bool = Field(
         default=False,
-        description="Experimental monotone-step gate with adaptive damping retries.",
+        description=(
+            "Experimental monotone-step gate: reject energy-increasing joint BA steps, atomically restore all "
+            "coupled variables, and retry with stronger intrinsics damping."
+        ),
     )
     adaptive_all_groups: bool = Field(
         default=False,
-        description="Scale damping for every active BA variable group during adaptive retries.",
+        description=(
+            "Experimental option that increases damping for every active BA variable group together instead of "
+            "only intrinsics during adaptive retries."
+        ),
     )
     adaptive_intrinsics_max_trials: int = Field(
         default=8,
