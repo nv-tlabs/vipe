@@ -5,6 +5,7 @@
  */
 
 #include <torch/extension.h>
+#include <cstdlib>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <vector>
@@ -16,7 +17,12 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
-#define BLOCK_H 4
+// 8x8 tile = 64-thread blocks. The original DROID-SLAM 4x8 (32-thread, single
+// warp) blocks cap GA10x occupancy at ~512/1536 threads per SM through the
+// 16-resident-blocks limit; 64-thread blocks double that at unchanged shared
+// memory per thread. All kernels below index tiles generically via
+// BLOCK_HW / CHANNEL_STRIDE, so the tile size is a free parameter.
+#define BLOCK_H 8
 #define BLOCK_W 8
 #define BLOCK_HW BLOCK_H *BLOCK_W
 #define CHANNEL_STRIDE 32
@@ -73,6 +79,14 @@ __global__ void altcorr_forward_kernel(const torch::PackedTensorAccessor32<scala
 
             float dx = x2s[tid] - floor(x2s[tid]);
             float dy = y2s[tid] - floor(y2s[tid]);
+
+            // [vipe] Barrier before the cross-thread reads of x2s/y2s below (h2/w2
+            // for k1 != tid). With BLOCK_HW == 32 (one warp) this was accidentally
+            // safe via SIMT lockstep; retiling to larger blocks (see BLOCK_H above)
+            // spans multiple independently-scheduled warps, turning the missing
+            // sync into a real, nondeterministic race between this write and that
+            // read. Latent in the original DROID-SLAM kernel at any tile size >32.
+            __syncthreads();
 
             int rd = 2 * r + 1;
             for (int iy = 0; iy < rd + 1; iy++) {
@@ -245,6 +259,98 @@ __global__ void altcorr_index_forward_kernel(
     }
 }
 
+// Thread-per-pixel variant of altcorr_index_forward_kernel for fp16 inputs
+// with C <= 128. The staged/shared-memory version above serializes on
+// 2 * (C/CHANNEL_STRIDE) * (rd+1)^2 = 512 block barriers per launch, while its
+// shared tiles provide no cross-thread reuse (the layout is channels-last, so
+// each thread's own gathers are already contiguous). Here each thread owns one
+// output pixel: fmap1's channels sit in registers (vector-loaded, 16B chunks),
+// fmap2 is gathered directly per offset and served by L1 — the (2r+2)^2
+// windows of neighboring pixels/offsets overlap almost entirely, so the cache
+// does what the shared tiles could not. No shared memory, no barriers.
+__global__ void altcorr_index_forward_kernel_pix(
+    const torch::PackedTensorAccessor32<at::Half, 5, torch::RestrictPtrTraits> fmap1,
+    const torch::PackedTensorAccessor32<at::Half, 5, torch::RestrictPtrTraits> fmap2,
+    const torch::PackedTensorAccessor32<float, 5, torch::RestrictPtrTraits> coords,
+    const torch::PackedTensorAccessor32<int64_t, 1, torch::RestrictPtrTraits> ii,
+    const torch::PackedTensorAccessor32<int64_t, 1, torch::RestrictPtrTraits> jj,
+    torch::PackedTensorAccessor32<float, 5, torch::RestrictPtrTraits> corr, int r, int level_offset,
+    float coord_scale) {
+    const int M = coords.size(1);
+    const int bm = blockIdx.x;
+    const int m = bm % M;
+    const int b = bm / M;
+    const int src = static_cast<int>(ii[m]);
+    const int dst = static_cast<int>(jj[m]);
+
+    const int H1 = coords.size(2);
+    const int W1 = coords.size(3);
+    const int H2 = fmap2.size(2);
+    const int W2 = fmap2.size(3);
+    const int C = fmap1.size(4);
+
+    const int idx = blockIdx.y * blockDim.x + threadIdx.x;
+    if (idx >= H1 * W1) return;
+    const int h1 = idx / W1;
+    const int w1 = idx % W1;
+
+    const float x2 = coords[b][m][h1][w1][0] / coord_scale;
+    const float y2 = coords[b][m][h1][w1][1] / coord_scale;
+    const float dx = x2 - floorf(x2);
+    const float dy = y2 - floorf(y2);
+    const int x0 = static_cast<int>(floorf(x2));
+    const int y0 = static_cast<int>(floorf(y2));
+    const int rd = 2 * r + 1;
+
+    // fmap1 channels of this pixel in registers (channels-last: contiguous).
+    // Pixel base is C * sizeof(half) = 256B aligned for C = 128, so 16B
+    // vector loads are safe.
+    __half2 f1v[64];  // up to C = 128 halfs
+    const __half2 *f1p = reinterpret_cast<const __half2 *>(&fmap1[b][src][h1][w1][0]);
+#pragma unroll
+    for (int c = 0; c < C / 2; c += 4) {
+        const float4 v = *reinterpret_cast<const float4 *>(f1p + c);
+        f1v[c] = reinterpret_cast<const __half2 *>(&v)[0];
+        f1v[c + 1] = reinterpret_cast<const __half2 *>(&v)[1];
+        f1v[c + 2] = reinterpret_cast<const __half2 *>(&v)[2];
+        f1v[c + 3] = reinterpret_cast<const __half2 *>(&v)[3];
+    }
+
+    float *corr_ptr = &corr[b][m][level_offset][h1][w1];
+    const int HW1 = H1 * W1;
+
+    for (int iy = 0; iy < rd + 1; iy++) {
+        for (int ix = 0; ix < rd + 1; ix++) {
+            const int h2 = y0 - r + iy;
+            const int w2 = x0 - r + ix;
+
+            float s = 0.0f;
+            if (within_bounds(h2, w2, H2, W2)) {
+                const __half2 *f2p = reinterpret_cast<const __half2 *>(&fmap2[b][dst][h2][w2][0]);
+                float2 acc = make_float2(0.0f, 0.0f);
+#pragma unroll
+                for (int c = 0; c < C / 2; c += 4) {
+                    const float4 v = *reinterpret_cast<const float4 *>(f2p + c);
+                    const __half2 *f2h = reinterpret_cast<const __half2 *>(&v);
+#pragma unroll
+                    for (int u = 0; u < 4; u++) {
+                        const float2 a = __half22float2(f1v[c + u]);
+                        const float2 bb = __half22float2(f2h[u]);
+                        acc.x += a.x * bb.x;
+                        acc.y += a.y * bb.y;
+                    }
+                }
+                s = acc.x + acc.y;
+            }
+
+            if (iy > 0 && ix > 0) *(corr_ptr + ((iy - 1) + rd * (ix - 1)) * HW1) += s * dy * dx;
+            if (iy > 0 && ix < rd) *(corr_ptr + ((iy - 1) + rd * ix) * HW1) += s * dy * (1.0f - dx);
+            if (iy < rd && ix > 0) *(corr_ptr + (iy + rd * (ix - 1)) * HW1) += s * (1.0f - dy) * dx;
+            if (iy < rd && ix < rd) *(corr_ptr + (iy + rd * ix) * HW1) += s * (1.0f - dy) * (1.0f - dx);
+        }
+    }
+}
+
 template <typename scalar_t>
 __global__ void altcorr_backward_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> fmap1,
@@ -302,6 +408,11 @@ __global__ void altcorr_backward_kernel(
 
             scalar_t dx = x2s[tid] - floor(x2s[tid]);
             scalar_t dy = y2s[tid] - floor(y2s[tid]);
+
+            // [vipe] See the matching barrier in altcorr_forward_kernel above: without
+            // it, the cross-thread reads of x2s/y2s a few lines down race the write
+            // just above once BLOCK_HW spans more than one warp.
+            __syncthreads();
 
             int rd = 2 * r + 1;
             for (int iy = 0; iy < rd + 1; iy++) {
@@ -408,6 +519,28 @@ std::vector<torch::Tensor> altcorr_index_cuda_forward(torch::Tensor fmap1, std::
     const auto L = static_cast<int64_t>(fmap2_pyramid.size());
 
     auto corr = torch::zeros({B, M, L * rd * rd, H, W}, fmap1.options().dtype(torch::kFloat));
+
+    const auto C = fmap1.size(4);
+    // Debug escape hatch: VIPE_ALTCORR_PIX=0 forces the original staged kernel
+    // (used for kernel A/B validation; the pix kernel is the default).
+    const char *pix_env = std::getenv("VIPE_ALTCORR_PIX");
+    const bool allow_pix = !(pix_env != nullptr && pix_env[0] == '0');
+    if (allow_pix && fmap1.scalar_type() == torch::kHalf && C % 8 == 0 && C <= 128) {
+        // Fast path: thread-per-pixel kernel (see altcorr_index_forward_kernel_pix).
+        const int threads_pix = 128;
+        const dim3 blocks_pix(B * M, (H * W + threads_pix - 1) / threads_pix);
+        for (int64_t level = 0; level < L; ++level) {
+            altcorr_index_forward_kernel_pix<<<blocks_pix, threads_pix>>>(
+                fmap1.packed_accessor32<at::Half, 5, torch::RestrictPtrTraits>(),
+                fmap2_pyramid[level].packed_accessor32<at::Half, 5, torch::RestrictPtrTraits>(),
+                coords.packed_accessor32<float, 5, torch::RestrictPtrTraits>(),
+                ii.packed_accessor32<int64_t, 1, torch::RestrictPtrTraits>(),
+                jj.packed_accessor32<int64_t, 1, torch::RestrictPtrTraits>(),
+                corr.packed_accessor32<float, 5, torch::RestrictPtrTraits>(), radius,
+                static_cast<int>(level * rd * rd), static_cast<float>(1 << level));
+        }
+        return {corr};
+    }
 
     const dim3 blocks(B * M, (H + BLOCK_H - 1) / BLOCK_H, (W + BLOCK_W - 1) / BLOCK_W);
     const dim3 threads(BLOCK_H, BLOCK_W);
