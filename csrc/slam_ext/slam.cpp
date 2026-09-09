@@ -4,6 +4,22 @@
  * Licensed under the BSD-3 License. See THIRD_PARTY_LICENSES.md for details.
  */
 
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The ba_extended_v2 binding added to this file is an original NVIDIA
+// CORPORATION & AFFILIATES contribution, licensed under the Apache License,
+// Version 2.0 (the "License"); you may not use it except in compliance with
+// the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <torch/extension.h>
 #include <vector>
 
@@ -37,6 +53,18 @@ std::vector<torch::Tensor> ba_extended_cuda(torch::Tensor poses, torch::Tensor d
                                             const float intrinsics_scale, const bool compute_energy,
                                             const float flow_weight);
 
+// Opt-in fused BA solver v2 (device-resident GpuBlockSystem solve). Same
+// signature/semantics as ba_extended_cuda; see geom_kernels.cu.
+std::vector<torch::Tensor> ba_extended_v2_cuda(torch::Tensor poses, torch::Tensor disps, torch::Tensor intrinsics,
+                                               torch::Tensor disps_sens, torch::Tensor targets, torch::Tensor weights,
+                                               torch::Tensor eta, torch::Tensor ii, torch::Tensor jj,
+                                               torch::Tensor depth_active, const int t0, const int t1,
+                                               const int iterations, const float lm, const float ep,
+                                               const bool motion_only, const float alpha,
+                                               const bool optimize_intrinsics, const float intrinsics_lm,
+                                               const float intrinsics_ep, const float intrinsics_scale,
+                                               const bool compute_energy, const float flow_weight);
+
 }  // namespace slam_ext
 
 void pybind_slam_ext(py::module &m) {
@@ -49,6 +77,13 @@ void pybind_slam_ext(py::module &m) {
           py::arg("weights"), py::arg("eta"), py::arg("ii"), py::arg("jj"), py::arg("depth_active"), py::arg("t0"),
           py::arg("t1"), py::arg("iterations"), py::arg("lm"), py::arg("ep"), py::arg("motion_only"),
           py::arg("alpha"), py::arg("optimize_intrinsics"), py::arg("intrinsics_lm"), py::arg("intrinsics_ep"),
+          py::arg("intrinsics_scale"), py::arg("compute_energy") = false, py::arg("flow_weight") = 0.001f);
+    m.def("ba_extended_v2", &slam_ext::ba_extended_v2_cuda,
+          "bundle adjustment with ViPE optional variables (opt-in device-resident solver)", py::arg("poses"),
+          py::arg("disps"), py::arg("intrinsics"), py::arg("disps_sens"), py::arg("targets"), py::arg("weights"),
+          py::arg("eta"), py::arg("ii"), py::arg("jj"), py::arg("depth_active"), py::arg("t0"), py::arg("t1"),
+          py::arg("iterations"), py::arg("lm"), py::arg("ep"), py::arg("motion_only"), py::arg("alpha"),
+          py::arg("optimize_intrinsics"), py::arg("intrinsics_lm"), py::arg("intrinsics_ep"),
           py::arg("intrinsics_scale"), py::arg("compute_energy") = false, py::arg("flow_weight") = 0.001f);
     m.def("frame_distance", &slam_ext::frame_distance_cuda, "frame_distance");
     m.def("projmap", &slam_ext::projmap_cuda, "projmap");

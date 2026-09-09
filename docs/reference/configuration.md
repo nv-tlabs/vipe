@@ -223,6 +223,7 @@ Bundle-adjustment solver and robust loss options.
 | --- | --- | --- | --- | --- |
 | `dense_disp_alpha` | float | required | >= 0.0 | Weight for dense-disparity regularization during bundle adjustment. |
 | `fused` | bool \| `auto` | required | - | Use the fused CUDA bundle-adjustment path. "auto" enables it automatically when the pipeline layout is compatible (single-view pinhole, no robust kernel, no rig-rotation optimization, no sparse tracks) and falls back to the generic solver otherwise; an explicit true forces the fused path and raises on unsupported layouts. |
+| `solver` | `legacy` \| `fused_v2` | `legacy` | choices `legacy` \| `fused_v2` | Which fused-BA kernel implementation to use when `fused` selects the fused path. "legacy" (default) is the original host-assembled Eigen/SimplicialLLT-backed solver and is unaffected by this option. "fused_v2" is an opt-in, device-resident solver (GPU block assembly + GPU Cholesky, no host round-trips) that produces numerically equivalent results with lower latency. Every existing config defaults to legacy. |
 | `intrinsics_damping_scale` | float | required | > 0.0 | Multiplier for damping applied to optimized camera intrinsics. |
 | `robust_kernel` | `huber` \| `tukey` \| `gnc_tls` \| null | required | - | Robust loss for dense-flow residuals. Set to null for L2 residuals. |
 | `robust_kernel_threshold` | float | required | > 0.0 | Robust-kernel threshold in 1/8-resolution feature-map pixels. |

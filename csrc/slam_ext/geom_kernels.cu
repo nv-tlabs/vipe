@@ -4,6 +4,22 @@
  * Licensed under the BSD-3 License. See THIRD_PARTY_LICENSES.md for details.
  */
 
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The ba_extended_v2 device-resident solver path added to this file is an
+// original NVIDIA CORPORATION & AFFILIATES contribution, licensed under the
+// Apache License, Version 2.0 (the "License"); you may not use it except in
+// compliance with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <torch/extension.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -21,6 +37,17 @@
 #include <eigen3/Eigen/Sparse>
 #include <eigen3/Eigen/SparseCore>
 #include <eigen3/Eigen/SparseCholesky>
+
+// New, opt-in fused BA solver (v2): device-resident block assembly + GPU
+// Cholesky, reachable only via BAConfig.solver == "fused_v2". Included here
+// (rather than compiled as a separate translation unit) because it is a
+// header-only class built entirely on ATen ops with no CUDA kernels of its
+// own to link, and the v2 Gauss-Newton loop below reuses this file's
+// existing __global__ kernels (projective_transform_kernel, EEt6x6_kernel,
+// Ev6x1_kernel, EvT6x1_kernel, accum_kernel, pose_retr_kernel,
+// disp_retr_kernel), which are only launchable from within this translation
+// unit without enabling relocatable device code build-wide.
+#include "gpu_block_system.cuh"
 
 typedef Eigen::SparseMatrix<double> SpMat;
 typedef Eigen::Triplet<double> T;
@@ -1949,6 +1976,262 @@ torch::Tensor iproj_cuda(torch::Tensor poses, torch::Tensor disps, torch::Tensor
                                       points.packed_accessor32<float, 4, torch::RestrictPtrTraits>());
 
     return points;
+}
+
+// ============================================================================
+// Fused BA solver v2 (opt-in via BAConfig.solver == "fused_v2").
+//
+// Same dense bundle-adjustment recipe as ba_cuda_impl/ba_extended_cuda above,
+// but the per-iteration linear solve is assembled and factorized entirely on
+// the device via GpuBlockSystem (see gpu_block_system.cuh) instead of being
+// copied to the host and factorized with Eigen's CPU SimplicialLLT. The
+// per-pixel/per-edge kernels (projective_transform_kernel, EEt6x6_kernel,
+// Ev6x1_kernel, EvT6x1_kernel, accum_kernel, pose_retr_kernel,
+// disp_retr_kernel) are unchanged and shared with the legacy path above; only
+// index-pattern precomputation (AccumPattern/SchurPattern) and the solve
+// itself are new. This is purely additive: ba_cuda_impl/ba_extended_cuda and
+// the "ba"/"ba_extended" bindings are untouched, and this path is only
+// reachable through the new "ba_extended_v2" binding.
+// ============================================================================
+
+#define MAX_LOG_FOCAL_STEP_V2 1.386294f  // ln(4); see MAX_LOG_FOCAL_STEP above for the legacy path.
+
+__global__ void intrinsics_retr_tensor_kernel(
+    torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> intrinsics,
+    const torch::PackedTensorAccessor32<float, 1, torch::RestrictPtrTraits> df, const float scale) {
+    if (threadIdx.x < 2) {
+        const float f = intrinsics[threadIdx.x];
+        const float v = df[0] * scale / fmaxf(fabsf(f), 1e-6f);
+        intrinsics[threadIdx.x] = f * expf(fminf(fmaxf(v, -MAX_LOG_FOCAL_STEP_V2), MAX_LOG_FOCAL_STEP_V2));
+    }
+}
+
+// Apply a precomputed accumulation pattern: out[j] = sum over {i : ix[i] == jx[j]} of data[i].
+// Numeric counterpart of accum_cuda, with the index preprocessing hoisted out of the
+// Gauss-Newton loop (see build_accum_pattern in gpu_block_system.cuh).
+torch::Tensor accum_apply(torch::Tensor data, const AccumPattern &pattern) {
+    torch::Tensor out = torch::zeros({pattern.count, data.size(1)},
+                                     torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+    if (pattern.count > 0) {
+        accum_kernel<<<pattern.count, THREADS>>>(data.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                                                 pattern.ptrs.packed_accessor32<long, 1, torch::RestrictPtrTraits>(),
+                                                 pattern.idxs.packed_accessor32<long, 1, torch::RestrictPtrTraits>(),
+                                                 out.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+    }
+    return out;
+}
+
+std::vector<torch::Tensor> ba_cuda_impl_gpu_v2(torch::Tensor poses, torch::Tensor disps, torch::Tensor intrinsics,
+                                               torch::Tensor disps_sens, torch::Tensor targets, torch::Tensor weights,
+                                               torch::Tensor eta, torch::Tensor ii, torch::Tensor jj,
+                                               torch::Tensor depth_active, const int t0, const int t1,
+                                               const int iterations, const float lm, const float ep,
+                                               const bool motion_only, const float alpha,
+                                               const bool optimize_intrinsics, const float intrinsics_lm,
+                                               const float intrinsics_ep, const float intrinsics_scale,
+                                               const bool compute_energy, const float flow_weight) {
+    auto opts = poses.options();
+    const auto f32 = torch::TensorOptions().dtype(torch::kFloat32);
+    const int num = ii.size(0);
+    const int ht = disps.size(1);
+    const int wd = disps.size(2);
+
+    torch::Tensor ts = torch::arange(t0, t1).to(torch::kCUDA);
+    torch::Tensor ii_exp = torch::cat({ts, ii}, 0);
+    torch::Tensor jj_exp = torch::cat({ts, jj}, 0);
+
+    std::tuple<torch::Tensor, torch::Tensor> kuniq = torch::_unique(ii_exp, true, true);
+    torch::Tensor kx = std::get<0>(kuniq);
+    torch::Tensor kk_exp = std::get<1>(kuniq);
+
+    // ---------------- symbolic setup (once per call) ----------------
+    torch::Tensor ii_cpu = ii.to(torch::kCPU);
+    torch::Tensor ii_exp_cpu = ii_exp.to(torch::kCPU);
+    torch::Tensor jj_exp_cpu = jj_exp.to(torch::kCPU);
+    torch::Tensor kk_exp_cpu = kk_exp.to(torch::kCPU);
+    torch::Tensor kx_cpu = kx.to(torch::kCPU);
+    torch::Tensor ts_cpu = torch::arange(t0, t1);
+
+    const AccumPattern acc_edge_to_frame = build_accum_pattern(ii_cpu, kx_cpu);
+    const AccumPattern acc_edge_to_window = build_accum_pattern(ii_cpu, ts_cpu);
+    const AccumPattern acc_exp_to_frame = build_accum_pattern(ii_exp_cpu, kx_cpu);
+    const SchurPattern schur = build_schur_pattern(ii_exp_cpu, jj_exp_cpu, kk_exp_cpu, t0, t1);
+
+    torch::Tensor block_rows = torch::cat({ii, ii, jj, jj}) - t0;
+    torch::Tensor block_cols = torch::cat({ii, jj, ii, jj}) - t0;
+    torch::Tensor rhs_rows = torch::cat({ii, jj}) - t0;
+    torch::Tensor dw_rows = jj_exp - t0;
+
+    torch::Tensor dx;
+    torch::Tensor dz;
+
+    torch::Tensor Hs = torch::zeros({4, num, 6, 6}, opts);
+    torch::Tensor vs = torch::zeros({2, num, 6}, opts);
+    torch::Tensor Eii = torch::zeros({num, 6, ht * wd}, opts);
+    torch::Tensor Eij = torch::zeros({num, 6, ht * wd}, opts);
+    torch::Tensor Cii = torch::zeros({num, ht * wd}, opts);
+    torch::Tensor wi = torch::zeros({num, ht * wd}, opts);
+    torch::Tensor Fs = torch::zeros({2, num, 6}, opts);
+    torch::Tensor Efi = torch::zeros({num, ht * wd}, opts);
+    torch::Tensor Hff = torch::zeros({num}, opts);
+    torch::Tensor vf = torch::zeros({num}, opts);
+    torch::Tensor energy = torch::empty({compute_energy ? iterations : 0}, opts);
+    torch::Tensor flow_energy = torch::empty({compute_energy ? iterations : 0, num}, opts);
+
+    torch::Tensor active;
+    torch::Tensor m;
+    if (!motion_only) {
+        active = depth_active.index({kx}).to(f32).view({-1, 1});
+        m = (disps_sens.index({kx, "..."}) > 0).to(f32).view({-1, ht * wd}) * active;
+    }
+    torch::Tensor row_active = depth_active.index({ii_exp}).to(f32).view({-1, 1, 1});
+
+    // ---------------- numeric Gauss-Newton loop (no host syncs) ----------------
+    for (int itr = 0; itr < iterations; itr++) {
+        projective_transform_kernel<<<num, THREADS>>>(
+            targets.packed_accessor32<float, 4, torch::RestrictPtrTraits>(),
+            weights.packed_accessor32<float, 4, torch::RestrictPtrTraits>(),
+            poses.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+            disps.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+            intrinsics.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+            depth_active.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+            ii.packed_accessor32<long, 1, torch::RestrictPtrTraits>(),
+            jj.packed_accessor32<long, 1, torch::RestrictPtrTraits>(),
+            Hs.packed_accessor32<float, 4, torch::RestrictPtrTraits>(),
+            vs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+            Eii.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+            Eij.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+            Cii.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+            wi.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+            Fs.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+            Efi.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+            Hff.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+            vf.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+            flow_energy.packed_accessor32<float, 2, torch::RestrictPtrTraits>(), itr, compute_energy,
+            optimize_intrinsics, intrinsics_scale, flow_weight);
+
+        GpuBlockSystem system(t1 - t0, optimize_intrinsics ? 1 : 0);
+        system.add_pose_blocks(Hs.reshape({-1, 6, 6}), block_rows, block_cols, 1.0);
+        system.add_rhs_blocks(vs.reshape({-1, 6}), rhs_rows, 1.0);
+        if (optimize_intrinsics) {
+            system.add_pose_scalar(Fs.reshape({-1, 6}), rhs_rows, 1.0);
+            system.add_scalar_diag(Hff.sum(), 1.0);
+            system.add_scalar_rhs(vf.sum(), 1.0);
+        }
+
+        if (compute_energy) {
+            torch::Tensor iter_energy = flow_energy.index({itr}).sum();
+            if (!motion_only) {
+                iter_energy =
+                    iter_energy +
+                    (m * alpha *
+                     torch::pow((disps.index({kx, "..."}) - disps_sens.index({kx, "..."})).view({-1, ht * wd}), 2))
+                        .sum();
+            }
+            energy.index_put_({itr}, iter_energy);
+        }
+
+        torch::Tensor df;
+        if (motion_only) {
+            std::tie(dx, df) = system.solve(lm, ep, intrinsics_lm, intrinsics_ep);
+        } else {
+            torch::Tensor C = active * (accum_apply(Cii, acc_edge_to_frame) + eta.view({-1, ht * wd}) + m * alpha) +
+                              (1 - active);
+            torch::Tensor w =
+                active *
+                (accum_apply(wi, acc_edge_to_frame) -
+                 m * alpha * (disps.index({kx, "..."}) - disps_sens.index({kx, "..."})).view({-1, ht * wd}));
+            torch::Tensor Q = 1.0 / C;
+
+            torch::Tensor Ei = accum_apply(Eii.view({num, 6 * ht * wd}), acc_edge_to_window)
+                                   .view({t1 - t0, 6, ht * wd});
+            torch::Tensor E = torch::cat({Ei, Eij}, 0) * row_active;
+
+            torch::Tensor schur_blocks = torch::zeros({schur.npairs, 6, 6}, opts);
+            if (schur.npairs > 0) {
+                EEt6x6_kernel<<<schur.npairs, THREADS>>>(
+                    E.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+                    Q.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                    schur.pair_idx.packed_accessor32<long, 2, torch::RestrictPtrTraits>(),
+                    schur_blocks.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
+            }
+            torch::Tensor v = torch::zeros({schur.rhs_depth.size(0), 6}, opts);
+            Ev6x1_kernel<<<schur.rhs_depth.size(0), THREADS>>>(
+                E.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+                Q.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                w.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                schur.rhs_depth.packed_accessor32<long, 2, torch::RestrictPtrTraits>(),
+                v.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+            system.add_pose_blocks(schur_blocks, schur.pair_block_i, schur.pair_block_j, -1.0);
+            system.add_rhs_blocks(v, schur.rhs_block, -1.0);
+
+            torch::Tensor Ef;
+            if (optimize_intrinsics) {
+                Ef = accum_apply(Efi, acc_edge_to_frame) * active;
+                if (schur.coupling_edge_rows.size(0) > 0) {
+                    torch::Tensor E_rows = E.index_select(0, schur.coupling_edge_rows);
+                    torch::Tensor Q_rows = Q.index_select(0, schur.coupling_depth_rows);
+                    torch::Tensor Ef_rows = Ef.index_select(0, schur.coupling_depth_rows);
+                    torch::Tensor Spf = (E_rows * (Q_rows * Ef_rows).unsqueeze(1)).sum(2);
+                    system.add_pose_scalar(Spf, schur.coupling_block, -1.0);
+                }
+                system.add_scalar_diag((Ef * Q * Ef).sum(), -1.0);
+                system.add_scalar_rhs((Ef * Q * w).sum(), -1.0);
+            }
+
+            std::tie(dx, df) = system.solve(lm, ep, intrinsics_lm, intrinsics_ep);
+
+            torch::Tensor dw = torch::zeros({dw_rows.size(0), ht * wd}, opts);
+            EvT6x1_kernel<<<dw_rows.size(0), THREADS>>>(E.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+                                                        dx.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                                                        dw_rows.packed_accessor32<long, 1, torch::RestrictPtrTraits>(),
+                                                        dw.packed_accessor32<float, 2, torch::RestrictPtrTraits>());
+
+            dz = Q * (w - accum_apply(dw, acc_exp_to_frame));
+            if (optimize_intrinsics) {
+                dz = dz - Q * Ef * df;
+            }
+        }
+
+        pose_retr_kernel<<<1, THREADS>>>(poses.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                                         dx.packed_accessor32<float, 2, torch::RestrictPtrTraits>(), t0, t1);
+        if (optimize_intrinsics) {
+            intrinsics_retr_tensor_kernel<<<1, THREADS>>>(
+                intrinsics.packed_accessor32<float, 1, torch::RestrictPtrTraits>(),
+                df.packed_accessor32<float, 1, torch::RestrictPtrTraits>(), intrinsics_scale);
+        }
+        if (!motion_only) {
+            disp_retr_kernel<<<kx.size(0), THREADS>>>(disps.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
+                                                      dz.packed_accessor32<float, 2, torch::RestrictPtrTraits>(),
+                                                      kx.packed_accessor32<long, 1, torch::RestrictPtrTraits>());
+        }
+    }
+
+    return {dx, dz, energy};
+}
+
+std::vector<torch::Tensor> ba_extended_v2_cuda(torch::Tensor poses, torch::Tensor disps, torch::Tensor intrinsics,
+                                               torch::Tensor disps_sens, torch::Tensor targets, torch::Tensor weights,
+                                               torch::Tensor eta, torch::Tensor ii, torch::Tensor jj,
+                                               torch::Tensor depth_active, const int t0, const int t1,
+                                               const int iterations, const float lm, const float ep,
+                                               const bool motion_only, const float alpha,
+                                               const bool optimize_intrinsics, const float intrinsics_lm,
+                                               const float intrinsics_ep, const float intrinsics_scale,
+                                               const bool compute_energy, const float flow_weight) {
+    CHECK_INPUT(targets);
+    CHECK_INPUT(weights);
+    CHECK_INPUT(poses);
+    CHECK_INPUT(disps);
+    CHECK_INPUT(intrinsics);
+    CHECK_INPUT(disps_sens);
+    CHECK_INPUT(ii);
+    CHECK_INPUT(jj);
+    CHECK_INPUT(depth_active);
+
+    return ba_cuda_impl_gpu_v2(poses, disps, intrinsics, disps_sens, targets, weights, eta, ii, jj, depth_active, t0,
+                               t1, iterations, lm, ep, motion_only, alpha, optimize_intrinsics, intrinsics_lm,
+                               intrinsics_ep, intrinsics_scale, compute_energy, flow_weight);
 }
 
 }  // namespace slam_ext

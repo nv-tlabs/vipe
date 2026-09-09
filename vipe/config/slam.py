@@ -23,6 +23,14 @@ class BAConfig(BaseConfigSchema):
         "no sparse tracks) and falls back to the generic solver otherwise; an explicit true forces the fused "
         "path and raises on unsupported layouts."
     )
+    solver: Literal["legacy", "fused_v2"] = Field(
+        default="legacy",
+        description='Which fused-BA kernel implementation to use when `fused` selects the fused path. "legacy" '
+        "(default) is the original host-assembled Eigen/SimplicialLLT-backed solver and is unaffected by this "
+        'option. "fused_v2" is an opt-in, device-resident solver (GPU block assembly + GPU Cholesky, no host '
+        "round-trips) that produces numerically equivalent results with lower latency. Every existing config "
+        "defaults to legacy.",
+    )
     intrinsics_damping_scale: float = Field(
         gt=0.0,
         description="Multiplier for damping applied to optimized camera intrinsics.",

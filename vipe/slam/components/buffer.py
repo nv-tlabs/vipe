@@ -429,8 +429,12 @@ class GraphBuffer:
 
         intrinsics_damping_scale = self.ba_config.get("intrinsics_damping_scale", 1.0)
 
+        # BAConfig.solver selects which fused kernel implementation to use; the
+        # default ("legacy") always calls slam_ext.ba_extended, exactly as before
+        # this option was introduced. "fused_v2" is opt-in only.
+        fused_ba_fn = slam_ext.ba_extended_v2 if self.ba_config.get("solver", "legacy") == "fused_v2" else slam_ext.ba_extended
         try:
-            _, _, ba_energy = slam_ext.ba_extended(
+            _, _, ba_energy = fused_ba_fn(
                 self.poses,
                 self.disps[:, 0],
                 intrinsics,
