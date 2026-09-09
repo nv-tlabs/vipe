@@ -227,6 +227,41 @@ class FactorGraph:
         self.jj[self.jj >= ix] -= 1
         self.rm_factors(m, store=False)
 
+    def shift_indices(self, count: int):
+        """Re-index all edges after the oldest ``count`` keyframes were retired.
+
+        Used by the long-sequence SLAM recipe (``vipe.slam.longseq``).
+        Companion to ``GraphBuffer.retire_head``: buffer slots moved left by
+        ``count``, so every stored keyframe index must follow. Active edges must
+        not reference retired slots (the caller guarantees retirement only
+        touches keyframes below the frontend window -- asserted here); inactive
+        edges touching retired slots are dropped, as they can never be revived.
+        """
+        if count == 0:
+            return
+        assert not torch.any((self.ii < count) | (self.jj < count)), (
+            "active factor-graph edges reference retired keyframes; "
+            "retirement must stay below the frontend optimization window"
+        )
+        self.ii = self.ii - count
+        self.jj = self.jj - count
+
+        # damping is indexed by buffer slot (one row per flattened disp map) and
+        # is read by the BA for frames whose rows were not rewritten in the same
+        # update (revived inactive edges, in-range frames) -- shift it along.
+        shift = count * self.buffer.n_views
+        self.damping[:-shift] = self.damping[shift:].clone()
+
+        keep = (self.ii_inac >= count) & (self.jj_inac >= count)
+        if not torch.all(keep):
+            exp_keep = keep.view(-1, 1).repeat(1, self.buffer.n_views).view(-1)
+            self.ii_inac = self.ii_inac[keep]
+            self.jj_inac = self.jj_inac[keep]
+            self.target_inac = self.target_inac[:, exp_keep]
+            self.weight_inac = self.weight_inac[:, exp_keep]
+        self.ii_inac = self.ii_inac - count
+        self.jj_inac = self.jj_inac - count
+
     @torch.amp.autocast("cuda", enabled=True)
     def update(
         self,

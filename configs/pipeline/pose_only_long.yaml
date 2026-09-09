@@ -1,0 +1,50 @@
+defaults:
+  - /slam: default
+
+instance: vipe.pipeline.pose_only_long.PoseOnlyLongAnnotationPipeline
+
+# Init configs
+init:
+  camera_type: "pinhole"
+  intrinsics: "geocalib"
+  async_prefetch: true
+  prefetch_queue_size: 16
+  instance:
+    kf_gap_sec: 2.0
+    phrases:
+      - person
+      - animal
+      - vehicle
+      - ball
+      - balloon
+      - gun
+      - pet
+      - car
+      - bus
+    add_sky: true
+
+slam:
+  # MoGe v2 keyframe-only metric depth prior by default: it never qualifies for
+  # the linear-rescale refresh shortcut (see update_disps_sens), so every
+  # intrinsics refresh re-runs it in full, which is fine here since intrinsics
+  # optimization freezes permanently after the first keyframe retirement.
+  keyframe_depth: moge2-l
+  optimize_intrinsics: ${neq:${..init.intrinsics},"gt"}
+  # Sliding-window recipe: the keyframe buffer holds only a live window, so GPU
+  # memory stays O(window) instead of O(sequence length). See SlamWindowConfig.
+  window:
+    max_keyframes: 512
+    retire_chunk: 128
+    local_ba_steps: 5
+    max_cached_frames: 500
+    keep_map: false
+
+# Output configs: poses/intrinsics only, no depth or visualization work.
+output:
+  path: vipe_results/
+  skip_exists: false
+  save_artifacts: true
+  save_slam_map: false
+  save_viz: false
+  viz_downsample: 2
+  viz_attributes: [['rgb']]

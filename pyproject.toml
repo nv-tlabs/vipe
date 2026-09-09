@@ -33,7 +33,7 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = [
     "run.py",
     "scripts",
@@ -55,6 +55,7 @@ warn_unused_ignores = false
 [[tool.mypy.overrides]]
 module = [
     "ffmpeg",
+    "gtsam",
     "Imath",
     "OpenEXR",
     "pandas",
@@ -86,7 +87,7 @@ dependencies = [
     "click",
     "einops",
     "gdown",
-    "gtsam",
+    "gtsam-develop==4.3a2.dev202609030306",
     "huggingface_hub",
     "hydra-core",
     "imageio[ffmpeg]",
@@ -95,7 +96,7 @@ dependencies = [
     "ninja",
     "numpy",
     "omegaconf",
-    "opencv-python",
+    "opencv-python<5",
     "OpenEXR<3.3.0",
     "pydantic>=2,<3",
     "pillow",
@@ -133,7 +134,7 @@ dev = [
     "build>=1,<2",
     "mypy>=1.15,<2",
     "pre-commit>=4,<5",
-    "pytest>=8,<9",
+    "pytest>=9",
     "ruff>=0.12,<1",
     "twine>=6,<7",
 ]

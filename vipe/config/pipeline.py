@@ -124,6 +124,54 @@ class DefaultPipelineConfig(BaseConfigSchema):
         return self
 
 
+class PoseOnlyPipelineConfig(BaseConfigSchema):
+    """Fast pose-only pipeline: per-frame camera poses and intrinsics without dense depth."""
+
+    instance: Literal["vipe.pipeline.pose_only.PoseOnlyAnnotationPipeline"] = Field(
+        description="Implementation class for the pose-only annotation pipeline."
+    )
+    init: DefaultInitConfig = Field(description="Initial camera and instance-mask setup.")
+    slam: SLAMConfig = Field(description="SLAM and bundle-adjustment configuration.")
+    output: OutputConfig = Field(description="Output artifact configuration (visualization options are ignored).")
+
+    @model_validator(mode="after")
+    def normalize_fused_ba(self) -> PoseOnlyPipelineConfig:
+        # Same layout as the default monocular pipeline: always single-view; the fused
+        # kernel additionally needs a pinhole camera model.
+        self.slam.ba.fused = self.slam.resolve_fused(
+            single_view=True,
+            pinhole=self.init.camera_type == "pinhole",
+        )
+        return self
+
+
+class PoseOnlyLongPipelineConfig(BaseConfigSchema):
+    """Pose-only pipeline variant for arbitrarily long sequences with bounded GPU/CPU memory."""
+
+    instance: Literal["vipe.pipeline.pose_only_long.PoseOnlyLongAnnotationPipeline"] = Field(
+        description="Implementation class for the long-sequence pose-only annotation pipeline."
+    )
+    init: DefaultInitConfig = Field(description="Initial camera and instance-mask setup.")
+    slam: SLAMConfig = Field(description="SLAM and bundle-adjustment configuration. Must set slam.window.")
+    output: OutputConfig = Field(description="Output artifact configuration (visualization options are ignored).")
+
+    @model_validator(mode="after")
+    def normalize_fused_ba(self) -> PoseOnlyLongPipelineConfig:
+        # Same layout as the default monocular pipeline: always single-view; the fused
+        # kernel additionally needs a pinhole camera model.
+        self.slam.ba.fused = self.slam.resolve_fused(
+            single_view=True,
+            pinhole=self.init.camera_type == "pinhole",
+        )
+        return self
+
+    @model_validator(mode="after")
+    def require_window(self) -> PoseOnlyLongPipelineConfig:
+        if self.slam.window is None:
+            raise ValueError("pose_only_long requires slam.window to be set.")
+        return self
+
+
 class PanoramaPipelineConfig(BaseConfigSchema):
     """Annotation pipeline for 360-degree panorama videos."""
 
@@ -149,4 +197,7 @@ class PanoramaPipelineConfig(BaseConfigSchema):
         return self
 
 
-PipelineConfig = Annotated[DefaultPipelineConfig | PanoramaPipelineConfig, Field(discriminator="instance")]
+PipelineConfig = Annotated[
+    DefaultPipelineConfig | PoseOnlyPipelineConfig | PoseOnlyLongPipelineConfig | PanoramaPipelineConfig,
+    Field(discriminator="instance"),
+]

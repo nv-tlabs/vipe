@@ -25,6 +25,8 @@ These are the pipeline values accepted by `pipeline=...` in Hydra overrides and 
 | `static_vda` | Default pipeline without instance segmentation, using static VDA alignment. | `DefaultAnnotationPipeline` | `pinhole` | `unidepth-l` | `adaptive_unidepth-l_vda` |
 | `wide_angle` | Default pipeline configured for wide-angle or fisheye input. | `DefaultAnnotationPipeline` | `mei` | `unidepth-l` | `null` |
 | `panorama` | Panorama pipeline that projects 360-degree frames into virtual perspective views. | `PanoramaAnnotationPipeline` | `panorama` | `null` | `null` |
+| `pose_only` |  | `PoseOnlyAnnotationPipeline` | `pinhole` | `moge2-l` | `null` |
+| `pose_only_long` |  | `PoseOnlyLongAnnotationPipeline` | `pinhole` | `moge2-l` | `null` |
 
 ## Stream Presets
 
@@ -44,7 +46,7 @@ Top-level ViPE runtime configuration.
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `streams` | RawMP4StreamListConfig \| FrameDirStreamListConfig | required | - | Input stream list that supplies videos or frame directories to process. |
-| `pipeline` | DefaultPipelineConfig \| PanoramaPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
+| `pipeline` | DefaultPipelineConfig \| PoseOnlyPipelineConfig \| PoseOnlyLongPipelineConfig \| PanoramaPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
 
 ## Input Streams
 
@@ -214,6 +216,7 @@ DROID-style SLAM frontend, backend, map extraction, and metric-depth options.
 | `keyframe_depth` | str \| null | required | - | Metric depth model used on keyframes to recover scale. Examples include metric3d-small, unidepth-l, moge, moge2-l, and dav3. Set to null to skip keyframe metric-depth recovery. |
 | `ba` | BAConfig | required | - | Bundle-adjustment solver options. |
 | `sparse_tracks` | SparseTracksConfig | required | - | Sparse-track backend options. |
+| `window` | SlamWindowConfig \| null | `null` | - | Sliding-window options for the long-sequence SLAM recipe. Set (non-null) to select LongSequenceSLAMSystem instead of the standard SLAMSystem; null (default) preserves standard behavior. |
 
 ### BAConfig
 

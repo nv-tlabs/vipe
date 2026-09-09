@@ -230,6 +230,40 @@ class GraphBuffer:
         self.cross_view_idx[ix] = self.cross_view_idx[ix + 1]
         self.n_frames -= 1
 
+    def retire_head(self, count: int):
+        """Remove the oldest ``count`` keyframes, compacting the buffer to the left.
+
+        Used by the long-sequence SLAM recipe (``vipe.slam.longseq``): all
+        per-slot state of slots ``[count, n_frames)`` moves to ``[0, n_frames -
+        count)`` so that the invariant *slot order == temporal order* is
+        preserved. The caller owns the retired keyframes' state (poses, depth,
+        map points must be read out *before* this call) and must re-index any
+        factor graph over this buffer (``FactorGraph.shift_indices``).
+        """
+        assert 0 < count < self.n_frames, "retirement must keep at least one live keyframe"
+        n = self.n_frames
+        per_slot_tensors = [
+            self.tstamp,
+            self.images,
+            self.poses,
+            self.disps,
+            self.disps_sens,
+            self.masks,
+            self.fmaps,
+            self.nets,
+            self.inps,
+            self.dirty,
+            self.cross_view_idx,
+        ]
+        for tensor in per_slot_tensors:
+            # .clone() the source: in-place assignment between overlapping
+            # slices of the same tensor is not otherwise guaranteed on CUDA.
+            tensor[: n - count] = tensor[count:n].clone()
+        # cross_view_idx[..., 0] stores absolute slot indices of cross-view
+        # targets; they moved left together with everything else.
+        self.cross_view_idx[: n - count, :, 0] -= count
+        self.n_frames = n - count
+
     def update_disps_sens(self, depth_model: DepthEstimationModel | None, frame_idx: int | None):
         if depth_model is None:
             return
