@@ -37,6 +37,11 @@ def make_depth_model(model: str):
 
         return MogeModel()
 
+    elif model_name == "moge2":
+        from .moge import MogeModel
+
+        return MogeModel(version=2, variant=model_sub)
+
     elif model_name == "dav3":
         from .dav3 import DepthAnything3Model
 

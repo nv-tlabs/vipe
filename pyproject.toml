@@ -20,6 +20,17 @@ ignore = [
 "__init__.py" = [
     "F401",
 ]
+# Vendored MoGe-2 inference code (vipe/priors/depth/moge2/), kept verbatim from
+# upstream per VENDORED.md; only import paths were rewritten. Not lint-clean
+# upstream (star imports, unused locals) -- fixing that would mean editing code
+# that must otherwise track upstream byte-for-byte.
+"vipe/priors/depth/moge2/**" = [
+    "F401",
+    "F403",
+    "F405",
+    "F841",
+    "I001",
+]
 
 [tool.mypy]
 python_version = "3.10"

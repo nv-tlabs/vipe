@@ -100,7 +100,7 @@ class SLAMConfig(BaseConfigSchema):
     visualize: bool = Field(description="Stream SLAM internals to rerun for debugging.")
     keyframe_depth: str | None = Field(
         description="Metric depth model used on keyframes to recover scale. Examples include metric3d-small, "
-        "unidepth-l, moge, and dav3. Set to null to skip keyframe metric-depth recovery."
+        "unidepth-l, moge, moge2-l, and dav3. Set to null to skip keyframe metric-depth recovery."
     )
     ba: BAConfig = Field(description="Bundle-adjustment solver options.")
     sparse_tracks: SparseTracksConfig = Field(description="Sparse-track backend options.")

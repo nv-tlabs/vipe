@@ -211,7 +211,7 @@ DROID-style SLAM frontend, backend, map extraction, and metric-depth options.
 | `infill_dense_disp` | bool | required | - | Also optimize dense disparity while filling non-keyframe outputs. |
 | `map_filter_thresh` | float | required | >= 0.0 | Depth-consistency threshold used when filtering SLAM-map points and extracting dense disparity. |
 | `visualize` | bool | required | - | Stream SLAM internals to rerun for debugging. |
-| `keyframe_depth` | str \| null | required | - | Metric depth model used on keyframes to recover scale. Examples include metric3d-small, unidepth-l, moge, and dav3. Set to null to skip keyframe metric-depth recovery. |
+| `keyframe_depth` | str \| null | required | - | Metric depth model used on keyframes to recover scale. Examples include metric3d-small, unidepth-l, moge, moge2-l, and dav3. Set to null to skip keyframe metric-depth recovery. |
 | `ba` | BAConfig | required | - | Bundle-adjustment solver options. |
 | `sparse_tracks` | SparseTracksConfig | required | - | Sparse-track backend options. |
 
