@@ -46,7 +46,12 @@ See [docs/installation.md](docs/installation.md) for details (dev/docs dependenc
 For videos too long for the default pipeline's fixed-size keyframe buffer, use the `pose_only_long` pipeline: it retires old keyframes to a compact trajectory ledger as it streams, so GPU and CPU memory stay bounded (roughly constant, not growing with video length) regardless of how many frames the video has. It uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 
 ```bash
+# Single video
 uv run vipe infer YOUR_LONG_VIDEO.mp4 -p pose_only_long -o vipe_results/
+
+# A folder of videos: every .mp4 in the folder is processed in turn, through a single
+# loaded model instance, writing each video's trajectory to vipe_results/pose/<name>.npz
+uv run vipe infer YOUR_VIDEO_FOLDER/ -p pose_only_long -o vipe_results/
 ```
 
 ## License

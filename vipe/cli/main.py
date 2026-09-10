@@ -44,17 +44,21 @@ from vipe.utils.viser import run_viser
 @click.option("--pipeline", "-p", default="default", help="Pipeline configuration to use (default: 'default')")
 @click.option("--visualize", "-v", is_flag=True, help="Enable visualization of intermediate results")
 def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: str, visualize: bool):
-    """Run inference on a video file or directory of images."""
+    """Run inference on a video file, a directory of videos, or a directory of images.
+
+    VIDEO may be a single .mp4 file or a directory containing .mp4 files -- every .mp4 in the
+    directory is processed in turn, through one pipeline instance (so its models are loaded once).
+    """
 
     logger = configure_logging()
 
     # Validate that exactly one input source is provided
     if not video and not image_dir:
-        click.echo("Error: Must provide either a video file or --image-dir", err=True)
+        click.echo("Error: Must provide either a video file/directory or --image-dir", err=True)
         raise click.Abort()
 
     if video and image_dir:
-        click.echo("Error: Cannot provide both video file and --image-dir", err=True)
+        click.echo("Error: Cannot provide both video file/directory and --image-dir", err=True)
         raise click.Abort()
 
     overrides = [f"pipeline={pipeline}", f"pipeline.output.path={output}", "pipeline.output.save_artifacts=true"]
@@ -65,10 +69,18 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
         overrides.append("pipeline.output.save_viz=false")
 
     # Set up stream configuration based on input type
+    video_paths: list[Path] = []
     if image_dir:
         overrides.extend(["streams=frame_dir_stream", f"streams.base_path={image_dir}"])
         input_desc = f"image directory {image_dir}"
+    elif video.is_dir():
+        video_paths = sorted(video.glob("*.mp4"))
+        if not video_paths:
+            click.echo(f"Error: no .mp4 files found in directory {video}", err=True)
+            raise click.Abort()
+        input_desc = f"{len(video_paths)} video(s) in directory {video}"
     else:
+        video_paths = [video]
         input_desc = f"video {video}"
 
     args = parse_typed_config("default", hydra_args=overrides)
@@ -91,14 +103,20 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
         video_stream = ProcessedVideoStream(FrameDirStream(image_dir), [])
         if not is_long_sequence:
             video_stream = video_stream.cache(desc="Reading image frames")
+        vipe_pipeline.run(video_stream)
     else:
-        assert video is not None
-        # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
-        video_stream = ProcessedVideoStream(RawMp4Stream(video), [])
-        if not is_long_sequence:
-            video_stream = video_stream.cache(desc="Reading video stream")
+        # Process each video with the same pipeline instance, so its cached models
+        # (depth, GeoCalib, TrackAnything networks) are only loaded once. Each video writes
+        # its own artifacts (named after the video) into the shared output directory.
+        for idx, video_path in enumerate(video_paths):
+            logger.info(f"Processing {video_path} ({idx + 1} / {len(video_paths)})")
+            # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
+            video_stream = ProcessedVideoStream(RawMp4Stream(video_path), [])
+            if not is_long_sequence:
+                video_stream = video_stream.cache(desc="Reading video stream")
+            vipe_pipeline.run(video_stream)
+            logger.info(f"Finished processing {video_path}")
 
-    vipe_pipeline.run(video_stream)
     logger.info("Finished")
 
 
