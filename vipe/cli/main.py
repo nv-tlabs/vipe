@@ -19,6 +19,7 @@ import click
 
 from vipe import make_pipeline
 from vipe.config import parse_typed_config
+from vipe.pipeline.pose_only_long import PoseOnlyLongAnnotationPipeline
 from vipe.streams.base import ProcessedVideoStream
 from vipe.streams.frame_dir_stream import FrameDirStream
 from vipe.streams.raw_mp4_stream import RawMp4Stream
@@ -75,13 +76,27 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
     logger.info(f"Processing {input_desc}...")
     vipe_pipeline = make_pipeline(args.pipeline)
 
+    # The long-sequence pipeline reads its input stream in a single bounded pass (see
+    # PoseOnlyLongAnnotationPipeline / _StreamingProcessedVideoStream) and does not need --
+    # or want -- the whole video materialized in host memory up front. Eagerly `.cache()`-ing
+    # here anyway defeats that: it forces full decode-and-buffer of every frame before the
+    # pipeline even starts, which is O(sequence length) host memory on exactly the inputs
+    # this pipeline exists to handle (it OOM'd a 5080-frame video at ~119GB RSS). Every other
+    # pipeline still gets the eager cache, since they rely on it to materialize a correct
+    # frame count for malformed videos before iterating.
+    is_long_sequence = isinstance(vipe_pipeline, PoseOnlyLongAnnotationPipeline)
+
     if image_dir:
         # Use frame directory stream
-        video_stream = ProcessedVideoStream(FrameDirStream(image_dir), []).cache(desc="Reading image frames")
+        video_stream = ProcessedVideoStream(FrameDirStream(image_dir), [])
+        if not is_long_sequence:
+            video_stream = video_stream.cache(desc="Reading image frames")
     else:
         assert video is not None
         # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
-        video_stream = ProcessedVideoStream(RawMp4Stream(video), []).cache(desc="Reading video stream")
+        video_stream = ProcessedVideoStream(RawMp4Stream(video), [])
+        if not is_long_sequence:
+            video_stream = video_stream.cache(desc="Reading video stream")
 
     vipe_pipeline.run(video_stream)
     logger.info("Finished")

@@ -18,12 +18,36 @@ ViPE estimates camera intrinsics, camera motion, and dense near-metric depth map
 
 ## News
 
+- **2026/09**: Added long-sequence SLAM (`pose_only_long`) for arbitrarily long videos, with GPU/CPU memory bounded by a sliding keyframe window instead of growing with video length. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/06**: 🚀🚀🚀 Released ViPE 1.2.0: **2.7x speed-up with no loss of accuracy**, enabled by CUDA fused kernels, model and pipeline caching, prefetching, and other optimizations.
 - **2026/05**: Merged Panorama estimation pipeline & bump release version to 1.0.0.
 - **2026/01**: Integration with [Depth-Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) for depth estimation (use `dav3` pipeline).
 - **2025/10**: Add support to run on wide-angle videos.
 - **2025/09**: Add support to run [Lyra](https://github.com/nv-tlabs/lyra) pipeline.
 - **2025/08**: Initial release of ViPE.
+
+## Installation
+
+```bash
+# From PyPI
+pip install nvidia-vipe
+
+# From source (conda for CUDA/native deps, uv for the Python env)
+conda env create -f envs/cu128.yml
+conda activate cu128
+uv sync
+uv run vipe infer YOUR_VIDEO.mp4
+```
+
+See [docs/installation.md](docs/installation.md) for details (dev/docs dependency groups, etc).
+
+## Long-Sequence Videos
+
+For videos too long for the default pipeline's fixed-size keyframe buffer, use the `pose_only_long` pipeline: it retires old keyframes to a compact trajectory ledger as it streams, so GPU and CPU memory stay bounded (roughly constant, not growing with video length) regardless of how many frames the video has. It uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
+
+```bash
+uv run vipe infer YOUR_LONG_VIDEO.mp4 -p pose_only_long -o vipe_results/
+```
 
 ## License
 
