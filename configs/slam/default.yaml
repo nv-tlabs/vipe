@@ -52,6 +52,16 @@ ba:
   # no sparse tracks).
   fused: auto
   intrinsics_damping_scale: 1.0
+  # Distortion parameters such as MEI xi use a smaller retraction step than focal length.
+  distortion_update_scale: 0.01
+  # additive | mei_center_log (axis-aware center-focal/log-distortion tangent)
+  intrinsics_parameterization: additive
+  # Experimental: relative damping for the distortion tangent versus the focal tangent.
+  intrinsics_distortion_damping_scale: 1.0
+  # Experimental: retry energy-increasing joint BA steps with stronger damping.
+  adaptive_intrinsics: false
+  adaptive_all_groups: false
+  adaptive_intrinsics_max_trials: 8
   # robust kernel for dense-flow residual: null (L2) | huber | tukey | gnc_tls
   robust_kernel: null
   # kernel threshold in /8 feature-map pixels (Huber k / Tukey c / GNC-TLS c_bar)

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from vipe import get_config_path
 from vipe.config import (
+    BAConfig,
     DefaultPipelineConfig,
     FrameDirStreamListConfig,
     PanoramaPipelineConfig,
@@ -133,6 +134,46 @@ def test_parse_typed_config_accepts_fused_ba_override(tmp_path: Path) -> None:
     assert config.pipeline.slam.ba.fused is True
 
 
+def test_parse_typed_config_accepts_mei_center_log_intrinsics_parameterization(tmp_path: Path) -> None:
+    config = parse_typed_config(
+        "default",
+        [
+            *_base_overrides(tmp_path),
+            "pipeline.init.camera_type=mei",
+            "pipeline.slam.ba.intrinsics_parameterization=mei_center_log",
+        ],
+    )
+
+    assert config.pipeline.slam.ba.intrinsics_parameterization == "mei_center_log"
+
+
+def test_ba_config_defaults_distortion_update_scale_for_legacy_callers(tmp_path: Path) -> None:
+    config = parse_typed_config("default", _base_overrides(tmp_path))
+    values = config.pipeline.slam.ba.model_dump()
+    values.pop("distortion_update_scale")
+
+    ba = BAConfig.model_validate(values)
+
+    assert ba.distortion_update_scale == 0.01
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        ["pipeline.slam.ba.intrinsics_parameterization=mei_center_log"],
+        ["pipeline.slam.ba.intrinsics_distortion_damping_scale=10"],
+        ["pipeline.slam.ba.adaptive_intrinsics=true", "pipeline.slam.optimize_intrinsics=false"],
+        ["pipeline.slam.ba.adaptive_all_groups=true"],
+    ],
+)
+def test_parse_typed_config_rejects_incompatible_ba_options(
+    tmp_path: Path,
+    overrides: list[str],
+) -> None:
+    with pytest.raises(ValidationError):
+        parse_typed_config("default", [*_base_overrides(tmp_path), *overrides])
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [
@@ -182,6 +223,7 @@ def test_default_init_async_prefetch_can_fall_back_to_serialized_cache(tmp_path:
         "streams.frame_skip=0",
         "pipeline.slam.sparse_tracks.name=bad",
         "pipeline.slam.ba.fused=maybe",
+        "pipeline.slam.ba.intrinsics_parameterization=bad",
         "pipeline.output.viz_downsample=0",
         "+pipeline.output.unexpected=1",
     ],
