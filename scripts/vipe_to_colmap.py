@@ -90,7 +90,7 @@ def write_images_txt(output_dir: Path, artifact: ArtifactPath):
             tx, ty, tz = translation
 
             # Image filename
-            image_name = f"images/frame_{frame_idx:06d}.jpg"
+            image_name = f"frame_{frame_idx:06d}.jpg"
 
             # Write image line
             f.write(f"{i + 1} {qw:.9f} {qx:.9f} {qy:.9f} {qz:.9f} {tx:.9f} {ty:.9f} {tz:.9f} 1 {image_name}\n")
@@ -113,7 +113,7 @@ def write_points3d_txt_from_slam_map(output_dir: Path, artifact: ArtifactPath):
         f.write(f"# Number of points: {slam_map.dense_disp_xyz.shape[0]}\n")
 
         point_id = 1
-        for keyframe_idx, frame_idx in enumerate(slam_map.dense_disp_frame_inds):
+        for keyframe_idx, _frame_idx in enumerate(slam_map.dense_disp_frame_inds):
             xyz, rgb = slam_map.get_dense_disp_pcd(keyframe_idx)
             xyz = xyz.cpu().numpy()
             rgb = rgb.cpu().numpy()
@@ -121,7 +121,7 @@ def write_points3d_txt_from_slam_map(output_dir: Path, artifact: ArtifactPath):
             for xyz, rgb in zip(xyz, rgb):
                 x, y, z = xyz
                 r, g, b = (rgb * 255).astype(np.uint8)
-                f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} 0.0 {frame_idx} {point_id} 0 0 0 0\n")
+                f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} 0.0\n")
                 point_id += 1
 
 
@@ -201,9 +201,9 @@ def write_points3d_txt_from_depth(
         f.write(f"# Number of points: {len(all_points)}\n")
 
         for point_id, point_data in enumerate(all_points):
-            point_id, x, y, z, r, g, b, error, image_id = point_data
+            point_id, x, y, z, r, g, b, error, _image_id = point_data
             # The last 4 values are for visualization purposes.
-            f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} {error:.6f} {image_id} {point_id} 0 0 0 0\n")
+            f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} {error:.6f}\n")
 
     logger.info(f"Written points3D.txt with {len(all_points)} points")
 
@@ -216,6 +216,9 @@ def extract_frames(artifact: ArtifactPath, output_dir: Path) -> Tuple[int, int]:
 
     logger.info(f"Extracting frames from {video_path}")
 
+    frame_idx = 0
+    frame_width = 0
+    frame_height = 0
     for frame_idx, rgb in read_rgb_artifacts(video_path):
         frame_path = images_dir / f"frame_{frame_idx:06d}.jpg"
         frame_height, frame_width = rgb.shape[:2]
@@ -247,21 +250,27 @@ def convert_vipe_to_colmap(artifact: ArtifactPath, output_path: Path, depth_step
     # Extract frames and get video dimensions
     frame_width, frame_height = extract_frames(artifact, output_path)
 
+    geometry_path = output_path.joinpath("sparse/0")
+    geometry_path.mkdir(parents=True, exist_ok=True)
+
     # Write COLMAP files
-    write_cameras_txt(output_path, artifact, frame_width, frame_height)
-    write_images_txt(output_path, artifact)
+    write_cameras_txt(geometry_path, artifact, frame_width, frame_height)
+    write_images_txt(geometry_path, artifact)
     if use_slam_map:
-        write_points3d_txt_from_slam_map(output_path, artifact)
+        write_points3d_txt_from_slam_map(geometry_path, artifact)
     else:
-        write_points3d_txt_from_depth(output_path, artifact, depth_step)
+        write_points3d_txt_from_depth(geometry_path, artifact, depth_step)
 
     logger.info("COLMAP conversion completed successfully!")
     logger.info(f"Output directory: {output_path}")
     logger.info("Files created:")
-    logger.info("  - cameras.txt: Camera intrinsics")
-    logger.info("  - images.txt: Camera poses")
-    logger.info("  - points3D.txt: 3D points")
-    logger.info("  - images/: Individual frame images")
+    logger.info(f" - {geometry_path}/cameras.txt: Camera intrinsics")
+    logger.info(f" - {geometry_path}/images.txt: Camera poses")
+    logger.info(f" - {geometry_path}/points3D.txt: 3D points")
+    logger.info(" - images/: Individual frame images")
+    logger.info(
+        "NOTE: set the `Point min. track length` option to 0 in COLMAP's render options, or no points will be rendered."
+    )
 
 
 def main():
