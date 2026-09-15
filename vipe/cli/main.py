@@ -13,9 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 from pathlib import Path
 
 import click
+import torch
 
 from vipe import make_pipeline
 from vipe.config import parse_typed_config
@@ -42,8 +44,21 @@ from vipe.utils.viser import run_viser
     default=Path.cwd() / "vipe_results",
 )
 @click.option("--pipeline", "-p", default="default", help="Pipeline configuration to use (default: 'default')")
+@click.option(
+    "--intrinsics",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="JSON pinhole calibration with width, height, fx, fy, cx, cy. Applied to the image directory, "
+    "the video, or every video in the directory; each input's frame size must match it.",
+)
 @click.option("--visualize", "-v", is_flag=True, help="Enable visualization of intermediate results")
-def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: str, visualize: bool):
+def infer(
+    video: Path | None,
+    image_dir: Path | None,
+    output: Path,
+    pipeline: str,
+    intrinsics: Path | None,
+    visualize: bool,
+):
     """Run inference on a video file, a directory of videos, or a directory of images.
 
     VIDEO may be a single .mp4 file or a directory containing .mp4 files -- every .mp4 in the
@@ -60,6 +75,20 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
     if video and image_dir:
         click.echo("Error: Cannot provide both video file/directory and --image-dir", err=True)
         raise click.Abort()
+
+    # Validate the calibration before any model is loaded.
+    intrinsics_tensor = None
+    if intrinsics is not None:
+        calibration = json.loads(intrinsics.read_text())
+        required = {"width", "height", "fx", "fy", "cx", "cy"}
+        if set(calibration) != required:
+            raise click.UsageError(f"intrinsics JSON must contain exactly: {sorted(required)}")
+        intrinsics_tensor = torch.tensor(
+            [calibration["fx"], calibration["fy"], calibration["cx"], calibration["cy"]],
+            dtype=torch.float32,
+        )
+        if not torch.isfinite(intrinsics_tensor).all() or torch.any(intrinsics_tensor[:2] <= 0):
+            raise click.UsageError("intrinsics must be finite and focal lengths must be positive")
 
     overrides = [f"pipeline={pipeline}", f"pipeline.output.path={output}", "pipeline.output.save_artifacts=true"]
     if visualize:
@@ -83,6 +112,11 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
         video_paths = [video]
         input_desc = f"video {video}"
 
+    if intrinsics_tensor is not None:
+        # A user calibration is authoritative: select the `gt` source, which the config
+        # resolver already maps to `slam.optimize_intrinsics=false`.
+        overrides.append("pipeline.init.intrinsics=gt")
+
     args = parse_typed_config("default", hydra_args=overrides)
 
     logger.info(f"Processing {input_desc}...")
@@ -98,9 +132,23 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
     # frame count for malformed videos before iterating.
     is_long_sequence = isinstance(vipe_pipeline, PoseOnlyLongAnnotationPipeline)
 
+    def check_calibration(raw_stream: FrameDirStream | RawMp4Stream, source: Path) -> None:
+        # One calibration describes one camera: every input it is applied to must have its
+        # frame size, or the fx/fy/cx/cy it carries describe a different image.
+        if intrinsics is None:
+            return
+        height, width = raw_stream.frame_size()
+        if calibration["width"] != width or calibration["height"] != height:
+            raise click.UsageError(
+                f"intrinsics dimensions {calibration['width']}x{calibration['height']} "
+                f"do not match frames {width}x{height} of {source}"
+            )
+
     if image_dir:
         # Use frame directory stream
-        video_stream = ProcessedVideoStream(FrameDirStream(image_dir), [])
+        raw_frames = FrameDirStream(image_dir, intrinsics=intrinsics_tensor)
+        check_calibration(raw_frames, image_dir)
+        video_stream = ProcessedVideoStream(raw_frames, [])
         if not is_long_sequence:
             video_stream = video_stream.cache(desc="Reading image frames")
         vipe_pipeline.run(video_stream)
@@ -110,8 +158,10 @@ def infer(video: Path | None, image_dir: Path | None, output: Path, pipeline: st
         # its own artifacts (named after the video) into the shared output directory.
         for idx, video_path in enumerate(video_paths):
             logger.info(f"Processing {video_path} ({idx + 1} / {len(video_paths)})")
+            raw_video = RawMp4Stream(video_path, intrinsics=intrinsics_tensor)
+            check_calibration(raw_video, video_path)
             # Some input videos can be malformed, so we need to cache the videos to obtain correct number of frames.
-            video_stream = ProcessedVideoStream(RawMp4Stream(video_path), [])
+            video_stream = ProcessedVideoStream(raw_video, [])
             if not is_long_sequence:
                 video_stream = video_stream.cache(desc="Reading video stream")
             vipe_pipeline.run(video_stream)
