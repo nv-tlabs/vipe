@@ -1,0 +1,45 @@
+{
+  "schema": "metrictrail_eval_datasets_v1",
+  "note": "Default GT roots, relative to the repository root (the directory holding pyproject.toml; data/ may be a symlink to the MetricTrail data directory). Override with --gt-root.",
+  "datasets": {
+    "kitti": {
+      "gt_root": "data/KITTI/prepared_280x504",
+      "gt_layout": "<root>/<NN>.npz with c2w_gt (or the historical <root>/<NN>/attempt-*/inputs/<NN>_<profile>.npz tree)",
+      "units": "m"
+    },
+    "vbr": {
+      "gt_root": "data/VBR/prepared_280x504",
+      "gt_layout": "<root>/<sequence>/{sequence.npz,manifest.json,.success,intrinsics.yaml}",
+      "units": "m"
+    },
+    "oxford": {
+      "gt_root": "data/Oxford-Spires/prepared_long_378x518",
+      "gt_layout": "<root>/{manifest.json,prepare.SUCCESS.json} + <root>/<scene>/{sequence.npz,rgb_timing.npz,manifest.json,prepare.SUCCESS.json,oxford_spires_long518_input_contract.json,intrinsics.yaml}",
+      "units": "m",
+      "points_gt_root": "data/Oxford-Spires/points_gt",
+      "points_gt_layout": "<root>/pc/<scene>/{DONE.json,frame_ids.txt,poses_c2w.txt,depth/XXXXXX.npy} + <root>/processed_sequences/<scene>/{poses_c2w.txt,intrinsics.txt}"
+    },
+    "lamaria": {
+      "gt_root": "data/LaMaria",
+      "gt_layout": "<root>/training/<seq>/{ground_truth/pGT/<seq>.txt,pinhole_calibrations/<seq>.json,asl_folder/<seq>/aria/cam0/data.csv}",
+      "units": "m"
+    },
+    "tum": {
+      "gt_root": "data/TUM-RGBD/prepared_388x518",
+      "gt_layout": "<root>/<scene>/{sequence.npz,manifest.json,.success,tum518_input_contract.json}",
+      "units": "m"
+    },
+    "7scenes": {
+      "gt_root": "data/7-Scenes/raw",
+      "gt_layout": "<root>/<scene>/seq-NN/frame-XXXXXX.pose.txt",
+      "units": "m",
+      "points_gt_root": "data/7-Scenes/raw",
+      "points_gt_layout": "<root>/<scene>/seq-NN/{frame-XXXXXX.pose.txt,frame-XXXXXX.depth.proj.png}"
+    },
+    "wild_slam": {
+      "gt_root": "data/Wild-SLAM/prepared_native_720x1280",
+      "gt_layout": "<root>/<seq>/{sequence.npz,manifest.json,SUCCESS}",
+      "units": "cm"
+    }
+  }
+}

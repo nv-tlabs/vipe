@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metrictrail-eval"
+version = "0.3.0"
+description = "Trajectory (Sim(3) ATE) and point-cloud evaluation for MetricTrail predictions and ViPE output directories on KITTI, VBR, Oxford-Spires, LaMaria, TUM RGB-D, 7-Scenes and Wild-SLAM"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<2",
+  "scipy",
+  "matplotlib",
+  "evo==1.36.5",
+]
+
+[project.optional-dependencies]
+# --metric points (Oxford-Spires, 7-Scenes); the records used open3d 0.19.0.
+points = [
+  "open3d==0.19.0",
+  "opencv-python-headless",
+]
+# --pred-format vipe --metric points: ViPE's depth artifact is a zip of EXR files.
+vipe = [
+  "OpenEXR",
+]
+
+[tool.setuptools]
+packages = ["metrictrail_eval"]
+
+[tool.setuptools.package-data]
+metrictrail_eval = [
+  "datasets.json",
+  "vendored/*.py",
+  "licenses/LICENSE.*",
+]
