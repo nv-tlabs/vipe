@@ -88,6 +88,21 @@ Set `pipeline.slam.weights` or `VIPE_METRICTRAIL_DPVO_CHECKPOINT` to the DINO-DP
 | DINO SALAD| External loop-candidate generation | https://github.com/serizba/salad/|
 
 For SALAD candidates, follow the [separate installation and export instructions](docs/metrictrail_optional.md#install-salad-separately).
+SALAD and its checkpoints stay in that external environment; they are not bundled with ViPE.
+
+### Optional loop-closure dependency
+
+Install the pose-graph dependency in the **ViPE environment**, separately from SALAD:
+
+```bash
+python -m pip install pypose==0.6.8
+# Alternatively, when installing this checkout:
+python -m pip install '.[metrictrail-lc]'
+```
+
+Loop closure uses PyPose on CPU for SE(3) operations and autograd, and SciPy for
+sparse linear solves. PyPose is loaded only for loop-closure optimization; local
+tracking does not require it. See the [file-based loop-closure workflow](docs/metrictrail_optional.md#loop-closure).
 
 ### Quick start
 **The demo video** (`assets/examples/metrictrail_demo.mp4`): the in-the-wild defaults, i.e. a
