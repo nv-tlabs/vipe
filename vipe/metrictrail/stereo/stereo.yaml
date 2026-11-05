@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# MetricTrail stereo runner (python -m vipe.metrictrail.stereo): the KITTI stereo setup.
+# Equal to the defaults of StereoRunnerConfig (stereo/config.py).
+#
+# Runner keys: MoGe-2 in FP16, depth_queue 4, seed 1234, buffer_size auto (the smallest
+# power of two >= frames + 2, at least 8192). Known K and the stereo baseline are given
+# on the command line (--intrinsics, --baseline).
+
+keyframe_depth: moge2-l
+depth_fp16: true
+depth_queue: 4
+buffer_size: auto
+tf32: false
+seed: 1234
+nonfinite_recovery: true   # non-finite pose: re-track in FP32 (precision only, fresh network, seed + 0..3)
+rgb_normalization: metrictrail
+weights: null
+dinov3_weights: null
+on_truncated_input: error
+save_slam_map: false
+
+# The stereo DPVO preset, merged over the stereo DPVO tree's defaults; its BUFFER_SIZE
+# is superseded by buffer_size above.
+dpvo:
+  # Match the official high-accuracy DPVO local-BA configuration.  The larger
+  # buffer is capacity for full KITTI sequences; it does not enlarge local BA.
+  BUFFER_SIZE: 8192
+  PATCHES_PER_FRAME: 96
+  REMOVAL_WINDOW: 22
+  OPTIMIZATION_WINDOW: 10
+  PATCH_LIFETIME: 13
+  KEYFRAME_THRESH: 15.0
+  MOTION_MODEL: 'DAMPED_LINEAR'
+  MOTION_DAMPING: 0.5
+  MIXED_PRECISION: True
+  CENTROID_SEL_STRAT: 'RANDOM'
+
+  # Native local VO only: no loop closure or global BA.
+  LOOP_CLOSURE: False
+  CLASSIC_LOOP_CLOSURE: False
+
+  # Native KITTI image_2/image_3 factors with the audited projective baseline.
+  STEREO: True
+  STEREO_WEIGHT: 1.0
+
+  # Metric z-depth initializes every patch and supplies the same robust unary
+  # log-inverse-depth factor used by the mono/local and loop configurations.
+  METRIC_DEPTH: True
+  METRIC_DEPTH_MIN: 0.2
+  METRIC_DEPTH_MAX: 500.0
+  METRIC_DEPTH_PRIOR_WEIGHT: 1.0
+  METRIC_DEPTH_PRIOR_HUBER: 0.3
+  METRIC_DEPTH_PRIOR_WARMUP: 12

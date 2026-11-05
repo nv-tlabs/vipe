@@ -2121,6 +2121,11 @@ dependencies = [
     { name = "viser" },
 ]
 
+[package.optional-dependencies]
+metrictrail-lc = [
+    { name = "pypose" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "build" },
@@ -2155,6 +2160,7 @@ requires-dist = [
     { name = "openexr", specifier = "<3.3.0" },
     { name = "pillow" },
     { name = "pydantic", specifier = ">=2,<3" },
+    { name = "pypose", marker = "extra == 'metrictrail-lc'", specifier = "==0.6.8" },
     { name = "python-pycg" },
     { name = "ray" },
     { name = "rerun-sdk" },
@@ -2169,6 +2175,8 @@ requires-dist = [
     { name = "transformers", specifier = ">=4,<5" },
     { name = "viser" },
 ]
+
+provides-extras = ["metrictrail-lc"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2683,6 +2691,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pypose"
+version = "0.6.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.9.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/bd/db5648cf24fcb615a0fb39462c9bde4ed347c08823a803d56dc7bbdb6ec0/pypose-0.6.8.tar.gz", hash = "sha256:83287f159238683ac5f8db1f392855c2758ff021cb251fa55cf72a0d2c0dfe2c", size = 115145, upload-time = "2024-05-25T07:58:18.744Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/aa/3d6e53c0237b8682b82df2834ea5ade1c37dac28a3a2db819f35bcfc421d/pypose-0.6.8-py3-none-any.whl", hash = "sha256:edd828931396e9c7887991c23e8aa3be85766ead6936f285f9ec98475581b95a", size = 127663, upload-time = "2024-05-25T07:58:16.751Z" },
 ]
 
 [[package]]

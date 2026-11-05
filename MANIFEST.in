@@ -1,7 +1,12 @@
 include LICENSE
+include NOTICE
 include README.md
 include THIRD_PARTY_LICENSES.md
 recursive-include csrc *
 prune csrc/include
 recursive-include configs *.yaml
 recursive-include vipe/priors *.yaml
+recursive-include vipe/metrictrail/csrc *
+include vipe/metrictrail/dpvo/LICENSE vipe/metrictrail/dpvo/VENDORED.md
+recursive-include vipe/metrictrail *.yaml *.md LICENSE
+include configs/slam/README_metrictrail.md

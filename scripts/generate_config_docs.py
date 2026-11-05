@@ -30,6 +30,19 @@ from vipe.config.pipeline import (
 from vipe.config.slam import BAConfig, SLAMConfig, SparseTracksConfig
 from vipe.config.streams import BaseStreamListConfig, FrameDirStreamListConfig, RawMP4StreamListConfig
 from vipe.config.vipe import ViPEConfig
+from vipe.metrictrail.calibration.config import SharedKCalibrationConfig
+from vipe.metrictrail.config import (
+    DPVOConfig,
+    FocalRefineConfig,
+    InputRasterConfig,
+    MetricTrailInitConfig,
+    MetricTrailInstanceConfig,
+    MetricTrailOutputConfig,
+    MetricTrailPipelineConfig,
+    MetricTrailPostConfig,
+    MetricTrailSLAMConfig,
+)
+from vipe.metrictrail.optional.config import KnownIntrinsicsConfig, LoopClosureOptions, MetricTrailOptionalConfig
 
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "reference" / "configuration.md"
 CONFIG_ROOT = REPO_ROOT / "configs"
@@ -51,6 +64,24 @@ MODEL_SECTIONS: list[tuple[str, list[type[BaseConfigSchema]]]] = [
         ],
     ),
     ("SLAM", [SLAMConfig, BAConfig, SparseTracksConfig]),
+    (
+        "MetricTrail",
+        [
+            MetricTrailPipelineConfig,
+            MetricTrailInitConfig,
+            InputRasterConfig,
+            SharedKCalibrationConfig,
+            MetricTrailInstanceConfig,
+            MetricTrailSLAMConfig,
+            DPVOConfig,
+            FocalRefineConfig,
+            MetricTrailPostConfig,
+            MetricTrailOptionalConfig,
+            KnownIntrinsicsConfig,
+            LoopClosureOptions,
+            MetricTrailOutputConfig,
+        ],
+    ),
 ]
 
 PIPELINE_PURPOSES = {
@@ -61,8 +92,11 @@ PIPELINE_PURPOSES = {
     "static_vda": "Default pipeline without instance segmentation, using static VDA alignment.",
     "wide_angle": "Default pipeline configured for wide-angle or fisheye input.",
     "panorama": "Panorama pipeline that projects 360-degree frames into virtual perspective views.",
+    "metrictrail": "MetricTrail: RGB-only shared intrinsics, per-frame MoGe-2 metric depth and DINO-fused DPVO; "
+    "full sequence by default, backend presets via slam@pipeline.slam=metrictrail_{local,gba,gba_refine}.",
 }
 PIPELINE_PRESET_ORDER = ["default", "dav3", "lyra", "no_vda", "static_vda", "wide_angle", "panorama"]
+PIPELINE_PRESET_ORDER += ["metrictrail"]
 
 
 def _escape_table_cell(value: str) -> str:

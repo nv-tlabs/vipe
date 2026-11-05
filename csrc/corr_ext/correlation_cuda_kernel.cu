@@ -5,6 +5,8 @@
  */
 
 #include <torch/types.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 using namespace torch;
 
 #include <cuda.h>
@@ -232,6 +234,7 @@ torch::Tensor correlation_cuda_forward(torch::Tensor input1, torch::Tensor input
 
     const int threads = THREADS_FORWARD;
     const dim3 blocks(batch_size, oH, oW);
+    const auto stream = at::cuda::getCurrentCUDAStream(input1.get_device());
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input1.scalar_type(), "correlation_forward_cuda", ([&] {
@@ -239,8 +242,10 @@ torch::Tensor correlation_cuda_forward(torch::Tensor input1, torch::Tensor input
             TensorAcc4R trInput2_acc = trInput2.packed_accessor32<scalar_t, 4, RestrictPtrTraits>();
             TensorAcc5R output_acc = output.packed_accessor32<scalar_t, 5, RestrictPtrTraits>();
             corr::correlation_cuda_forward_kernel<scalar_t>
-                <<<blocks, threads>>>(trInput1_acc, trInput2_acc, output_acc, kH, kW, patchH, patchW, padH, padW,
-                                      dilationH, dilationW, dilation_patchH, dilation_patchW, dH, dW);
+                <<<blocks, threads, 0, stream>>>(trInput1_acc, trInput2_acc, output_acc, kH, kW, patchH, patchW,
+                                                 padH, padW, dilationH, dilationW, dilation_patchH, dilation_patchW,
+                                                 dH, dW);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
         }));
 
     return output;
@@ -260,6 +265,7 @@ std::vector<torch::Tensor> correlation_cuda_backward(torch::Tensor input1, torch
 
     const dim3 blocks(C, iH, iW);
     const dim3 threads(THREADS_BACKWARD, THREADS_BACKWARD);
+    const auto stream = at::cuda::getCurrentCUDAStream(input1.get_device());
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input1.scalar_type(), "correlation_backward_cuda", ([&] {
@@ -271,14 +277,18 @@ std::vector<torch::Tensor> correlation_cuda_backward(torch::Tensor input1, torch
 
             for (int n = 0; n < batch_size; ++n) {
                 corr::correlation_cuda_backward_kernel_input1<scalar_t>
-                    <<<blocks, threads>>>(gradOutput_acc, input2_acc, gradInput1_acc, kH, kW, patchH, patchW, padH,
-                                          padW, dilationH, dilationW, dilation_patchH, dilation_patchW, dH, dW, n);
+                    <<<blocks, threads, 0, stream>>>(gradOutput_acc, input2_acc, gradInput1_acc, kH, kW, patchH,
+                                                     patchW, padH, padW, dilationH, dilationW, dilation_patchH,
+                                                     dilation_patchW, dH, dW, n);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
 
             for (int n = 0; n < batch_size; ++n) {
                 corr::correlation_cuda_backward_kernel_input2<scalar_t>
-                    <<<blocks, threads>>>(gradOutput_acc, input1_acc, gradInput2_acc, kH, kW, patchH, patchW, padH,
-                                          padW, dilationH, dilationW, dilation_patchH, dilation_patchW, dH, dW, n);
+                    <<<blocks, threads, 0, stream>>>(gradOutput_acc, input1_acc, gradInput2_acc, kH, kW, patchH,
+                                                     patchW, padH, padW, dilationH, dilationW, dilation_patchH,
+                                                     dilation_patchW, dH, dW, n);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
         }));
 

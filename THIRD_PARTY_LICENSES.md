@@ -1,5 +1,19 @@
 This project includes code from the following projects. Under each project, the original license is included.
 
+## Optional installed dependencies and external tools
+
+The `metrictrail-lc` extra installs [PyPose 0.6.8](https://github.com/pypose/pypose),
+which is distributed under its [Apache-2.0 license](https://github.com/pypose/pypose/blob/main/LICENSE).
+PyPose is an optional runtime dependency; its source is not vendored in this repository.
+
+[SALAD](https://github.com/serizba/salad) is an external candidate-generation tool,
+installed and run separately under its [GPLv3 source license](https://github.com/serizba/salad/blob/main/LICENSE).
+ViPE does not bundle SALAD source, an exporter, or its model weights. The
+pose-graph command reads candidate JSON produced by an external workflow.
+Separately obtained checkpoints and other external tools retain their own
+applicable terms. These installation instructions do not change any third-party
+license or grant additional rights to source code or model weights.
+
 # DROID-SLAM
 
 Source: https://github.com/princeton-vl/DROID-SLAM
@@ -3168,6 +3182,50 @@ Source: https://github.com/chengdazhi/Deformable-Convolution-V2-PyTorch/tree/pyt
 MIT License
 
 Copyright (c) 2020 Dazhi Cheng
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+# DPVO
+
+Source: https://github.com/princeton-vl/DPVO
+
+Vendored (with MetricTrail's metric-depth additions) under `vipe/metrictrail/dpvo/` and
+`vipe/metrictrail/csrc/dpvo/`; see `vipe/metrictrail/dpvo/VENDORED.md`. The rectified-stereo
+DPVO tree of the optional stereo runner is vendored under
+`vipe/metrictrail/stereo/dpvo_stereo/` and `vipe/metrictrail/csrc/dpvo_stereo/`; see
+`vipe/metrictrail/stereo/dpvo_stereo/VENDORED.md`. Their copies of lietorch are covered by
+the lietorch entry above.
+
+NVIDIA-authored files and NVIDIA modifications are licensed under Apache-2.0
+where identified in their source headers; upstream DPVO and LieTorch source
+retains its original terms.
+
+`vipe/metrictrail/dpvo_scatter.py` incorporates PyTorch Scatter 2.1.2 source
+under the MIT license and Copyright (c) 2020 Matthias Fey. Its full license
+is included in the Pytorch Scatter entry above; NVIDIA modifications are
+identified in the source header.
+
+```
+MIT License
+
+Copyright (c) 2022 Princeton Vision & Learning Lab
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

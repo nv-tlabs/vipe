@@ -1,0 +1,15 @@
+ViPE and MetricTrail
+Copyright 2025 NVIDIA CORPORATION & AFFILIATES.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+NVIDIA-authored source and NVIDIA modifications identified by Apache-2.0
+headers are licensed under the Apache License, Version 2.0.
+
+MetricTrail incorporates DPVO source under the MIT license and LieTorch
+source under the BSD-3-Clause license. Its scatter utilities incorporate
+PyTorch Scatter source under the MIT license. Upstream copyrights and
+licenses are preserved alongside the notices for NVIDIA modifications.
+
+See THIRD_PARTY_LICENSES.md and component LICENSE files for third-party
+source paths, copyright notices, and license terms. These source licenses
+do not cover separately obtained model weights, datasets, or input media.
