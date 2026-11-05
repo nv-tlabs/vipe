@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# MetricTrail tracker preset "gba_refine": the gba preset + the full global-BA backend
+# (scheduled global BA, culled-frame interpolation, final re-measured global BA, scale
+# latent, reverse proximity edges, keyframe-hole guard). Long handheld indoor sequences
+# with revisits; needs about 22-39 GiB of GPU memory at 388x518.
+# Select it with: slam@pipeline.slam=metrictrail_gba_refine
+#
+# The dpvo block is the MetricTrail DPVO preset of the same name
+# (merged over DPVO's defaults; keys not listed keep DPVO's default, add them with +).
+# Its BUFFER_SIZE is superseded by buffer_size below
+# (auto: smallest power of two >= frames + 2, at least 8192).
+
+preset: gba_refine
+keyframe_depth: moge2-l
+depth_fp16: true
+depth_queue: 4
+buffer_size: auto
+tf32: false
+seed: 1234
+seed_name: null
+nonfinite_recovery: true   # non-finite pose: re-track in FP32 (precision only, fresh network, seed + 0..3)
+rgb_normalization: metrictrail
+weights: null
+dinov3_weights: null
+visualize: false
+
+dpvo:
+  # Match the official high-accuracy DPVO local-BA configuration.
+  BUFFER_SIZE: 8192
+  PATCHES_PER_FRAME: 96
+  REMOVAL_WINDOW: 22
+  OPTIMIZATION_WINDOW: 10
+  PATCH_LIFETIME: 13
+  KEYFRAME_THRESH: 15.0
+  MOTION_MODEL: 'DAMPED_LINEAR'
+  MOTION_DAMPING: 0.5
+  MIXED_PRECISION: True
+  CENTROID_SEL_STRAT: 'RANDOM'
+
+  # Proximity loop edges; retrieval loop closure stays off.
+  LOOP_CLOSURE: True
+  CLASSIC_LOOP_CLOSURE: False
+  BACKEND_THRESH: 64.0
+  MAX_EDGE_AGE: 1000
+  GLOBAL_OPT_FREQ: 15
+
+  # Metric-scale global BA, every pose but the first free.
+  METRIC_GLOBAL_BA: True
+  METRIC_GLOBAL_BA_T0: 'all'
+
+  # Metric z-depth initializes every patch and supplies a robust unary
+  # log-inverse-depth factor to the local BA normal equations.
+  METRIC_DEPTH: True
+  METRIC_DEPTH_MIN: 0.2
+  METRIC_DEPTH_MAX: 500.0
+  METRIC_DEPTH_PRIOR_WEIGHT: 1.0
+  METRIC_DEPTH_PRIOR_HUBER: 0.3
+  METRIC_DEPTH_PRIOR_WARMUP: 12
+
+  # Group 2: also run the global BA every 8 accepted keyframes.
+  GBA_SCHEDULE_K: 8
+
+  # Group 3: spread the final keyframe correction along each run of culled frames.
+  CULLED_INTERP: True
+
+  # Group 4: final re-measurement at terminate (passes of 8 and 24), 3 burn-in
+  # refreshes per pass, warm start from the active edges, state carried across passes.
+  GBA_REMEASURE_FINAL: 'two'
+  FMAP_STORE: 512
+  REMEASURE_BURNIN: 3
+  REMEASURE_WARM_ACTIVE: True
+  REMEASURE_CARRY_STATE: True
+
+  # Group 5: per-keyframe log-scale latent of the metric prior in the global BA.
+  GBA_SCALE_LATENT: True
+  GBA_SCALE_SMOOTH: 20.0
+  GBA_SCALE_CLAMP: 0.35
+  GBA_SCALE_MIN_PATCHES: 32
+  GBA_SCALE_MIN_PARALLAX_PX: 2.0
+  GBA_SCALE_LOCAL_USE: 'off'
+
+  # Group 6: reverse proximity edges + keyframe-hole guard (10 culls / 10 deg).
+  LOOP_REVERSE_EDGES: True
+  KEYFRAME_MAX_CULL: 10
+  KEYFRAME_MAX_CULL_ROT_DEG: 10.0

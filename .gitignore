@@ -170,3 +170,9 @@ ci_outputs/
 /external/
 JIAHUI.md
 csrc/include/
+
+# MetricTrail: benchmark frames and GT linked under data/ (see configs/slam/README_metrictrail.md)
+/data
+
+# External model weights
+/ckpt/

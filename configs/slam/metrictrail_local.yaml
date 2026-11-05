@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# MetricTrail tracker preset "local": DINO-fused DPVO + per-frame MoGe-2 metric depth,
+# fixed-lag local BA only. The default of pipeline=metrictrail; long outdoor sequences.
+#
+# The dpvo block holds the DPVO settings of this preset
+# (merged over DPVO's defaults; keys not listed keep DPVO's default, add them with +).
+# Its BUFFER_SIZE is superseded by buffer_size below
+# (auto: smallest power of two >= frames + 2, at least 8192).
+
+preset: local
+keyframe_depth: moge2-l
+depth_fp16: true
+depth_queue: 4
+buffer_size: auto
+tf32: false
+seed: 1234
+seed_name: null
+nonfinite_recovery: true   # non-finite pose: re-track in FP32 (precision only, fresh network, seed + 0..3)
+rgb_normalization: metrictrail
+weights: null
+dinov3_weights: null
+visualize: false
+
+dpvo:
+  # Match the official high-accuracy DPVO local-BA configuration.
+  # KITTI 00 contains more than 4k input frames; this is capacity only and does
+  # not change the fixed-lag optimization window.
+  BUFFER_SIZE: 8192
+  PATCHES_PER_FRAME: 96
+  REMOVAL_WINDOW: 22
+  OPTIMIZATION_WINDOW: 10
+  PATCH_LIFETIME: 13
+  KEYFRAME_THRESH: 15.0
+  MOTION_MODEL: 'DAMPED_LINEAR'
+  MOTION_DAMPING: 0.5
+  MIXED_PRECISION: True
+  CENTROID_SEL_STRAT: 'RANDOM'
+
+  # Local VO only: no global BA or loop closure.
+  LOOP_CLOSURE: False
+  CLASSIC_LOOP_CLOSURE: False
+
+  # Metric z-depth initializes every patch and supplies a robust unary
+  # log-inverse-depth factor to the local BA normal equations.
+  METRIC_DEPTH: True
+  METRIC_DEPTH_MIN: 0.2
+  METRIC_DEPTH_MAX: 500.0
+  METRIC_DEPTH_PRIOR_WEIGHT: 1.0
+  METRIC_DEPTH_PRIOR_HUBER: 0.3
+  METRIC_DEPTH_PRIOR_WARMUP: 12

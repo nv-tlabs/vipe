@@ -14,10 +14,12 @@ ViPE estimates camera intrinsics, camera motion, and dense near-metric depth map
   <a href="https://pypi.org/project/nvidia-vipe/"><img src="https://img.shields.io/pypi/v/nvidia-vipe?logo=pypi&logoColor=white&label=PyPI" alt="PyPI"/></a>
   <a href="https://nv-tlabs.github.io/vipe/"><img src="https://img.shields.io/badge/Documentation-blue?logo=readthedocs&logoColor=white" alt="Documentation"/></a>
   <a href="https://nv-tlabs.github.io/vipe/dataset/"><img src="https://img.shields.io/badge/Datasets-4B8BBE?logo=databricks&logoColor=white" alt="Datasets"/></a>
+  <a href="https://research.nvidia.com/labs/sil/projects/metrictrail/"><img src="https://img.shields.io/badge/MetricTrail%20Project%20Page-76B900?logo=nvidia&logoColor=white" alt="MetricTrail Project Page"/></a>
 </p>
 
 ## News
 
+- **2026/11**: 🚀🚀🚀 Released ViPE-Long: Added long-sequence pipeline (`metrictrail`) for streaming long videos reconstruction, with metric depth and local optimization as key features. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/09**: Added long-sequence SLAM (`pose_only_long`) for arbitrarily long videos, with GPU/CPU memory bounded by a sliding keyframe window instead of growing with video length. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/06**: 🚀🚀🚀 Released ViPE 1.2.0: **2.7x speed-up with no loss of accuracy**, enabled by CUDA fused kernels, model and pipeline caching, prefetching, and other optimizations.
 - **2026/05**: Merged Panorama estimation pipeline & bump release version to 1.0.0.
@@ -54,6 +56,98 @@ uv run vipe infer YOUR_LONG_VIDEO.mp4 -p pose_only_long -o vipe_results/
 uv run vipe infer YOUR_VIDEO_FOLDER/ -p pose_only_long -o vipe_results/
 ```
 
+## MetricTrail
+
+MetricTrail is a **streaming metric geometry system** that combines pretrained spatial priors with bounded local geometric optimization to recover accurate camera trajectories and dense 3D reconstruction from long videos. To use metrictrail, build MetricTrail's DPVO kernels after the installation of ViPE.
+### Build
+
+```bash
+uv pip install yacs numba   # DPVO runtime requirements (not ViPE dependencies)
+uv pip install xformers==0.0.33.post1  # MoGe-2's DINOv2 attention
+python -m vipe.metrictrail.build       # cuda_corr, cuda_ba, lietorch_backends
+python -m vipe.metrictrail.build --stereo   # also the optional stereo DPVO kernels
+python -m vipe.metrictrail.build --dry-run  # print the plan only
+```
+Point `CUDA_HOME` at the conda environment's toolkit (`export CUDA_HOME=$CONDA_PREFIX` after
+`conda activate cu128`) when the shell presets another CUDA, so all extensions use nvcc 12.8.
+
+The sources travel with ViPE's sdist (`MANIFEST.in`) and are package data of
+`vipe.metrictrail`, so the build also works from an installed (non-editable) ViPE. 
+
+### Weights
+
+MetricTrail weights are obtained separately, with a Hugging Face release planned under the
+[NVIDIA License](https://developer.download.nvidia.com/licenses/NVIDIA-OneWay-Noncommercial-License-22Mar2022.pdf).
+Set `pipeline.slam.weights` or `VIPE_METRICTRAIL_DPVO_CHECKPOINT` to the DINO-DPVO checkpoint.
+
+| weight | setting | default |
+| --- | --- | --- |
+| MoGe-2 ViT-L | ViPE's own | https://github.com/microsoft/moge |
+| DINO-DPVO | `pipeline.slam.weights` | https://huggingface.co/nvidia/MetricTrail |
+| DINOv3 ViT-S/16| `pipeline.slam.dinov3_weights` | https://github.com/facebookresearch/dinov3|
+| DINO SALAD| External loop-candidate generation | https://github.com/serizba/salad/|
+
+For SALAD candidates, follow the [separate installation and export instructions](docs/metrictrail_optional.md#install-salad-separately).
+SALAD and its checkpoints stay in that external environment; they are not bundled with ViPE.
+
+### Optional loop-closure dependency
+
+Install the pose-graph dependency in the **ViPE environment**, separately from SALAD:
+
+```bash
+python -m pip install pypose==0.6.8
+# Alternatively, when installing this checkout:
+python -m pip install '.[metrictrail-lc]'
+```
+
+Loop closure uses PyPose on CPU for SE(3) operations and autograd, and SciPy for
+sparse linear solves. PyPose is loaded only for loop-closure optimization; local
+tracking does not require it. See the [file-based loop-closure workflow](docs/metrictrail_optional.md#loop-closure).
+
+### Quick start
+**The demo video** (`assets/examples/metrictrail_demo.mp4`): the in-the-wild defaults, i.e. a
+280x504 cover-crop at the video's own frame rate, RGB-only SharedK calibration, local tracking.
+
+```bash
+python run.py pipeline=metrictrail streams.base_path=assets/examples/metrictrail_demo.mp4 \
+    pipeline.output.path=vipe_results/metrictrail_demo
+# -> vipe_results/metrictrail_demo/{pose,intrinsics,depth}/metrictrail_demo.*  and the run record
+# vipe_results/metrictrail_demo/vipe/metrictrail_demo_metrictrail.json 
+
+# point cloud export
+python -m vipe.metrictrail.pointcloud vipe_results/metrictrail_demo --name metrictrail_demo \
+    --video assets/examples/metrictrail_demo.mp4 --filter strict
+# -> vipe_results/metrictrail_demo/pointcloud/metrictrail_demo.ply
+```
+
+**KITTI odometry**, one sequence, uncalibrated, with loop closure (frames prepared at 280x504;
+data layout and every benchmark in `configs/slam/README_metrictrail.md`):
+
+```bash
+python run.py pipeline=metrictrail slam@pipeline.slam=metrictrail_local \
+    streams=frame_dir_stream streams.base_path=data/KITTI/rgb/02 \
+    pipeline.init.input_raster.policy=unchanged \
+    pipeline.init.calibration.allow_unstable=true \
+    pipeline.output.path=vipe_results/kitti
+
+# After exporting candidate JSON for the saved trajectory:
+python -m vipe.metrictrail.optional.loop_closure vipe_results/kitti --name 02 --preset kitti \
+    --candidates /path/to/02-loops.json
+# vipe_results/kitti/pose/02.npz (before loop closure), vipe_results/kitti/pose_lc/02.npz (after)
+```
+
+Scoring is a separate package on the `metrictrail_eval` branch (its README lists every dataset and
+how to plot the aligned trajectories, `python -m metrictrail_eval.plot`):
+
+```bash
+git worktree add ../vipe-metrictrail-eval metrictrail_eval
+cd ../vipe-metrictrail-eval/metrictrail_eval
+python -m metrictrail_eval.score --dataset kitti --pred-format vipe --pred <repo>/vipe_results/kitti \
+    --gt-root <KITTI GT, e.g. data/KITTI/prepared_280x504> --cases 02 --allow-partial --stage LC  # --stage local: before LC
+```
+
+Refer to [MetricTrail](./docs/metrictrail.md) for detailed explanations and further usages.
+
 ## License
 
-This project will download and install additional third-party **models and softwares**. Note that these models or softwares are not distributed by NVIDIA. Review the license terms of these models and projects before use. This source code, **except for the Unik3D part (which is under the BY-NC-SA 4.0 license)** , is released under the [Apache 2 License](https://www.apache.org/licenses/LICENSE-2.0).
+This project will download and install additional third-party **models and softwares**. Note that these models or softwares are not distributed by NVIDIA. Review the license terms of these models and projects before use. NVIDIA-authored source is released under the [Apache License 2.0](LICENSE). Incorporated third-party code retains its applicable terms, including Unik3D (BY-NC-SA 4.0), DPVO (MIT), and LieTorch (BSD-3-Clause). See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [NOTICE](NOTICE).

@@ -25,6 +25,7 @@ These are the pipeline values accepted by `pipeline=...` in Hydra overrides and 
 | `static_vda` | Default pipeline without instance segmentation, using static VDA alignment. | `DefaultAnnotationPipeline` | `pinhole` | `unidepth-l` | `adaptive_unidepth-l_vda` |
 | `wide_angle` | Default pipeline configured for wide-angle or fisheye input. | `DefaultAnnotationPipeline` | `mei` | `unidepth-l` | `null` |
 | `panorama` | Panorama pipeline that projects 360-degree frames into virtual perspective views. | `PanoramaAnnotationPipeline` | `panorama` | `null` | `null` |
+| `metrictrail` | MetricTrail: RGB-only shared intrinsics, per-frame MoGe-2 metric depth and DINO-fused DPVO; full sequence by default, backend presets via slam@pipeline.slam=metrictrail_{local,gba,gba_refine}. | `MetricTrailPipeline` | `pinhole` | `moge2-l` | `null` |
 | `pose_only` |  | `PoseOnlyAnnotationPipeline` | `pinhole` | `moge2-l` | `null` |
 | `pose_only_long` |  | `PoseOnlyLongAnnotationPipeline` | `pinhole` | `moge2-l` | `null` |
 
@@ -46,7 +47,7 @@ Top-level ViPE runtime configuration.
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `streams` | RawMP4StreamListConfig \| FrameDirStreamListConfig | required | - | Input stream list that supplies videos or frame directories to process. |
-| `pipeline` | DefaultPipelineConfig \| PoseOnlyPipelineConfig \| PoseOnlyLongPipelineConfig \| PanoramaPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
+| `pipeline` | DefaultPipelineConfig \| PoseOnlyPipelineConfig \| PoseOnlyLongPipelineConfig \| PanoramaPipelineConfig \| MetricTrailPipelineConfig | required | - | Annotation pipeline and all pipeline-specific runtime options. |
 
 ## Input Streams
 
@@ -243,3 +244,250 @@ Sparse feature-track backend used to seed or support SLAM.
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `name` | `dummy` \| `cuvslam` | required | choices `dummy` \| `cuvslam` | Sparse-track provider. dummy disables external sparse tracks; cuvslam uses NVIDIA cuVSLAM. |
+
+## MetricTrail
+
+### MetricTrailPipelineConfig
+
+MetricTrail: RGB-only shared intrinsics, MoGe-2 metric depth and DINO-fused DPVO tracking.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `instance` | `vipe.metrictrail.pipeline.MetricTrailPipeline` | required | fixed `vipe.metrictrail.pipeline.MetricTrailPipeline` | Implementation class of the MetricTrail pipeline. |
+| `init` | MetricTrailInitConfig | required | - | Shared-intrinsics initialization. |
+| `slam` | MetricTrailSLAMConfig | required | - | DPVO tracker and its backend preset (slam group). |
+| `focal_refine` | FocalRefineConfig | required | - | Optional focal refinement (stage B). |
+| `post` | MetricTrailPostConfig | required | - | Optional ViPE depth fusion after tracking. |
+| `optional` | MetricTrailOptionalConfig | required | - | Optional inputs/outputs, all off by default: known intrinsics, loop closure (docs/metrictrail_optional.md). |
+| `output` | MetricTrailOutputConfig | required | - | Output artifacts. |
+
+### MetricTrailInitConfig
+
+Initialization: RGB-only shared intrinsics (SharedK) calibrated from the input video itself.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `camera_type` | `pinhole` | required | fixed `pinhole` | Camera model (MetricTrail tracks pinhole video). |
+| `intrinsics` | `sharedk` | required | fixed `sharedk` | Source of the shared K. sharedk calibrates it from RGB only and refuses inputs that carry K (a known K is the optional input pipeline.optional.intrinsics, which replaces SharedK). |
+| `calibration` | SharedKCalibrationConfig | required | - | SharedK calibration settings. |
+| `calibration_cache` | str \| null | `null` | - | Optional frozen SharedK artifact path: create once, then reuse its model-estimated K after checking all prepared RGB frames and calibration settings. A mismatch raises; null recalibrates every run. Use a new path after changing calibration code or weights. Incompatible with optional known intrinsics. |
+| `on_truncated_input` | `error` \| `warn` | `error` | choices `error` \| `warn` | What to do when the input stream stops before its source ends (e.g. frame_end set below the video length): MetricTrail processes full sequences. |
+| `instance` | MetricTrailInstanceConfig \| null | `null` | - | ViPE's dynamic-object masking (ViPE's init.instance): TrackAnything runs in the init stage, no DPVO patch is placed on a dynamic pixel, dynamic pixels get no metric prior and leave the SLAM map, and the masks are written as ViPE mask artifacts. Null (default) turns it off. |
+| `input_raster` | InputRasterConfig | required | - | Input raster and frame-rate policy, applied before calibration (preset: in-the-wild cover_crop to 280x504; resize for a plain resize; unchanged for pre-prepared frames). |
+| `tracking_stride` | int | `1` | >= 1 | Track every k-th frame of the prepared input (frames 0, k, 2k, ...) while SharedK calibrates on every frame; the pose artifact's source_frame_ids name the tracked frames. 1 tracks every frame; 7-Scenes uses 5 on the stride-1 clip. |
+
+### InputRasterConfig
+
+Input raster and frame rate (in-the-wild default: cover-fit to 280x504 with an integer centre crop).
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `policy` | `cover_crop` \| `resize` \| `unchanged` | `cover_crop` | choices `cover_crop` \| `resize` \| `unchanged` | cover_crop: resize (resampler) to cover height x width, then an integer centre crop (the aspect ratio changes by cropping, never by squashing); the geometry and frame selection of tools/prepare_video.py (in-the-wild video). resize: resize (resampler) to exactly height x width, no crop (7-Scenes). Both keep the source frame rate and keep one frame in k above max_frames. unchanged: the input raster and every frame as delivered (pre-prepared frames, e.g. benchmark frame directories). |
+| `height` | int | `280` | >= 4 | Prepared height (px). |
+| `width` | int | `504` | >= 4 | Prepared width (px). |
+| `max_frames` | int | `1500` | >= 1 | Inputs with more frames keep one frame in k, the smallest k that fits. |
+| `resampler` | `bicubic_antialias` \| `bilinear` | `bicubic_antialias` | choices `bicubic_antialias` \| `bilinear` | Resize of cover_crop / resize: bicubic_antialias (default; torch interpolate, bicubic, antialias; closest to an ffmpeg Lanczos resize, about 2 ms more per frame once before tracking; a large downscale without antialiasing aliases) or bilinear (ViPE's VideoFrame.resize, no antialias; reproduces the validation numbers of the benchmarks resized on read). |
+
+### SharedKCalibrationConfig
+
+RGB-only shared-intrinsics calibration on ViPE's keyframe SLAM (MetricTrail init stage).
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `budget` | `fast64` \| `robust128` \| `robust256` | `robust128` | choices `fast64` \| `robust128` \| `robust256` | Accepted-keyframe budget of the calibration sweep (robust256 may stop early at 128). |
+| `initializer_frames` | int | `32` | >= 1 | Number of leading frames whose free-FoV focal predictions give the initial shared K (median). |
+| `terminal_min_accepted_keyframes` | int \| null | `16` | - | When the video ends before the budget, accept the terminal optimised K if at least this many keyframes were retained (and it passes the convergence gate). Null fails such videos instead. |
+| `fallback_to_initializer` | bool | `false` | - | Use the depth provider's own (initializer) K when the video ends below the terminal minimum or the terminal optimised K fails the convergence gate. Requires terminal_min_accepted_keyframes. Only with fallback none: provider_focal already binds that K in those cases. |
+| `allow_unstable` | bool | `false` | - | Accept an optimised K that reached the budget but did not pass the GT-free convergence gate (benchmark policy). With provider_focal only a sweep that reached its keyframe budget keeps such a K; every other unconverged sweep still binds the provider focal. |
+| `fallback` | `none` \| `provider_focal` | `provider_focal` | choices `none` \| `provider_focal` | provider_focal (in-the-wild policy): when SharedK does not converge, runs out of frames, keeps too few keyframes or raises, bind the depth provider's own focal (initializer median) with the principal point at the image centre and record the reason (allow_unstable keeps a budget-reached optimised K). none: such a run fails or follows allow_unstable / fallback_to_initializer. |
+| `depth_model` | str | `moge2-l` | - | Depth provider used during calibration (ViPE depth registry name; moge2* uses MetricTrail's exact MoGe-2 call). It must predict its own focal and be re-inferred per focal (MODEL_METRIC_DEPTH). |
+| `depth_use_fp16` | bool | `false` | - | Autocast the calibration depth provider to FP16. MetricTrail calibrates in FP32. |
+| `rgb_normalization` | `metrictrail` \| `stream` | `metrictrail` | choices `metrictrail` \| `stream` | metrictrail re-quantises each frame to uint8 and divides by 255 on the device (8-bit-exact inputs, independent of the stream's float path); stream uses the stream's float RGB as is. |
+| `seed` | int | `1234` | - | Python/numpy/torch seed set before calibration. |
+| `disable_tf32` | bool | `true` | - | Disable TF32 matmul/cuDNN and use highest float32 matmul precision (process-wide). |
+| `slam` | SLAMConfig \| null | `null` | - | ViPE SLAM config for the calibration sweep. Null composes configs/slam/default.yaml. The SharedK overrides (no ViPE keyframe-depth prior, focal optimisation, fused BA, milestones 16/64/256, 24 final iterations) are always applied on top. |
+
+### MetricTrailInstanceConfig
+
+ViPE's dynamic-object masking: the fields (and defaults) of ViPE's ``init.instance``.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kf_gap_sec` | float | `2.0` | > 0.0 | Minimum time gap, in seconds, between keyframes used to initialize instance segmentation. |
+| `phrases` | list[str] | `["person", "animal", "vehicle", "ball", "balloon", "gun", "pet", "car", "bus"]` | min items 1 | Text prompts passed to the open-vocabulary detector for objects that should be segmented. |
+| `add_sky` | bool | `true` | - | Add a sky mask to the instance segmentation output (the sky is not masked out). |
+
+### MetricTrailSLAMConfig
+
+MetricTrail tracker: DINO-fused DPVO fed with per-frame metric depth (slam group ``metrictrail_*``).
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `preset` | `local` \| `gba` \| `gba_refine` \| `custom` | required | choices `local` \| `gba` \| `gba_refine` \| `custom` | Name of the DPVO backend preset (recorded with the run). local: fixed-lag local BA; gba: + proximity edges and metric global BA; gba_refine: + the full global-BA backend. |
+| `dpvo` | DPVOConfig | required | - | DPVO configuration merged over DPVO's defaults. |
+| `buffer_size` | int \| `auto` | `auto` | - | DPVO BUFFER_SIZE applied after the preset (MetricTrail's dpvo_buffer_size; GPU memory only). auto: the smallest power of two >= frames + 2, at least 8192; an integer wins. |
+| `tf32` | bool | `false` | - | TF32 for CUDA matmul and cuDNN during tracking. False (default): both off and float32 matmul precision highest; per-frame networks run under FP16/BF16 autocast. |
+| `keyframe_depth` | str | `moge2-l` | - | Metric depth model for every frame DPVO receives (ViPE depth-registry name; moge2* uses MetricTrail's exact MoGe-2 call). It must return metric depth for a pinhole K. |
+| `depth_fp16` | bool | `true` | - | Autocast the depth model to FP16 (weights stay FP32). |
+| `depth_queue` | int | `4` | >= 0 | Frames the depth producer may run ahead of DPVO on an auxiliary CUDA stream; 0 runs depth and DPVO sequentially on the default stream (reference path). |
+| `seed` | int \| null | `1234` | - | Base tracking seed; the per-sequence seed is derived from the stream name (see seed_name), and the FP32 recovery of a non-finite trajectory (nonfinite_recovery) tracks at that seed + 0, 1, 2, 3. Null leaves the RNGs unseeded. |
+| `seed_name` | str \| null | `null` | - | Name the per-sequence seed is derived from. Null: the stream name with spaces replaced by '_'. Set it to reproduce a trajectory tracked under another name, e.g. demo for assets/examples/metrictrail_demo.mp4. |
+| `nonfinite_recovery` | bool | `true` | - | Non-finite poses: the sequence is tracked once, at the per-sequence seed, with the preset as configured; only if a pose is non-finite is the cached DINO-DPVO network released (evicted from the model cache) and a freshly loaded one tracks it again in full FP32 (DPVO MIXED_PRECISION off, DINOv3 autocast off, TF32 off; every other preset setting, loop edges and global BA included, kept) at the per-sequence seed + 0, 1, 2, 3 in that order (unseeded with seed null), keeping the first all-finite trajectory; an attempt that runs out of CUDA memory is recorded and counts as failed; the run fails if none is kept. A finite first pass is kept as is. Every pass is recorded (nonfinite_recovery in the run record). False: a non-finite trajectory fails the run. |
+| `rgb_normalization` | `metrictrail` \| `stream` | `metrictrail` | choices `metrictrail` \| `stream` | metrictrail re-quantises each frame to 8 bit and rebuilds float RGB as uint8 * (1/255) in float32; stream uses the stream's float RGB as is. |
+| `weights` | str \| null | `null` | - | DINO-DPVO checkpoint. Null: $VIPE_METRICTRAIL_DPVO_CHECKPOINT, else $TORCH_HOME/hub/metrictrail/dino_dpvo_multidataset15k.pth. |
+| `dinov3_weights` | str \| null | `null` | - | DINOv3 ViT-S/16 weights. Null: $VIPE_DINOV3_VITS16_CHECKPOINT, else $TORCH_HOME/hub/checkpoints/dinov3_vits16_pretrain_lvd1689m-08c60483.pth. |
+| `visualize` | bool | `false` | - | Accepted for `vipe infer -v`; DPVO has no viewer here. |
+
+### DPVOConfig
+
+Every key of DPVO's configuration (vendored ``vipe/metrictrail/dpvo/config.py``), with DPVO's defaults.
+
+    The whole block is merged over DPVO's defaults with yacs. Keys not listed in a slam
+    preset keep DPVO's default; add them on the command line with ``+``.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `BUFFER_SIZE` | int | `4096` | >= 1 | Keyframe buffer capacity (see slam.buffer_size). |
+| `CENTROID_SEL_STRAT` | `RANDOM` \| `GRADIENT_BIAS` | `RANDOM` | choices `RANDOM` \| `GRADIENT_BIAS` | Patch centroid selection. |
+| `PATCHES_PER_FRAME` | int | `80` | >= 1 | Patches sampled per frame. |
+| `REMOVAL_WINDOW` | int | `20` | >= 1 | Frames after which factors leave the local window. |
+| `OPTIMIZATION_WINDOW` | int | `12` | >= 1 | Keyframes optimised by the local BA. |
+| `PATCH_LIFETIME` | int | `12` | >= 1 | Frames a patch is tracked into. |
+| `KEYFRAME_INDEX` | int | `4` | >= 1 | Age of the keyframe tested for removal. |
+| `KEYFRAME_THRESH` | float | `12.5` | >= 0.0 | Flow (px) below which a keyframe is removed. |
+| `MOTION_MODEL` | str | `DAMPED_LINEAR` | - | Pose initialisation of a new frame (anything else: constant pose). |
+| `MOTION_DAMPING` | float | `0.5` | - | Damping of the linear motion model. |
+| `MIXED_PRECISION` | bool | `true` | - | Run DPVO's network under FP16 autocast. |
+| `METRIC_DEPTH` | bool | `false` | - | Metric depth initialises patches and adds a unary prior. |
+| `METRIC_DEPTH_MIN` | float | `0.2` | > 0.0 | Smallest metric depth used as a prior (m). |
+| `METRIC_DEPTH_MAX` | float | `500.0` | > 0.0 | Largest metric depth used as a prior (m). |
+| `METRIC_DEPTH_PRIOR_WEIGHT` | float | `1.0` | >= 0.0 | Weight of the metric unary. |
+| `METRIC_DEPTH_PRIOR_HUBER` | float | `0.3` | > 0.0 | Huber width of the metric unary. |
+| `METRIC_DEPTH_PRIOR_WARMUP` | int | `12` | >= 0 | Accepted keyframes before the metric unary is switched on. |
+| `LOOP_CLOSURE` | bool | `false` | - | Proximity loop edges (only with METRIC_GLOBAL_BA). |
+| `BACKEND_THRESH` | float | `64.0` | - | Flow (px) below which a proximity edge is added. |
+| `MAX_EDGE_AGE` | int | `1000` | >= 1 | Oldest frame a proximity edge may reach. |
+| `GLOBAL_OPT_FREQ` | int | `15` | >= 1 | Keyframes between proximity-edge searches. |
+| `CLASSIC_LOOP_CLOSURE` | bool | `false` | - | Retrieval loop closure (refused by MetricTrail). |
+| `LOOP_CLOSE_WINDOW_SIZE` | int | `3` | - | Retrieval loop-closure window (unused). |
+| `LOOP_RETR_THRESH` | float | `0.04` | - | Retrieval loop-closure threshold (unused). |
+| `METRIC_GLOBAL_BA` | bool | `false` | - | Metric-scale global BA over stored factors. |
+| `METRIC_GLOBAL_BA_T0` | `active_min` \| `all` | `active_min` | choices `active_min` \| `all` | Poses freed by the global BA: all (every pose but the first) or active_min. |
+| `GBA_SCHEDULE_K` | int | `0` | >= 0 | Also run the global BA every K keyframes (0 = off). |
+| `CULLED_INTERP` | bool | `false` | - | Spread keyframe corrections over culled frames. |
+| `GBA_REMEASURE_FINAL` | `off` \| `one` \| `two` | `off` | choices `off` \| `one` \| `two` | Final re-measured global BA passes at terminate. |
+| `FMAP_STORE` | int | `512` | >= 36 | Feature-map ring length while re-measuring. |
+| `REMEASURE_MIN_AGE` | int | `0` | >= 0 | Only re-measure edges at least this old. |
+| `REMEASURE_BURNIN` | int | `0` | >= 0 | Refreshes before the first BA of each pass. |
+| `REMEASURE_WARM_ACTIVE` | bool | `false` | - | Warm-start active edges in pass 0. |
+| `REMEASURE_CARRY_STATE` | bool | `false` | - | Carry the update state across passes. |
+| `GBA_SCALE_LATENT` | bool | `false` | - | Per-keyframe log-scale latent of the metric prior. |
+| `GBA_SCALE_SMOOTH` | float | `20.0` | - | Smoothness weight of the scale latent. |
+| `GBA_SCALE_CLAMP` | float | `0.35` | - | Bound of the scale latent (log units). |
+| `GBA_SCALE_MIN_PATCHES` | int | `32` | >= 0 | Minimum prior patches for a data term. |
+| `GBA_SCALE_MIN_PARALLAX_PX` | float | `2.0` | - | Minimum parallax (px) for a data term. |
+| `GBA_SCALE_LOCAL_USE` | `off` \| `frozen` | `off` | choices `off` \| `frozen` | Local-BA use of the latent. |
+| `LOOP_REVERSE_EDGES` | bool | `false` | - | Also add the reverse proximity edges. |
+| `KEYFRAME_MAX_CULL` | int | `0` | >= 0 | Keep a keyframe after this many culls (0 = off). |
+| `KEYFRAME_MAX_CULL_ROT_DEG` | float | `10.0` | >= 0.0 | Rotation (deg) the culled run must also exceed. |
+
+### FocalRefineConfig
+
+Focal refinement (stage B): one RoMa revisit-pair fit of the shared focal, then an accept gate.
+
+    Flow: route (GT-free gates on stage A) -> one stage-B attempt -> accept gate
+    -> if accepted, rebind the focal and re-track. The remaining fields are the
+    stage-B settings.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `enabled` | bool | `false` | - | Run focal refinement after the first tracking pass. |
+| `route_automatically` | bool | `true` | - | Enter stage B only when the routing gates on stage A's output say so. |
+| `seed` | int | `7` | - | Seed of RoMa's correspondence sampling. |
+| `roma_python` | str \| null | `null` | - | Interpreter that runs stage B (RoMa). Null: $VIPE_METRICTRAIL_ROMA_PYTHON, else this one. |
+| `roma_repo` | str \| null | `null` | - | RoMa checkout put on sys.path of that interpreter; null: romatch must import. |
+| `roma_checkpoints` | str \| null | `null` | - | Directory with roma_outdoor.pth and dinov2_vitl14_pretrain.pth. Null: $VIPE_METRICTRAIL_ROMA_CHECKPOINTS, else $TORCH_HOME/hub/metrictrail/roma. |
+| `workdir` | str \| null | `null` | - | Scratch directory of stage B; null: <output.path>/metrictrail/<name>/stage_b. |
+| `budget` | int | `800` | >= 1 | Maximum revisit pairs matched. |
+| `radius_m` | float | `15.0` | > 0.0 | Revisit radius on stage A's trajectory (m). |
+| `min_frame_gap` | int | `200` | >= 0 | Minimum frame gap of a revisit pair. |
+| `trajectory_stride` | int | `5` | >= 1 | Frame stride of the revisit search. |
+| `candidate_band_deg` | tuple[float, float] | `[25.0, 140.0]` | min items 2, max items 2 | Heading band of candidates. |
+| `coarse_resolution` | int | `560` | >= 1 | RoMa matching resolution. |
+| `upsample_predictions` | bool | `false` | - | RoMa upsampled refinement (off). |
+| `samples_per_pair` | int | `3000` | >= 1 | Correspondences sampled per pair. |
+| `max_correspondences` | int | `150` | >= 1 | Inliers kept per pair. |
+| `min_inliers` | int | `100` | >= 1 | Minimum fundamental-matrix inliers per pair. |
+| `ransac_threshold_px` | float | `0.6` | > 0.0 | MAGSAC threshold (px). |
+| `grid_relative` | tuple[float, float] | `[0.6, 1.3]` | min items 2, max items 2 | Focal grid relative to stage A. |
+| `max_rail_fraction` | float | `0.1` | >= 0.0 | Accept gate: bootstrap rail fraction. |
+| `max_deviation_pct` | float | `25.0` | >= 0.0 | Accept gate: change from stage A (%). |
+| `max_estimator_disagreement_pct` | float | `15.0` | >= 0.0 | Accept gate: centre-pinned vs profiled focal (%). |
+| `centre_halfwidth_px` | float | `40.0` | >= 0.0 | Principal-point column range (px). |
+| `centre_grid_points` | int | `41` | >= 1 | Principal-point columns profiled. |
+| `profile_points_per_pair` | int | `60` | >= 1 | Correspondences per pair in the profile. |
+| `bootstrap_draws` | int | `400` | >= 1 | Bootstrap resamples. |
+| `fit_band_deg` | tuple[float, float] | `[25.0, 140.0]` | min items 2, max items 2 | Heading band of the fit. |
+| `gate_revisit_count` | int | `1000` | >= 0 | Routing gate: revisit candidates. |
+| `gate_revisit_per_frame` | float | `0.15` | >= 0.0 | Routing gate: candidates per frame. |
+| `gate_focal_drift_pct` | float | `0.2` | >= 0.0 | Routing gate: minimum final focal drift. |
+| `gate_focal_drift_max_pct` | float | `2.5` | >= 0.0 | Routing gate: maximum final focal drift. |
+
+### MetricTrailPostConfig
+
+Depth post-processing after tracking: ViPE's AdaptiveDepthProcessor on the DPVO output.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `depth_align_model` | str \| null | `null` | - | ViPE's adaptive depth recipe adaptive_<metric>[_svda\|_vda] (e.g. adaptive_unidepth-l_svda, adaptive_unidepth-l_vda, adaptive_moge_vda, adaptive_unidepth-l), run as in ViPE's default pipeline and saved as ViPE depth artifacts. mvd_* is not supported. Null (default): no depth fusion. |
+
+### MetricTrailOptionalConfig
+
+MetricTrail's optional inputs/outputs; all off by default (the RGB-only MetricTrail pipeline).
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `intrinsics` | KnownIntrinsicsConfig \| null | `null` | - | Known (GT/sensor) intrinsics replacing SharedK. Null: RGB-only SharedK calibration. |
+| `loop_closure` | LoopClosureOptions | `{}` | - | CPU loop closure from external candidate files; writes pose_lc/<name>.{npz,json}. Disabled by default. |
+
+### KnownIntrinsicsConfig
+
+A known (GT/sensor) pinhole K that replaces the RGB-only SharedK calibration (one source, source pixels).
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `fx` | float \| null | `null` | - | Focal length x (source pixels). |
+| `fy` | float \| null | `null` | - | Focal length y (source pixels). |
+| `cx` | float \| null | `null` | - | Principal point x (source pixels). |
+| `cy` | float \| null | `null` | - | Principal point y (source pixels). |
+| `path` | str \| null | `null` | - | K file: .txt (4 numbers fx fy cx cy, or a 3x3 matrix), .json or .npz (see docs/metrictrail_optional.md for the accepted keys). |
+| `from_stream` | bool | `false` | - | Use the intrinsics carried by the input stream's frames (already at the input raster). |
+| `source_hw` | tuple[int, int] \| null | `null` | - | (height, width) of the raster the K refers to. Null: the K file's raster member, else the input raster (no mapping). |
+| `raster_map` | `cover_crop` \| `cover_affine` \| `stretch` \| null | `null` | - | How the input raster was made from the source image; required when the two differ. |
+| `stream_tolerance_px` | float | `0.001` | >= 0.0 | from_stream only: largest per-frame deviation (pixels) from the first frame's K. MetricTrail tracks one shared K. |
+
+### LoopClosureOptions
+
+CPU loop closure from externally supplied frame pairs.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `enabled` | bool | `false` | - | Apply file-based loop closure after saving the trajectory. |
+| `candidates` | str \| null | `null` | - | External candidate JSON with frame pairs for the saved trajectory. |
+| `preset` | `kitti` \| `vbr` | `kitti` | choices `kitti` \| `vbr` | CPU pose-graph weighting preset. |
+| `overwrite` | bool | `false` | - | Replace existing pose_lc artifacts. |
+
+### MetricTrailOutputConfig
+
+Output artifacts (ViPE's layout) and the MetricTrail run record.
+
+| Field | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `path` | str | required | - | Directory where artifacts are written. |
+| `skip_exists` | bool | required | - | Skip a sequence whose pose artifact and run record already exist. |
+| `save_artifacts` | bool | required | - | Save pose, intrinsics, camera type, the metric depth (save_metric_depth) and the MetricTrail run record. |
+| `save_slam_map` | bool | `false` | - | Save DPVO's patch point map as the ViPE SLAM map. |
+| `save_metric_depth` | `async` \| `off` | `async` | choices `async` \| `off` | async: save the per-frame MoGe-2 metric depth of the final tracking pass as depth/<name>.zip (ViPE's depth artifact format), written by a background thread off the tracking path. off: pose-only. |
+| `save_viz` | bool | required | - | Render ViPE's MP4 visualization of the output stream. |
+| `viz_downsample` | int | required | >= 1 | Downsample factor of the visualization video. |
+| `viz_attributes` | list[list[`rgb` \| `instance` \| `depth` \| `pcd` \| `rectified`]] | required | min items 1 | Groups of frame attributes rendered into the visualization video. |

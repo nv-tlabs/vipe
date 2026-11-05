@@ -1,0 +1,109 @@
+# @package _global_
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+#
+# MetricTrail: RGB-only shared intrinsics (SharedK) + per-frame MoGe-2 metric depth +
+# DINO-fused DPVO tracking. One pipeline; the tracker backend is a slam-group preset:
+#
+#   python run.py pipeline=metrictrail streams.base_path=VIDEO.mp4                   # local
+#   python run.py pipeline=metrictrail slam@pipeline.slam=metrictrail_gba ...        # + global BA
+#   python run.py pipeline=metrictrail slam@pipeline.slam=metrictrail_gba_refine ... # full backend
+#   python run.py pipeline=metrictrail pipeline.focal_refine.enabled=true ...       # + stage B
+#
+# This file is in the global package so that it can also set streams.frame_end: -1.
+# MetricTrail processes full sequences; every other pipeline keeps the stream preset's
+# own frame_end (raw_mp4_stream: 1000). A command-line streams.frame_end still wins,
+# and pipeline.init.on_truncated_input decides what a cut input does.
+
+defaults:
+  - /slam@pipeline.slam: metrictrail_local
+
+pipeline:
+  instance: vipe.metrictrail.pipeline.MetricTrailPipeline
+
+  init:
+    camera_type: pinhole
+    intrinsics: sharedk
+    # Frozen RGB-only K artifact, created once and checked/reused across e.g. mask off/on runs.
+    # One path per prepared video; use a new path after changing calibration code or weights.
+    calibration_cache: null
+    on_truncated_input: error
+    # In-the-wild raster and frame rate: cover-fit to 280x504 with an integer centre crop,
+    # source fps, one frame in k above 1500 frames.
+    # Resizing uses `resampler` below. policy=resize: plain resize to height x width, no crop.
+    # Pre-prepared frames (e.g. benchmark frame directories): input_raster.policy=unchanged.
+    input_raster:
+      policy: cover_crop
+      height: 280
+      width: 504
+      max_frames: 1500
+      # bicubic_antialias (default; ~2 ms/frame more, antialiased) | bilinear (ViPE's resize)
+      resampler: bicubic_antialias
+    # Track every k-th prepared frame; SharedK still calibrates on all of them (7-Scenes: 5).
+    tracking_stride: 1
+    # SharedK policy: the in-the-wild policy (provider-focal fallback, no unstable K,
+    # terminal minimum 16). Benchmarks add pipeline.init.calibration.allow_unstable=true
+    # (configs/slam/README_metrictrail.md): the provider-focal fallback is the same MoGe-2 K as the
+    # initializer fallback (fallback_to_initializer).
+    calibration:
+      budget: robust128
+      initializer_frames: 32
+      terminal_min_accepted_keyframes: 16
+      fallback: provider_focal
+      fallback_to_initializer: false
+      allow_unstable: false
+      depth_model: moge2-l
+      depth_use_fp16: false
+      rgb_normalization: metrictrail
+      seed: 1234
+      disable_tf32: true
+      slam: null
+    # ViPE's dynamic-object masking (same fields as ViPE's init.instance); null = off.
+    # On with ViPE's defaults: pipeline.init.instance={}  (see docs/metrictrail_dynamic_and_fusion.md)
+    instance: null
+
+  # Focal refinement (stage B): route -> one RoMa fit -> accept gate -> rebind + re-track.
+  focal_refine:
+    enabled: false
+    route_automatically: true
+    seed: 7
+    roma_python: null
+    roma_repo: null
+    roma_checkpoints: null
+    workdir: null
+
+  # ViPE depth fusion after tracking: adaptive_<metric>[_svda|_vda] (e.g. adaptive_unidepth-l_svda);
+  # svda / vda = Video Depth Anything Small / Large, aligned to the SLAM map (<metric> only as fallback).
+  # When turning it on, as ViPE's presets: with init.instance (moving objects) adaptive_unidepth-l_svda
+  # (default), static scene adaptive_unidepth-l_vda (static_vda).
+  # null (default) = no depth fusion. mvd_* is refused.
+  post:
+    depth_align_model: null
+
+  # Optional inputs/outputs, all off by default (docs/metrictrail_optional.md).
+  # Known K (replaces SharedK; stage B is then skipped):
+  #   'pipeline.optional.intrinsics={path: K.txt}' or
+  #   'pipeline.optional.intrinsics={fx: .., fy: .., cx: .., cy: .., source_hw: [H, W], raster_map: stretch}'
+  # CPU loop closure from external candidate files; local preset only.
+  # Writes pose_lc/<name>.{npz,json}.
+  optional:
+    intrinsics: null
+    loop_closure:
+      enabled: false
+      candidates: null
+      preset: kitti        # kitti | vbr
+      overwrite: false
+
+  output:
+    path: vipe_results/
+    skip_exists: false
+    save_artifacts: true
+    save_slam_map: false
+    save_metric_depth: async
+    save_viz: false
+    viz_downsample: 2
+    viz_attributes: [['rgb']]
+
+streams:
+  frame_end: -1

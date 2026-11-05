@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# MetricTrail tracker preset "gba": the local preset + DPVO proximity loop edges and the
+# metric-scale global BA (t0 = all). Short indoor / handheld sequences without long revisits.
+# Select it with: slam@pipeline.slam=metrictrail_gba
+#
+# The dpvo block is the MetricTrail DPVO preset of the same name
+# (merged over DPVO's defaults; keys not listed keep DPVO's default, add them with +).
+# Its BUFFER_SIZE is superseded by buffer_size below
+# (auto: smallest power of two >= frames + 2, at least 8192).
+
+preset: gba
+keyframe_depth: moge2-l
+depth_fp16: true
+depth_queue: 4
+buffer_size: auto
+tf32: false
+seed: 1234
+seed_name: null
+nonfinite_recovery: true   # non-finite pose: re-track in FP32 (precision only, fresh network, seed + 0..3)
+rgb_normalization: metrictrail
+weights: null
+dinov3_weights: null
+visualize: false
+
+dpvo:
+  # Match the official high-accuracy DPVO local-BA configuration.
+  BUFFER_SIZE: 8192
+  PATCHES_PER_FRAME: 96
+  REMOVAL_WINDOW: 22
+  OPTIMIZATION_WINDOW: 10
+  PATCH_LIFETIME: 13
+  KEYFRAME_THRESH: 15.0
+  MOTION_MODEL: 'DAMPED_LINEAR'
+  MOTION_DAMPING: 0.5
+  MIXED_PRECISION: True
+  CENTROID_SEL_STRAT: 'RANDOM'
+
+  # Proximity loop edges (patchgraph.edges_loop) every GLOBAL_OPT_FREQ frames from
+  # patches up to MAX_EDGE_AGE frames old when the predicted flow is below
+  # BACKEND_THRESH px; retrieval loop closure stays off.
+  LOOP_CLOSURE: True
+  CLASSIC_LOOP_CLOSURE: False
+  BACKEND_THRESH: 64.0
+  MAX_EDGE_AGE: 1000
+  GLOBAL_OPT_FREQ: 15
+
+  # Metric-scale global BA over active + inactive edges: no depth normalization,
+  # the metric unary is applied, every pose but the first is free.
+  METRIC_GLOBAL_BA: True
+  METRIC_GLOBAL_BA_T0: 'all'
+
+  # Metric z-depth initializes every patch and supplies a robust unary
+  # log-inverse-depth factor to the local BA normal equations.
+  METRIC_DEPTH: True
+  METRIC_DEPTH_MIN: 0.2
+  METRIC_DEPTH_MAX: 500.0
+  METRIC_DEPTH_PRIOR_WEIGHT: 1.0
+  METRIC_DEPTH_PRIOR_HUBER: 0.3
+  METRIC_DEPTH_PRIOR_WARMUP: 12

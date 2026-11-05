@@ -9,6 +9,7 @@ from pydantic import model_validator
 
 from vipe.config.base_schema import BaseConfigSchema, Field
 from vipe.config.slam import SLAMConfig
+from vipe.metrictrail.config import MetricTrailPipelineConfig
 
 FrameAttributeName = Literal["rgb", "instance", "depth", "pcd", "rectified"]
 
@@ -198,6 +199,10 @@ class PanoramaPipelineConfig(BaseConfigSchema):
 
 
 PipelineConfig = Annotated[
-    DefaultPipelineConfig | PoseOnlyPipelineConfig | PoseOnlyLongPipelineConfig | PanoramaPipelineConfig,
+    DefaultPipelineConfig
+    | PoseOnlyPipelineConfig
+    | PoseOnlyLongPipelineConfig
+    | PanoramaPipelineConfig
+    | MetricTrailPipelineConfig,
     Field(discriminator="instance"),
 ]
