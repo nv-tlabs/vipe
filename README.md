@@ -20,14 +20,15 @@ ViPE estimates camera intrinsics, camera motion, and dense near-metric depth map
 ## News
 
 - **2026/11**: Add support to run [Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) for both ViPE and ViPE-Long. The inference speed is around 16 FPS for Depth Pro L and 14 FPS for Depth Pro H+, compared with 12 FPS for MoGe-2. We summarize the pose results here:
-| Dataset | MoGe-2 | DepthPro2-L | DepthPro2-H+ |
-|---|---:|---:|---:|
-| KITTI Uncalibrated | 14.05  | 10.28| **10.25**| 
-| KITTI Uncalibrated + LC | 9.78 | 6.39| **6.37**| 
-| KITTI Calibrated + LC | 7.39 | 5.90 | **5.85**|
-| KITTI Stereo + LC | 3.00 | 2.63 | **2.52**|
-| Oxford Spires Uncalibrated | 1.77 | 1.54  | **1.21**|
-| Oxford Spires Calibrated | 1.71 | 1.51  | **1.16**|
+
+  | Dataset | MoGe-2 | DepthPro2-L | DepthPro2-H+ |
+  |---|---:|---:|---:|
+  | KITTI Uncalibrated | 14.05  | 10.28| **10.25**| 
+  | KITTI Uncalibrated + LC | 9.78 | 6.39| **6.37**| 
+  | KITTI Calibrated + LC | 7.39 | 5.90 | **5.85**|
+  | KITTI Stereo + LC | 3.00 | 2.63 | **2.52**|
+  | Oxford Spires Uncalibrated | 1.77 | 1.54  | **1.21**|
+  | Oxford Spires Calibrated | 1.71 | 1.51  | **1.16**|
 
 - **2026/11**: 🚀🚀🚀 Released ViPE-Long: Added long-sequence pipeline (`metrictrail`) for streaming long videos reconstruction, with metric depth and local optimization as key features. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/09**: Added long-sequence SLAM (`pose_only_long`) for arbitrarily long videos, with GPU/CPU memory bounded by a sliding keyframe window instead of growing with video length. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
