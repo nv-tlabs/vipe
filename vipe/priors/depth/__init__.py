@@ -17,6 +17,16 @@ from .base import DepthEstimationInput, DepthEstimationModel, DepthEstimationRes
 
 
 def make_depth_model(model: str):
+    if model.startswith("depthpro2-"):
+        if model.endswith("-stream"):
+            raise ValueError(
+                "Depth Pro 2 streaming requires MetricTrail's chronological lifecycle; "
+                "use depthpro2-l or depthpro2-h for DROID keyframe replay"
+            )
+        from .depthpro2 import DepthPro2Model
+
+        return DepthPro2Model(model, streaming=False, use_fp16=False)
+
     if "-" not in model:
         model_name, model_sub = model, ""
     else:

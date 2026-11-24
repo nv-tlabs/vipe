@@ -225,20 +225,23 @@ class AdaptiveDepthProcessor(StreamProcessor):
         assert not share_depth_model, "Adaptive depth processor does not support shared depth model"
         self.require_cache = True
         self.model = model
+        self.temporal_depth_model = None
+        self.video_depth_model: VideoDepthAnythingDepthModel | None = None
 
-        try:
-            prefix, metric_model, video_model = model.split("_")
-            assert video_model in ["svda", "vda"]
-            self.video_depth_model: VideoDepthAnythingDepthModel | None = VideoDepthAnythingDepthModel(
-                model="vits" if video_model == "svda" else "vitl"
-            )
-
-        except ValueError:
-            prefix, metric_model = model.split("_")
-            video_model = None
-            self.video_depth_model = None
-
+        parts = model.split("_")
+        if len(parts) not in {2, 3}:
+            raise ValueError("Expected adaptive_<metric-model>[_<video-model>]")
+        prefix, metric_model = parts[:2]
         assert prefix == "adaptive", "Model name should start with 'adaptive_'"
+        if len(parts) == 3:
+            video_model = parts[2]
+            if video_model in {"depthpro2-l", "depthpro2-h"}:
+                from vipe.priors.depth.depthpro2 import DepthPro2Model
+
+                self.temporal_depth_model = DepthPro2Model(video_model, streaming=True, use_fp16=False, window=16)
+            else:
+                assert video_model in ["svda", "vda"]
+                self.video_depth_model = VideoDepthAnythingDepthModel(model="vits" if video_model == "svda" else "vitl")
 
         self.depth_model = make_depth_model(metric_model)
         self.prompt_model = PriorDAModel()
@@ -275,6 +278,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
         # Determine the percentage score of the SLAM map.
 
         self.cache_scale_bias: tuple[torch.Tensor, torch.Tensor] | None = None
+        if self.temporal_depth_model is not None:
+            self.temporal_depth_model.reset_stream()
         min_uv_score: float = 1.0
         slam_map = unpack_optional(self.slam_output.slam_map)
         data_iterator: Iterable[VideoFrame]
@@ -336,9 +341,22 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 ).metric_depth
                 frame.information = f"uv={min_uv_score:.2f}(SLAM)"
 
-            if video_depth_result is not None:
+            temporal_valid = None
+            video_depth_inv_depth = None
+            if self.temporal_depth_model is not None:
+                temporal_depth = unpack_optional(
+                    self.temporal_depth_model.estimate(
+                        DepthEstimationInput(
+                            rgb=frame.rgb.float(), intrinsics=frame.intrinsics, camera_type=frame.camera_type
+                        )
+                    ).metric_depth
+                )
+                temporal_valid = torch.isfinite(temporal_depth) & (temporal_depth > 0)
+                video_depth_inv_depth = torch.where(temporal_valid, temporal_depth.clamp_min(1e-6).reciprocal(), 0)
+            elif video_depth_result is not None:
                 video_depth_inv_depth = video_depth_result[frame_idx]
 
+            if video_depth_inv_depth is not None:
                 align_mask = video_depth_inv_depth > 1e-3
                 if frame.mask is not None:
                     align_mask = align_mask & frame.mask & (~frame.sky_mask)
@@ -366,6 +384,8 @@ class AdaptiveDepthProcessor(StreamProcessor):
                 video_inv_depth = video_depth_inv_depth * scale_tensor + bias_tensor
                 video_inv_depth[video_inv_depth < 1e-3] = 1e-3
                 frame.metric_depth = video_inv_depth.reciprocal()
+                if temporal_valid is not None:
+                    frame.metric_depth = torch.where(temporal_valid, frame.metric_depth, 0)
 
             else:
                 frame.metric_depth = prompt_result

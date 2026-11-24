@@ -912,6 +912,12 @@ class DPVOSLAMSystem:
 
         from .depth import MetricTrailMoGe2
 
+        if index == 0:
+            # A new sequence or recovery pass must not reuse causal depth history.
+            reset_stream = getattr(depth_model, "reset_stream", None)
+            if callable(reset_stream):
+                reset_stream()
+
         zero = torch.zeros((), dtype=torch.int64, device=self.device)
         frame_k: torch.Tensor | None = None
         k_mismatch = zero

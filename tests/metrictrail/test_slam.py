@@ -222,6 +222,86 @@ def test_run_tracks_every_frame_with_the_shared_k(system, depth_queue: int) -> N
     assert system.depth.calls[0].camera_type.name == "PINHOLE"
 
 
+@pytest.fixture
+def streaming_depth(system, monkeypatch: pytest.MonkeyPatch):
+    """Keep causal history across calls unless the tracking lifecycle resets it."""
+
+    passes: list[list[int]] = []
+    estimate = system.depth.estimate
+
+    def reset_stream() -> None:
+        passes.append([])
+
+    def estimate_frame(src: DepthEstimationInput) -> DepthEstimationResult:
+        assert passes, "reset_stream must precede the first frame"
+        passes[-1].append(len(passes[-1]))
+        return estimate(src)
+
+    monkeypatch.setattr(system.depth, "reset_stream", reset_stream, raising=False)
+    monkeypatch.setattr(system.depth, "estimate", estimate_frame)
+    return passes
+
+
+@pytest.mark.parametrize("depth_queue", [0, 4])
+def test_streaming_depth_resets_on_repeated_runs(system, streaming_depth, depth_queue: int) -> None:
+    system.system.config.depth_queue = depth_queue
+    for _ in range(2):
+        output = system.system.run(FakeStream(6), intrinsics=K4)
+        assert output.record["tracking_status"] == TRACKING_OK
+    assert streaming_depth == [list(range(6)), list(range(6))]
+    assert len(system.depth.calls) == 12
+
+
+@pytest.mark.parametrize("depth_queue", [0, 4])
+@pytest.mark.parametrize("nan_attempts", [1, 3])
+def test_streaming_depth_resets_on_nonfinite_replay(
+    recovery, streaming_depth, depth_queue: int, nan_attempts: int
+) -> None:
+    recovery.system.config.depth_queue = depth_queue
+    recovery.script["nan_attempts"] = nan_attempts
+    output = recovery.system.run(FakeStream(6), intrinsics=K4)
+    assert output.record["tracking_status"] == TRACKING_OK and np.isfinite(output.c2w).all()
+    assert len(recovery.built) == nan_attempts + 1
+    assert streaming_depth == [list(range(6)) for _ in range(nan_attempts + 1)]
+
+
+def test_stereo_inherits_streaming_depth_reset(system, streaming_depth) -> None:
+    from vipe.metrictrail.stereo.runner import StereoDPVOSystem
+
+    assert StereoDPVOSystem._prepare is DPVOSLAMSystem._prepare
+    stereo = object.__new__(StereoDPVOSystem)
+    stereo.device, stereo.config, stereo.ops = system.system.device, system.system.config, system.system.ops
+    for _ in range(2):
+        source_ids: list[int] = []
+        for index, frame in enumerate(FakeStream(2)):
+            stereo._prepare(
+                index,
+                frame,
+                False,
+                depth_model=system.depth,
+                k4=K4,
+                k_device=torch.from_numpy(K4),
+                image_hw=(24, 40),
+                source_ids=source_ids,
+            )
+        assert source_ids == [0, 1]
+    assert streaming_depth == [[0, 1], [0, 1]]
+
+
+@pytest.mark.parametrize("depth_queue", [0, 4])
+def test_streaming_depth_reset_failure_propagates(system, monkeypatch: pytest.MonkeyPatch, depth_queue: int) -> None:
+    system.system.config.depth_queue = depth_queue
+
+    def fail_reset() -> None:
+        raise RuntimeError("causal depth reset failed")
+
+    monkeypatch.setattr(system.depth, "reset_stream", fail_reset, raising=False)
+    with pytest.raises(RuntimeError, match="causal depth reset failed"):
+        system.system.run(FakeStream(6), intrinsics=K4)
+    assert system.depth.calls == []
+    assert all(not entry.dpvo.calls for entry in system.built)
+
+
 def test_padded_raster_goes_through_the_transport(system) -> None:
     output = system.system.run(FakeStream(4, hw=(26, 42)), intrinsics=K4)
     assert system.built[0].hw == (28, 44)

@@ -41,6 +41,13 @@ if not OmegaConf.has_resolver("eq"):
     OmegaConf.register_new_resolver("eq", lambda a, b: a == b)
 if not OmegaConf.has_resolver("neq"):
     OmegaConf.register_new_resolver("neq", lambda a, b: a != b)
+if not OmegaConf.has_resolver("default_depth_alignment"):
+    OmegaConf.register_new_resolver(
+        "default_depth_alignment",
+        lambda provider, fallback: (
+            f"adaptive_unidepth-l_{provider}" if provider in ("depthpro2-l", "depthpro2-h") else fallback
+        ),
+    )
 
 
 def __getattr__(name: str) -> Any:

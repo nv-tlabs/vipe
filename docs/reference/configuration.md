@@ -439,7 +439,7 @@ Depth post-processing after tracking: ViPE's AdaptiveDepthProcessor on the DPVO 
 
 | Field | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
-| `depth_align_model` | str \| null | `null` | - | ViPE's adaptive depth recipe adaptive_<metric>[_svda\|_vda] (e.g. adaptive_unidepth-l_svda, adaptive_unidepth-l_vda, adaptive_moge_vda, adaptive_unidepth-l), run as in ViPE's default pipeline and saved as ViPE depth artifacts. mvd_* is not supported. Null (default): no depth fusion. |
+| `depth_align_model` | str \| null | `null` | - | ViPE's adaptive_<metric> recipe with optional svda, vda, depthpro2-l or depthpro2-h temporal depth, run as in ViPE's default pipeline and saved as ViPE depth artifacts. mvd_* is not supported. Null (default): no depth fusion. |
 
 ### MetricTrailOptionalConfig
 

@@ -838,7 +838,8 @@ def test_instance_switch_takes_vipe_fields_and_defaults(tmp_path: Path) -> None:
 
 def test_depth_align_model_accepts_vipe_adaptive_recipes_and_refuses_mvd(tmp_path: Path) -> None:
     vipe_values = {
-        name: _vipe_preset(name)["post"]["depth_align_model"]
+        name: parse_typed_config("default", [f"pipeline={name}", f"streams.base_path={tmp_path}"])
+        .pipeline.post.depth_align_model
         for name in ("default", "no_vda", "static_vda", "lyra", "dav3")
     }
     assert vipe_values == {

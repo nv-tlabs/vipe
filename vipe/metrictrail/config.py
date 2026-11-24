@@ -372,8 +372,8 @@ class MetricTrailPostConfig(BaseConfigSchema):
 
     depth_align_model: str | None = Field(
         default=None,
-        description="ViPE's adaptive depth recipe adaptive_<metric>[_svda|_vda] (e.g. adaptive_unidepth-l_svda, "
-        "adaptive_unidepth-l_vda, adaptive_moge_vda, adaptive_unidepth-l), run as in ViPE's default pipeline and "
+        description="ViPE's adaptive_<metric> recipe with optional svda, vda, depthpro2-l or depthpro2-h temporal depth, "
+        "run as in ViPE's default pipeline and "
         "saved as ViPE depth artifacts. mvd_* is not supported. Null (default): no depth fusion.",
     )
 
@@ -385,18 +385,18 @@ class MetricTrailPostConfig(BaseConfigSchema):
         if model.startswith("mvd_"):
             raise ValueError(
                 f"post.depth_align_model={model!r}: ViPE's multi-view depth (mvd_*) is not supported with the DPVO "
-                "backend; use an adaptive_<metric>[_svda|_vda] recipe or null"
+                "backend; use an adaptive_<metric> recipe or null"
             )
         parts = model.split("_")
         if (
             parts[0] != "adaptive"
             or len(parts) not in (2, 3)
             or not parts[1]
-            or parts[2:] not in ([], ["svda"], ["vda"])
+            or parts[2:] not in ([], ["svda"], ["vda"], ["depthpro2-l"], ["depthpro2-h"])
         ):
             raise ValueError(
-                f"post.depth_align_model={model!r} is not one of ViPE's adaptive_<metric>[_svda|_vda] recipes "
-                "(e.g. adaptive_unidepth-l_svda, adaptive_moge_vda, adaptive_unidepth-l)"
+                f"post.depth_align_model={model!r} is not one of ViPE's adaptive_<metric> recipes "
+                "with optional svda, vda, depthpro2-l or depthpro2-h temporal depth"
             )
         return self
 

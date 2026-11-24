@@ -29,7 +29,7 @@ slam:
 
 # Post-processing configs
 post:
-  depth_align_model: "adaptive_unidepth-l_svda"
+  depth_align_model: ${default_depth_alignment:${..slam.keyframe_depth},adaptive_unidepth-l_svda}
 
 # Output configs
 output:

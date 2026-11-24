@@ -17,6 +17,8 @@ resolution are reused unchanged) that makes MetricTrail's exact MoGe-2 call:
   invalid pixels become 0 ("no prior") in :meth:`estimate`, and a frame without
   a single valid pixel is an error.
 
+Depth Pro 2 use ViPE's shared depth provider; stateless FP32 calibration
+and causal tracking share only the weights, never a video's temporal cache.
 Any other name is handed to ViPE's ``make_depth_model`` unchanged, so other
 registry backends can be selected by configuration alone.
 """
@@ -244,10 +246,28 @@ def make_metrictrail_depth_model(
     """Build MetricTrail's depth provider.
 
     ``moge2[-variant]`` returns a :class:`MetricTrailMoGe2` (weights shared
-    through ``model_cache`` across precisions); every other name is ViPE's
+    through ``model_cache`` across precisions). ``depthpro2-{l,h}`` is
+    stateless FP32 calibration; the ``-stream`` suffix selects causal tracking
+    (16 frames, FP16 when requested). Only their weights share the cache.
+    Every other name is ViPE's
     ``make_depth_model(name)``, cached under ViPE's own ``depth/<name>`` key.
     """
 
+    if name.startswith("depthpro2-"):
+        from vipe.priors.depth.depthpro2 import DepthPro2Model, checkpoint_directory, load_depth_pro2_weights
+
+        streaming = name.endswith("-stream")
+        preset = name.removesuffix("-stream")
+        if model_cache is None:
+            return DepthPro2Model(preset, streaming=streaming, use_fp16=use_fp16)
+        directory = checkpoint_directory()
+        weights = model_cache.get(
+            f"metrictrail/depth/{preset}/weights/{directory}",
+            lambda: load_depth_pro2_weights(preset, checkpoint_dir=directory),
+        )
+        # Always a fresh wrapper: cached weights must not carry a previous
+        # video's history or fixed focal into this sequence/recovery pass.
+        return DepthPro2Model(preset, streaming=streaming, use_fp16=use_fp16, weights=weights)
     if is_moge2_name(name):
         variant = _moge2_variant(name)
         if model_cache is None:

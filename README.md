@@ -19,6 +19,16 @@ ViPE estimates camera intrinsics, camera motion, and dense near-metric depth map
 
 ## News
 
+- **2026/11**: Add support to run [Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) for both ViPE and ViPE-Long. The inference speed is around 16 FPS for Depth Pro L and 14 FPS for Depth Pro H+, compared with 12 FPS for MoGe-2. We summarize the pose results here:
+| Dataset | MoGe-2 | DepthPro2-L | DepthPro2-H+ |
+|---|---:|---:|---:|
+| KITTI Uncalibrated | 14.05  | 10.28| **10.25**| 
+| KITTI Uncalibrated + LC | 9.78 | 6.39| **6.37**| 
+| KITTI Calibrated + LC | 7.39 | 5.90 | **5.85**|
+| KITTI Stereo + LC | 3.00 | 2.63 | **2.52**|
+| Oxford Spires Uncalibrated | 1.77 | 1.54  | **1.21**|
+| Oxford Spires Calibrated | 1.71 | 1.51  | **1.16**|
+
 - **2026/11**: 🚀🚀🚀 Released ViPE-Long: Added long-sequence pipeline (`metrictrail`) for streaming long videos reconstruction, with metric depth and local optimization as key features. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/09**: Added long-sequence SLAM (`pose_only_long`) for arbitrarily long videos, with GPU/CPU memory bounded by a sliding keyframe window instead of growing with video length. Uses the MoGe v2 (`moge2-l`) keyframe-depth prior by default.
 - **2026/06**: 🚀🚀🚀 Released ViPE 1.2.0: **2.7x speed-up with no loss of accuracy**, enabled by CUDA fused kernels, model and pipeline caching, prefetching, and other optimizations.
@@ -83,12 +93,65 @@ Set `pipeline.slam.weights` or `VIPE_METRICTRAIL_DPVO_CHECKPOINT` to the DINO-DP
 | weight | setting | default |
 | --- | --- | --- |
 | MoGe-2 ViT-L | ViPE's own | https://github.com/microsoft/moge |
-| DINO-DPVO | `pipeline.slam.weights` | https://huggingface.co/nvidia/MetricTrail |
+| Depth Pro 2 | `DEPTHPRO2_CHECKPOINT_DIR` | https://huggingface.co/apple/DepthPro2 |
+| DINO-DPVO | `pipeline.slam.weights` | https://huggingface.co/nvidia/metrictrail |
 | DINOv3 ViT-S/16| `pipeline.slam.dinov3_weights` | https://github.com/facebookresearch/dinov3|
 | DINO SALAD| External loop-candidate generation | https://github.com/serizba/salad/|
 
 For SALAD candidates, follow the [separate installation and export instructions](docs/metrictrail_optional.md#install-salad-separately).
 SALAD and its checkpoints stay in that external environment; they are not bundled with ViPE.
+
+### Depth providers
+
+MoGe-2 remains MetricTrail's default. Depth Pro 2 is another provider in ViPE's
+shared depth registry, used by both ViPE and ViPE-Long (MetricTrail). Use the same
+`pipeline=metrictrail` command and replace only the two depth-provider settings:
+
+```bash
+# Depth Pro 2 L
+python run.py pipeline=metrictrail streams.base_path=YOUR_VIDEO.mp4 \
+    pipeline.init.calibration.depth_model=depthpro2-l \
+    pipeline.slam.keyframe_depth=depthpro2-l-stream \
+    pipeline.output.path=vipe_results/depthpro2_l
+
+# Depth Pro 2 H+
+python run.py pipeline=metrictrail streams.base_path=YOUR_VIDEO.mp4 \
+    pipeline.init.calibration.depth_model=depthpro2-h \
+    pipeline.slam.keyframe_depth=depthpro2-h-stream \
+    pipeline.output.path=vipe_results/depthpro2_h
+```
+
+H+ uses the upstream preset name `depthpro2-h`. Both variants share the same FoV checkpoint
+and use `DEPTHPRO2_CHECKPOINT_DIR` below for their weights. MoGe-2 remains the default.
+Calibration is stateless FP32; the `-stream` provider uses causal 16-frame depth during tracking.
+
+Depth fusion is optional. MetricTrail keeps it **off**, while ViPE's `default` pipeline uses matching Depth Pro 2 L/H+ temporal fusion when the keyframe prior is `depthpro2-l`/`depthpro2-h`. Other priors retain their existing
+defaults.  For ViPE's DROID backend, use the stateless provider: like UniDepth and MoGe-2, DROID re-estimates old keyframes when intrinsics change. A causal stream must not consume those replayed frames:
+
+```bash
+python run.py pipeline=default streams.base_path=YOUR_VIDEO.mp4 \
+    pipeline.slam.keyframe_depth=depthpro2-l \
+    pipeline.output.save_artifacts=true \
+    pipeline.output.save_slam_map=true \
+    pipeline.output.save_viz=false
+```
+
+Replace `depthpro2-l` with `depthpro2-h` for H+. To select Depth Pro 2 fusion explicitly in either pipeline, add
+`pipeline.post.depth_align_model=adaptive_unidepth-l_depthpro2-l`
+(or `adaptive_unidepth-l_depthpro2-h` for H+). To select the existing VDA fusion, use
+`pipeline.post.depth_align_model=adaptive_unidepth-l_svda` (`_vda` for the large model).
+Use `pipeline.post.depth_align_model=null` to explicitly disable it.
+
+Install the external source and its additional dependencies separately, from the activated
+ViPE environment following the official repo of [Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2).
+Download the depth and shared FoV checkpoints from the weights link above into one directory,
+keeping their original filenames:
+
+```bash
+export DEPTHPRO2_CHECKPOINT_DIR=/path/to/checkpoints/depth-pro-2
+```
+
+The external source and weights remain subject to Apple's [code license](https://github.com/apple-aiml-research/ml-depth-pro-2/blob/main/LICENSE) and [model license](https://github.com/apple-aiml-research/ml-depth-pro-2/blob/main/LICENSE_MODEL); neither is bundled with ViPE.
 
 ### Optional loop-closure dependency
 
