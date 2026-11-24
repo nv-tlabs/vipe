@@ -18,6 +18,8 @@
 # Licensed under the MIT License. See THIRD_PARTY_LICENSES.md for details.
 # -------------------------------------------------------------------------------------------------
 
+from enum import Enum, auto, unique
+
 import torch
 from omegaconf import DictConfig
 
@@ -26,6 +28,13 @@ from vipe.ext.lietorch import SE3
 from ..networks.droid_net import DroidNet
 from .buffer import GraphBuffer
 from .factor_graph import FactorGraph
+
+
+@unique
+class InitState(Enum):
+    Uninitialized = auto()
+    Initialized = auto()
+    Updated = auto()
 
 
 class SLAMFrontend:
@@ -49,7 +58,7 @@ class SLAMFrontend:
         self.t1 = 0
 
         # frontend variables
-        self.is_initialized = False
+        self.init_state = InitState.Uninitialized
 
         self.max_age = 25
         self.iters1 = 4
@@ -76,6 +85,18 @@ class SLAMFrontend:
 
     def __update(self):
         """add edges, perform update"""
+
+        if not self.has_init_pose:
+            self.__init_pose()
+
+        assert self.init_state is not InitState.Uninitialized
+        if self.init_state is InitState.Initialized:
+            for v in range(self.video.n_views):
+                self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
+        elif self.init_state is InitState.Updated:
+            for v in range(self.video.n_views):
+                self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
+        self.init_state = InitState.Updated
 
         self.t1 += 1
 
@@ -113,12 +134,6 @@ class SLAMFrontend:
             for _ in range(self.iters2):
                 self.graph.update(use_inactive=True, fixed_motion=self.has_init_pose)
 
-        # set pose for next itration
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 1, v].mean()
-
         # update visualization
         self.video.dirty[self.graph.ii.min() : self.t1] = True
 
@@ -136,23 +151,20 @@ class SLAMFrontend:
             for _ in range(8):
                 self.graph.update(t0=1, use_inactive=True, fixed_motion=self.has_init_pose)
 
-        if not self.has_init_pose:
-            self.__init_pose()
-        for v in range(self.video.n_views):
-            self.video.disps[self.t1, v] = self.video.disps[self.t1 - 4 : self.t1, v].mean()
         self.video.dirty[: self.t1] = True
 
         # initialization complete
-        self.is_initialized = True
+        self.init_state = InitState.Initialized
+
         self.graph.rm_factors(self.graph.ii < self.warmup - 4, store=True)
 
     def run(self):
         """main update"""
 
         # do initialization
-        if not self.is_initialized and self.video.n_frames == self.warmup:
+        if self.init_state is InitState.Uninitialized and self.video.n_frames == self.warmup:
             self.__initialize()
 
         # do update if new keyframe is added.
-        elif self.is_initialized and self.t1 < self.video.n_frames:
+        elif self.init_state is not InitState.Uninitialized and self.t1 < self.video.n_frames:
             self.__update()
