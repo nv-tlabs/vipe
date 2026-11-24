@@ -59,16 +59,22 @@ class DefaultAnnotationPipeline(Pipeline):
     def _add_init_processors(self, video_stream: VideoStream) -> ProcessedVideoStream:
         init_processors: list[StreamProcessor] = []
 
-        # The assertions make sure that the attributes are not estimated previously.
-        # Otherwise it will be overwritten by the processors.
-        assert FrameAttribute.INTRINSICS not in video_stream.attributes()
-        assert FrameAttribute.CAMERA_TYPE not in video_stream.attributes()
         assert FrameAttribute.METRIC_DEPTH not in video_stream.attributes()
         assert FrameAttribute.INSTANCE not in video_stream.attributes()
 
-        init_processors.append(
-            GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type, model_cache=self.model_cache)
-        )
+        if self.init_cfg.intrinsics == "geocalib":
+            assert FrameAttribute.INTRINSICS not in video_stream.attributes()
+            assert FrameAttribute.CAMERA_TYPE not in video_stream.attributes()
+            init_processors.append(
+                GeoCalibIntrinsicsProcessor(video_stream, camera_type=self.camera_type, model_cache=self.model_cache)
+            )
+        elif self.init_cfg.intrinsics == "gt":
+            if FrameAttribute.INTRINSICS not in video_stream.attributes():
+                raise ValueError("init.intrinsics=gt requires every input frame to provide intrinsics")
+            if FrameAttribute.CAMERA_TYPE not in video_stream.attributes():
+                raise ValueError("init.intrinsics=gt requires every input frame to provide a camera type")
+        else:
+            raise ValueError(f"Unsupported intrinsics source: {self.init_cfg.intrinsics}")
         if self.init_cfg.instance is not None:
             init_processors.append(
                 TrackAnythingProcessor(

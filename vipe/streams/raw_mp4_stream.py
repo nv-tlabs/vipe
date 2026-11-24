@@ -18,7 +18,8 @@ from pathlib import Path
 import cv2
 import torch
 
-from vipe.streams.base import ProcessedVideoStream, StreamList, VideoFrame, VideoStream
+from vipe.streams.base import FrameAttribute, ProcessedVideoStream, StreamList, VideoFrame, VideoStream
+from vipe.utils.cameras import CameraType
 
 
 class RawMp4Stream(VideoStream):
@@ -27,13 +28,25 @@ class RawMp4Stream(VideoStream):
     This does not support nested iterations.
     """
 
-    def __init__(self, path: Path, seek_range: range | None = None, name: str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        seek_range: range | None = None,
+        name: str | None = None,
+        intrinsics: torch.Tensor | None = None,
+    ) -> None:
         super().__init__()
         if seek_range is None:
             seek_range = range(-1)
 
         self.path = path
         self._name = name if name is not None else path.stem
+        self._intrinsics = intrinsics
+        if self._intrinsics is not None:
+            if self._intrinsics.shape != (4,) or not torch.isfinite(self._intrinsics).all():
+                raise ValueError("Pinhole intrinsics must be one finite [fx, fy, cx, cy] vector")
+            if torch.any(self._intrinsics[:2] <= 0):
+                raise ValueError("Pinhole focal lengths must be positive")
 
         # Read metadata
         vcap = cv2.VideoCapture(str(self.path))
@@ -57,6 +70,14 @@ class RawMp4Stream(VideoStream):
 
     def name(self) -> str:
         return self._name
+
+    def attributes(self) -> set[FrameAttribute]:
+        # The pipeline decides between GeoCalib and init.intrinsics=gt from the stream's
+        # attribute set (read through the cache), not by inspecting frames, so a calibrated
+        # stream must advertise exactly what its frames carry.
+        if self._intrinsics is None:
+            return set()
+        return {FrameAttribute.INTRINSICS, FrameAttribute.CAMERA_TYPE}
 
     def __len__(self) -> int:
         return len(range(self.start, self.end, self.step))
@@ -89,7 +110,14 @@ class RawMp4Stream(VideoStream):
         frame_rgb = torch.as_tensor(frame).float() / 255.0
         frame_rgb = frame_rgb.cuda()
 
-        return VideoFrame(raw_frame_idx=self.current_frame_idx, rgb=frame_rgb)
+        intrinsics = self._intrinsics.cuda().clone() if self._intrinsics is not None else None
+        camera_type = CameraType.PINHOLE if intrinsics is not None else None
+        return VideoFrame(
+            raw_frame_idx=self.current_frame_idx,
+            rgb=frame_rgb,
+            intrinsics=intrinsics,
+            camera_type=camera_type,
+        )
 
 
 class RawMP4StreamList(StreamList):
