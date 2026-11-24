@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -21,7 +22,47 @@ from einops import rearrange
 
 from vipe.ext.scatter import scatter_add
 
-from .vector import RavelMapping, SparseBlockVector, SparseNullVector, SparseVectorDict, SparseVectorSubview
+from .vector import (
+    RavelMapping,
+    SparseBlockVector,
+    SparseNullVector,
+    SparseVectorDict,
+    SparseVectorSubview,
+    _segment_sum_sorted,
+)
+
+
+def _coalesce_block_entries(
+    i_inds: torch.Tensor,
+    j_inds: torch.Tensor,
+    data: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Lexicographically sort and sum duplicate block entries deterministically."""
+    order = torch.argsort(j_inds, stable=True)
+    order = order[torch.argsort(i_inds[order], stable=True)]
+
+    sorted_pairs = torch.stack([i_inds[order], j_inds[order]], dim=1)
+    unique_pairs, lengths = torch.unique_consecutive(sorted_pairs, dim=0, return_counts=True)
+    reduced_data = _segment_sum_sorted(data[order], lengths)
+    return unique_pairs[:, 0], unique_pairs[:, 1], reduced_data
+
+
+@dataclass(frozen=True)
+class RelativeBlockDamping:
+    """Per-coordinate Marquardt factors for dense square blocks.
+
+    For a diagonal Hessian block ``H``, this adds
+    ``diag(diag(H) * factors + ep)``.  Unlike ``SparseBlockVector``, the
+    factors are relative to the current Hessian diagonal.
+    """
+
+    factors: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if not self.factors:
+            raise ValueError("RelativeBlockDamping requires at least one factor")
+        if any(not math.isfinite(factor) or factor < 0.0 for factor in self.factors):
+            raise ValueError("RelativeBlockDamping factors must be finite and nonnegative")
 
 
 @dataclass(kw_only=True)
@@ -59,7 +100,11 @@ class SparseBlockMatrix:
     def __sub__(self, other: "SparseBlockMatrix") -> "SparseBlockMatrix":
         raise NotImplementedError
 
-    def apply_damping_assume_coalesced(self, damping: SparseBlockVector | float, ep: float) -> None:
+    def apply_damping_assume_coalesced(
+        self,
+        damping: SparseBlockVector | RelativeBlockDamping | float,
+        ep: float,
+    ) -> None:
         raise NotImplementedError
 
     def _tmult_mat_elements(self, other_i_inds: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -170,12 +215,20 @@ class SparseDenseBlockMatrix(SparseBlockMatrix):
         )
 
     def coalesce(self):
-        ij_inds = torch.stack([self.i_inds, self.j_inds], dim=0)
-        ij_inds, inverse = torch.unique(ij_inds, return_inverse=True, dim=1)
-        data = scatter_add(self.data, inverse, dim=0)
-        return SparseDenseBlockMatrix(i_inds=ij_inds[0], j_inds=ij_inds[1], data=data)
+        if torch.are_deterministic_algorithms_enabled():
+            i_inds, j_inds, data = _coalesce_block_entries(self.i_inds, self.j_inds, self.data)
+        else:
+            ij_inds = torch.stack([self.i_inds, self.j_inds], dim=0)
+            ij_inds, inverse = torch.unique(ij_inds, return_inverse=True, dim=1)
+            i_inds, j_inds = ij_inds[0], ij_inds[1]
+            data = scatter_add(self.data, inverse, dim=0)
+        return SparseDenseBlockMatrix(i_inds=i_inds, j_inds=j_inds, data=data)
 
-    def apply_damping_assume_coalesced(self, damping: SparseBlockVector | float, ep: float) -> None:
+    def apply_damping_assume_coalesced(
+        self,
+        damping: SparseBlockVector | RelativeBlockDamping | float,
+        ep: float,
+    ) -> None:
         assert self.data.shape[1] == self.data.shape[2]
 
         diag_mask = self.i_inds == self.j_inds
@@ -183,12 +236,21 @@ class SparseDenseBlockMatrix(SparseBlockMatrix):
             identity = torch.eye(self.data.shape[1], device=self.data.device).unsqueeze(0)
             self.data[diag_mask] += (ep + damping * self.data[diag_mask]) * identity
 
+        elif isinstance(damping, RelativeBlockDamping):
+            factors = self.data.new_tensor(damping.factors)
+            if factors.shape != (self.data.shape[1],):
+                raise ValueError(f"Expected {self.data.shape[1]} relative damping factors, got {factors.numel()}")
+            diagonal_blocks = self.data[diag_mask]
+            diagonal_addition = torch.diagonal(diagonal_blocks, dim1=-2, dim2=-1) * factors + ep
+            self.data[diag_mask] += torch.diag_embed(diagonal_addition)
+
         else:
             assert isinstance(damping, SparseBlockVector)
             diag_i_inds = self.i_inds[diag_mask]
             assert torch.all(diag_i_inds[1:] > diag_i_inds[:-1]), "Assuming sorted"
             damping_data_inds = torch.searchsorted(diag_i_inds, damping.inds)
-            self.data[torch.where(diag_mask)[0][damping_data_inds]] += ep + torch.diag_embed(damping.data)
+            diagonal_addition = damping.data + ep
+            self.data[torch.where(diag_mask)[0][damping_data_inds]] += torch.diag_embed(diagonal_addition)
 
     def __sub__(self, other: SparseBlockMatrix) -> SparseBlockMatrix:
         assert isinstance(other, SparseDenseBlockMatrix)
@@ -299,10 +361,14 @@ class SparseMDiagonalBlockMatrix(SparseBlockMatrix):
         )
 
     def coalesce(self):
-        ij_inds = torch.stack([self.i_inds, self.j_inds], dim=0)
-        ij_inds, inverse = torch.unique(ij_inds, return_inverse=True, dim=1)
-        data = scatter_add(self.data, inverse, dim=0)
-        return SparseMDiagonalBlockMatrix(i_inds=ij_inds[0], j_inds=ij_inds[1], data=data)
+        if torch.are_deterministic_algorithms_enabled():
+            i_inds, j_inds, data = _coalesce_block_entries(self.i_inds, self.j_inds, self.data)
+        else:
+            ij_inds = torch.stack([self.i_inds, self.j_inds], dim=0)
+            ij_inds, inverse = torch.unique(ij_inds, return_inverse=True, dim=1)
+            i_inds, j_inds = ij_inds[0], ij_inds[1]
+            data = scatter_add(self.data, inverse, dim=0)
+        return SparseMDiagonalBlockMatrix(i_inds=i_inds, j_inds=j_inds, data=data)
 
     def subset(self, inds: torch.Tensor) -> SparseBlockMatrix:
         return SparseMDiagonalBlockMatrix(
@@ -342,12 +408,19 @@ class SparseMDiagonalBlockMatrix(SparseBlockMatrix):
             data=torch.cat([self.data, -other.data]),
         ).coalesce()
 
-    def apply_damping_assume_coalesced(self, damping: SparseBlockVector | float, ep: float) -> None:
+    def apply_damping_assume_coalesced(
+        self,
+        damping: SparseBlockVector | RelativeBlockDamping | float,
+        ep: float,
+    ) -> None:
         assert self.data.shape[-1] == 1
 
         diag_mask = self.i_inds == self.j_inds
         if isinstance(damping, float):
             self.data[diag_mask] += ep + damping * self.data[diag_mask]
+
+        elif isinstance(damping, RelativeBlockDamping):
+            raise NotImplementedError("RelativeBlockDamping is only implemented for dense square blocks")
 
         else:
             assert isinstance(damping, SparseBlockVector)
